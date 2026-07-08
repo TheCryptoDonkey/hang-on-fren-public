@@ -1,4 +1,4 @@
-name: Deploy Pages
+name: Deploy
 
 on:
   push:
@@ -13,11 +13,11 @@ permissions:
   id-token: write
 
 concurrency:
-  group: pages
+  group: deploy
   cancel-in-progress: false
 
 jobs:
-  build:
+  build-pages:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -46,8 +46,8 @@ jobs:
         with:
           path: dist
 
-  deploy:
-    needs: build
+  deploy-pages:
+    needs: build-pages
     runs-on: ubuntu-latest
     environment:
       name: github-pages
@@ -56,3 +56,45 @@ jobs:
       - name: Deploy
         id: deployment
         uses: actions/deploy-pages@v5.0.0
+
+  deploy-custom-domain:
+    needs: build-pages
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.0
+
+      - name: Setup Node
+        uses: actions/setup-node@v6.4.0
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Build for custom domain
+        run: npm run build
+
+      - name: Configure SSH
+        env:
+          DEPLOY_HOST: ${{ secrets.HOF_DEPLOY_HOST }}
+          DEPLOY_SSH_KEY: ${{ secrets.HOF_DEPLOY_SSH_KEY }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/hang-on-fren-deploy
+          chmod 600 ~/.ssh/hang-on-fren-deploy
+          ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts
+
+      - name: Publish release
+        env:
+          DEPLOY_HOST: ${{ secrets.HOF_DEPLOY_HOST }}
+          DEPLOY_ROOT: ${{ secrets.HOF_DEPLOY_ROOT }}
+          DEPLOY_USER: ${{ secrets.HOF_DEPLOY_USER }}
+        run: |
+          set -euo pipefail
+          release="$(date -u +%Y%m%d%H%M%S)"
+          remote="$DEPLOY_ROOT/releases/$release"
+          ssh -i ~/.ssh/hang-on-fren-deploy "$DEPLOY_USER@$DEPLOY_HOST" "mkdir -p '$remote'"
+          rsync -az --delete -e "ssh -i ~/.ssh/hang-on-fren-deploy" dist/ "$DEPLOY_USER@$DEPLOY_HOST:$remote/"
+          ssh -i ~/.ssh/hang-on-fren-deploy "$DEPLOY_USER@$DEPLOY_HOST" "ln -sfn '$remote' '$DEPLOY_ROOT/current'"
