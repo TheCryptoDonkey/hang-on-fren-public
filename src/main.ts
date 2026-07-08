@@ -7,7 +7,7 @@ import { createWorld, resetWorld, updateWorld, addPickup, addMarker, signedForwa
 import { createTimer, tickTimer, addRoseTime, addCanTime, timerUrgency, DEFAULT_TIMER } from './timer.js';
 import { createScore, addDistance, addRose, addFuel, addBonus, addStuntBonus, penalise, addOvertake, addNearMiss, registerCrash, summarise, type RunSummary } from './scoring.js';
 import type { PickupKind } from './world.js';
-import { loadSprites, buildSignVariants, brandPetrol, type SpriteStore } from './sprites.js';
+import { SpriteStore, loadSpritesInto, buildSignVariants, brandPetrol } from './sprites.js';
 import { renderScene, drawTitleArt } from './render.js';
 import { drawHud, addPopup, updatePopups, type HudState, type Popup } from './hud.js';
 import { loadBoard, saveBoard, insertScore, qualifies, topScore, type HighScore } from './highscore.js';
@@ -1388,13 +1388,19 @@ async function boot(): Promise<void> {
     navigator.serviceWorker.register(assetUrl('sw.js')).catch(() => undefined);
   }
   initMusic(MUSIC_URL);
-  const store = await loadSprites();
+  const store = new SpriteStore();
   brandPetrol(store);
   decorateTrack(track, buildSignVariants(store));
   state.store = store;
   state.phase = 'title';
   last = performance.now();
   requestAnimationFrame(frame);
+  void loadSpritesInto(store)
+    .then(() => {
+      brandPetrol(store);
+      decorateTrack(track, buildSignVariants(store));
+    })
+    .catch(() => undefined);
 }
 
 void boot();
