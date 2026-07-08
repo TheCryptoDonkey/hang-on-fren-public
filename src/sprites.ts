@@ -991,13 +991,19 @@ export function brandPetrol(store: SpriteStore): void {
   store.set('pickup-petrol', { canvas, w: base.w, h: base.h });
 }
 
+export async function loadSpriteInto(store: SpriteStore, name: string): Promise<boolean> {
+  const url = ART_URLS[name];
+  if (!url) return false;
+  const sprite = await loadTrimmed(url).catch(() => null);
+  if (!sprite) return false;
+  store.set(name, sprite);
+  return true;
+}
+
 /** Load every known art asset into `store` (best-effort); fall back per-sprite on failure. */
 export async function loadSpritesInto(store: SpriteStore): Promise<void> {
   await Promise.all(
-    Object.entries(ART_URLS).map(async ([name, url]) => {
-      const sprite = await loadTrimmed(url).catch(() => null);
-      if (sprite) store.set(name, sprite);
-    }),
+    Object.keys(ART_URLS).map(name => loadSpriteInto(store, name)),
   );
 }
 

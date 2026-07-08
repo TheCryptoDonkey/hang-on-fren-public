@@ -7,7 +7,7 @@ import { createWorld, resetWorld, updateWorld, addPickup, addMarker, signedForwa
 import { createTimer, tickTimer, addRoseTime, addCanTime, timerUrgency, DEFAULT_TIMER } from './timer.js';
 import { createScore, addDistance, addRose, addFuel, addBonus, addStuntBonus, penalise, addOvertake, addNearMiss, registerCrash, summarise, type RunSummary } from './scoring.js';
 import type { PickupKind } from './world.js';
-import { SpriteStore, loadSpritesInto, buildSignVariants, brandPetrol } from './sprites.js';
+import { SpriteStore, loadSpriteInto, loadSpritesInto, buildSignVariants, brandPetrol } from './sprites.js';
 import { renderScene, drawTitleArt } from './render.js';
 import { drawHud, addPopup, updatePopups, type HudState, type Popup } from './hud.js';
 import { loadBoard, saveBoard, insertScore, qualifies, topScore, type HighScore } from './highscore.js';
@@ -1395,7 +1395,8 @@ async function boot(): Promise<void> {
   state.phase = 'title';
   last = performance.now();
   requestAnimationFrame(frame);
-  void loadSpritesInto(store)
+  void loadSpriteInto(store, 'title-art')
+    .then(() => loadSpritesInto(store))
     .then(() => {
       brandPetrol(store);
       decorateTrack(track, buildSignVariants(store));
