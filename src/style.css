@@ -1,0 +1,121 @@
+:root {
+  color-scheme: dark;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html,
+body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #06131c;
+  font-family: 'Trebuchet MS', 'Segoe UI', system-ui, sans-serif;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: none;
+}
+
+/*
+ * The canvas element ALWAYS fills the viewport via CSS alone (position:fixed +
+ * inset:0). We never set its width/height from JS — that used to desync on
+ * desktop/Retina and leave the scene drawn into only part of the window with a
+ * black bar. Layout owns the element size; JS only sizes the drawing buffer to
+ * match (see resize() in main.ts).
+ */
+#game {
+  display: block;
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+  image-rendering: auto;
+}
+
+#mobile-controls {
+  --control-size: clamp(64px, 18vmin, 96px);
+  --control-gap: clamp(8px, 2.2vmin, 14px);
+
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 5;
+  display: none;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: var(--control-gap);
+  padding:
+    0
+    max(14px, env(safe-area-inset-right))
+    max(14px, env(safe-area-inset-bottom))
+    max(14px, env(safe-area-inset-left));
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.16s ease;
+}
+
+body.touch-device[data-phase="playing"] #mobile-controls {
+  display: flex;
+  opacity: 1;
+}
+
+.mobile-control-cluster {
+  display: grid;
+  grid-template-columns: repeat(2, var(--control-size));
+  gap: var(--control-gap);
+  pointer-events: none;
+}
+
+body.touch-device[data-phase="playing"] .mobile-control-cluster {
+  pointer-events: auto;
+}
+
+.mobile-control-button {
+  width: var(--control-size);
+  height: var(--control-size);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff7df;
+  background: rgba(8, 26, 36, 0.54);
+  border: 2px solid rgba(255, 215, 107, 0.7);
+  border-radius: 999px;
+  box-shadow:
+    0 10px 24px rgba(0, 0, 0, 0.28),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.18);
+  font-family: inherit;
+  font-size: clamp(28px, 8vmin, 44px);
+  font-weight: 900;
+  line-height: 1;
+  text-shadow: 0 2px 5px rgba(0, 0, 0, 0.65);
+  cursor: pointer;
+  touch-action: none;
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
+}
+
+.mobile-control-button--slow {
+  border-color: rgba(255, 93, 120, 0.72);
+  color: #ffe4eb;
+  font-size: clamp(15px, 4vmin, 22px);
+  letter-spacing: 0;
+}
+
+.mobile-control-button.is-active,
+.mobile-control-button:active {
+  transform: translateY(2px) scale(0.96);
+  background: rgba(255, 215, 107, 0.28);
+  border-color: rgba(255, 255, 255, 0.9);
+}
+
+.mobile-control-button--slow.is-active,
+.mobile-control-button--slow:active {
+  background: rgba(255, 93, 120, 0.3);
+}

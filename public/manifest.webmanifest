@@ -1,0 +1,16 @@
+{
+  "name": "Hang On, Fren",
+  "short_name": "Hang On, Fren",
+  "description": "A ten-region Vespa arcade racer — grab fuel for time, roses for turbo, don't wipe out.",
+  "id": ".",
+  "start_url": ".",
+  "scope": ".",
+  "display": "fullscreen",
+  "background_color": "#06131c",
+  "theme_color": "#0a2a3a",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

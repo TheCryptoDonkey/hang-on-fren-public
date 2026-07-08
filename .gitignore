@@ -1,0 +1,13 @@
+node_modules
+dist
+.DS_Store
+*.log
+npm-debug.log*
+.playwright-mcp/
+.art-ref/
+/hero-test.png
+/title-art-orig.png
+/scratch-*.jpeg
+/scratch-*.png
+/hero-straight-upright.png
+art-originals/
