@@ -17,6 +17,17 @@ npm test
 npm run build
 ```
 
+## Support
+
+Hang On, Fren follows a value-for-value model. Support links are optional and
+separate from gameplay score:
+
+- Lightning: `profusemeat89@walletofsatoshi.com`
+- Geyser: <https://geyser.fund/project/forgesworn?hero=geyserannually1>
+- Ko-fi: <https://ko-fi.com/brays>
+
+The same links are available on the public support page at `/support.html`.
+
 ## Deployment
 
 The public repo deploys to GitHub Pages through `.github/workflows/pages.yml`.
@@ -30,3 +41,7 @@ Private deployment topology belongs outside this repo.
 The shipped game art lives under `public/`. Local source/reference material in
 `.art-ref/` and `art-originals/` is ignored by git and is not required to play
 or build the game.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
