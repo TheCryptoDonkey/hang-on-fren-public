@@ -107,14 +107,16 @@ function addRoad(
 }
 
 const LEN = { short: 25, medium: 50, long: 100 };
-const CURVE = { easy: 2, medium: 4, hard: 6.5, hairpin: 11 };
+const CURVE = { easy: 2, medium: 4, hard: 6.5, evil: 8.5, hairpin: 11 };
 const HILL = { low: 1100, medium: 3000, high: 6200, huge: 9500 };
 
 /**
- * Build a long, varied, seamless-looping Riviera track with real drama: big
- * climbs and crests, plunging descents, fast sweepers, rolling esses and TWO
- * hairpins. All hills return to zero and both ends are straight so wrapping
- * `player.z` past the end is invisible.
+ * Build a long, varied, seamless-looping Riviera track with real menace: big
+ * climbs and crests, plunging descents, fast sweepers — and the nasty stuff:
+ * a SNAKE of S-bends with no recovery straights, a deceptive double-apex TRAP
+ * that eases mid-corner then bites again, a downhill CORKSCREW of alternating
+ * hairpins and a flat-out CHICANE on the run home. All hills return to zero
+ * and both ends are straight so wrapping `player.z` past the end is invisible.
  */
 export function buildTrack(): Track {
   const s: Segment[] = [];
@@ -127,19 +129,34 @@ export function buildTrack(): Track {
   // long left sweeper plunging back down the far side
   addRoad(s, LEN.medium, LEN.long, LEN.long, -CURVE.hard, -HILL.high);
   addRoad(s, LEN.short, LEN.medium, LEN.short, 0, -HILL.medium); // steep drop-away
-  // valley esses
-  addRoad(s, LEN.medium, LEN.medium, LEN.medium, CURVE.easy, HILL.low);
-  addRoad(s, LEN.medium, LEN.short, LEN.medium, -CURVE.medium, HILL.medium);
-  addRoad(s, LEN.medium, LEN.medium, LEN.medium, CURVE.medium, -HILL.low);
+  // THE SNAKE — hard esses flicking left-right-left with NO recovery straights:
+  // each bend hands straight into the next, so the bike is always loaded up.
+  addRoad(s, LEN.medium, LEN.short, LEN.short, CURVE.hard, HILL.low);
+  addRoad(s, LEN.short, LEN.short, LEN.short, -CURVE.hard, HILL.low);
+  addRoad(s, LEN.short, LEN.short, LEN.short, CURVE.hard, -HILL.low);
+  addRoad(s, LEN.short, LEN.short, LEN.medium, -CURVE.hard, -HILL.low);
   // FIRST HAIRPIN — tight right, then immediately back left, over a rise
   addRoad(s, LEN.short, LEN.short, LEN.short, CURVE.hairpin, HILL.medium);
   addRoad(s, LEN.short, LEN.short, LEN.short, -CURVE.hairpin, -HILL.low);
   // climb to a second crest, then a long downhill right sweeper
   addRoad(s, LEN.medium, LEN.long, LEN.medium, -CURVE.medium, HILL.high);
   addRoad(s, LEN.medium, LEN.long, LEN.long, CURVE.hard, -HILL.high);
+  // THE TRAP — a deceptive double-apex right: it eases mid-corner just long
+  // enough to tempt you back onto the throttle, then tightens again.
+  addRoad(s, LEN.medium, LEN.short, LEN.short, CURVE.evil, HILL.low);
+  addRoad(s, LEN.short, LEN.short, LEN.short, CURVE.easy, 0); // the false exit…
+  addRoad(s, LEN.short, LEN.short, LEN.medium, CURVE.evil, -HILL.low); // …and the second bite
   // SECOND HAIRPIN the other way, cresting a rise
   addRoad(s, LEN.short, LEN.short, LEN.short, -CURVE.hairpin, HILL.medium);
   addRoad(s, LEN.short, LEN.medium, LEN.short, CURVE.hard, -HILL.medium);
+  // THE CORKSCREW — three alternating hairpins tumbling down a hillside
+  addRoad(s, LEN.short, LEN.short, LEN.short, CURVE.hairpin, -HILL.low);
+  addRoad(s, LEN.short, LEN.short, LEN.short, -CURVE.hairpin, -HILL.low);
+  addRoad(s, LEN.short, LEN.short, LEN.short, CURVE.hairpin, -HILL.low);
+  // flat-out CHICANE — fast left-right-left flicks with the throttle pinned
+  addRoad(s, LEN.short, LEN.short, LEN.short, -CURVE.hard, 0);
+  addRoad(s, LEN.short, LEN.short, LEN.short, CURVE.hard, 0);
+  addRoad(s, LEN.short, LEN.short, LEN.short, -CURVE.hard, HILL.low);
   // sweeping esses back toward the start height
   addRoad(s, LEN.medium, LEN.medium, LEN.medium, -CURVE.medium, HILL.low);
   addRoad(s, LEN.medium, LEN.medium, LEN.medium, CURVE.easy, -HILL.low);

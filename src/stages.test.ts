@@ -26,7 +26,7 @@ describe('stages: ten finite levels', () => {
 
   it('puts the finish line at ten legs of road', () => {
     expect(FINISH_M).toBe(LEVELS * STAGE_M);
-    expect(FINISH_M).toBe(16000);
+    expect(FINISH_M).toBe(20000);
   });
 
   it('gives sampled regions their own car roster', () => {

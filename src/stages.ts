@@ -44,8 +44,11 @@ export interface Stage {
 
 /** How many levels/regions the journey is made of. */
 export const LEVELS = 10;
-/** Metres of road per stage / between checkpoints. */
-export const STAGE_M = 1600;
+/** Metres of road per stage / between checkpoints. Stretched from the original
+ *  1600 — longer legs mean each checkpoint has to be EARNED, and the nasty
+ *  mid-track geometry (the snake / trap / corkscrew) comes round more often
+ *  per region. */
+export const STAGE_M = 2000;
 /** Distance at which the finish line sits — completing the tenth level wins. */
 export const FINISH_M = LEVELS * STAGE_M;
 /** Seconds granted when the rider crosses into a new stage (OutRun checkpoint). */
