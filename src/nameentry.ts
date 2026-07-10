@@ -60,8 +60,11 @@ export function cleanName(value: string): string {
  * Lay out the name box + on-screen keyboard, anchored to the lower screen and
  * sized to fit BOTH the width and the remaining height, so it never overflows
  * in short landscape or narrow portrait. `u` is the game's diagonal UI scale.
+ * `bottomInset` lifts the whole block clear of the screen's bottom edge — on
+ * phones the last ~40px belong to the browser (Safari's tap-for-chrome zone
+ * and the home indicator), so keys parked there feel dead.
  */
-export function layout(W: number, H: number, u: number): NameLayout {
+export function layout(W: number, H: number, u: number, bottomInset = 0): NameLayout {
   const cols = 10;
   const rowsN = ROWS.length;
   const actionRowsN = 1;
@@ -69,7 +72,7 @@ export function layout(W: number, H: number, u: number): NameLayout {
   const gap = Math.max(4, 7 * u);
   const vGap = Math.max(12, 18 * u); // box → keyboard
   const boxH = Math.max(40, 48 * u);
-  const bottomMargin = Math.max(16, 26 * u);
+  const bottomMargin = Math.max(16, 26 * u) + bottomInset;
 
   const maxKbW = Math.min(W * 0.96, 660 * u);
   const keyByW = (maxKbW - gap * (cols - 1)) / cols;
