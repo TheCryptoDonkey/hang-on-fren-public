@@ -776,6 +776,83 @@ function fallbackShield(): SpriteImage {
     ctx.stroke();
   });
 }
+function fallbackBeer(): SpriteImage {
+  return bake(80, 100, ctx => {
+    // Foamy amber pint — the speed-up / wobbly-vision trade-off.
+    const glass = ctx.createLinearGradient(18, 0, 62, 0);
+    glass.addColorStop(0, '#d98a1e');
+    glass.addColorStop(0.5, '#f5b53c');
+    glass.addColorStop(1, '#c97c14');
+    ctx.fillStyle = glass;
+    ctx.beginPath();
+    ctx.moveTo(20, 34);
+    ctx.lineTo(24, 90);
+    ctx.lineTo(56, 90);
+    ctx.lineTo(60, 34);
+    ctx.closePath();
+    ctx.fill();
+    // handle
+    ctx.strokeStyle = '#e8a82e';
+    ctx.lineWidth = 7;
+    ctx.beginPath();
+    ctx.arc(63, 58, 13, -Math.PI / 2.6, Math.PI / 2.6);
+    ctx.stroke();
+    // rising bubbles
+    ctx.fillStyle = 'rgba(255,240,200,0.75)';
+    for (const [bx, by, r] of [[30, 70, 2.5], [42, 58, 2], [50, 76, 2.5], [36, 46, 1.8], [48, 44, 1.6]] as const) {
+      ctx.beginPath(); ctx.arc(bx, by, r, 0, Math.PI * 2); ctx.fill();
+    }
+    // foam head, tumbling over the rim
+    ctx.fillStyle = '#fff7e8';
+    for (const [fx, fy, r] of [[26, 30, 9], [38, 25, 11], [52, 29, 9], [32, 22, 7], [46, 21, 7]] as const) {
+      ctx.beginPath(); ctx.arc(fx, fy, r, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.strokeStyle = 'rgba(0,0,0,0.45)';
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.moveTo(20, 34);
+    ctx.lineTo(24, 90);
+    ctx.lineTo(56, 90);
+    ctx.lineTo(60, 34);
+    ctx.stroke();
+  });
+}
+function fallbackShroom(): SpriteImage {
+  return bake(90, 100, ctx => {
+    // Fly agaric — red cap, white spots: invincibility + a psychedelic trip.
+    ctx.fillStyle = '#f2e8d8';
+    ctx.beginPath();
+    ctx.moveTo(36, 52);
+    ctx.quadraticCurveTo(33, 82, 30, 90);
+    ctx.lineTo(60, 90);
+    ctx.quadraticCurveTo(57, 82, 54, 52);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(120,90,60,0.4)';
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(40, 60); ctx.lineTo(39, 84); ctx.stroke();
+    // cap
+    const cap = ctx.createLinearGradient(0, 14, 0, 56);
+    cap.addColorStop(0, '#e5342e');
+    cap.addColorStop(1, '#b81f1f');
+    ctx.fillStyle = cap;
+    ctx.beginPath();
+    ctx.moveTo(8, 54);
+    ctx.quadraticCurveTo(10, 16, 45, 14);
+    ctx.quadraticCurveTo(80, 16, 82, 54);
+    ctx.quadraticCurveTo(45, 62, 8, 54);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(0,0,0,0.45)';
+    ctx.lineWidth = 2.5;
+    ctx.stroke();
+    // white spots
+    ctx.fillStyle = '#fff4ec';
+    for (const [sx, sy, r] of [[24, 34, 5], [45, 24, 6], [66, 36, 5], [34, 48, 4], [57, 47, 4]] as const) {
+      ctx.beginPath(); ctx.ellipse(sx, sy, r, r * 0.8, 0, 0, Math.PI * 2); ctx.fill();
+    }
+  });
+}
 function fallbackFourTwenty(): SpriteImage {
   return bake(90, 90, ctx => {
     ctx.fillStyle = '#122018'; ctx.beginPath(); ctx.arc(45, 45, 34, 0, Math.PI * 2); ctx.fill();
@@ -835,6 +912,8 @@ const FALLBACKS: Record<string, () => SpriteImage> = {
   'pickup-fiatnam': fallbackFiatnam,
   'pickup-fourtwenty': fallbackFourTwenty,
   'pickup-shield': fallbackShield,
+  'pickup-beer': fallbackBeer,
+  'pickup-shroom': fallbackShroom,
 };
 
 const ART_URLS: Record<string, string> = {

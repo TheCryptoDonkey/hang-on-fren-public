@@ -25,6 +25,8 @@ const PICKUP_SPRITE: Record<string, string> = {
   fiatnam: 'pickup-fiatnam',
   fourtwenty: 'pickup-fourtwenty',
   shield: 'pickup-shield',
+  beer: 'pickup-beer',
+  shroom: 'pickup-shroom',
 };
 
 // Sprite widths (fraction of the full road width) live in geometry.ts — the
@@ -322,6 +324,8 @@ export interface Scene {
   boost: number; // 0..1 turbo intensity
   sling?: number; // 0..1 slipstream slingshot intensity
   draft?: number; // 0..1 banked draft charge while tucked in a wake
+  wobble?: number; // 0..1 beer intensity — drunken camera sway + double vision
+  trip?: number; // 0..1 fly-agaric intensity — full psychedelic colour trip
   palette?: Palette; // time-of-day colours; defaults to bright day
   scenery?: SceneryKit; // per-stage roadside prop kit; resolves scenery slots
   timeOfDay?: TimeOfDay; // which gpt-image horizon backdrops to crossfade
@@ -367,6 +371,23 @@ export function renderScene(scene: Scene): void {
   const shake = (player.offRoad ? 2 + speedPct0 * 8 : 0) + impact * 16;
   ctx.save();
   if (shake > 0) ctx.translate((Math.random() - 0.5) * shake, (Math.random() - 0.5) * shake);
+
+  // Beer wobble: the whole scene rolls, breathes and sways on slow sinusoids —
+  // seasick rather than shaken (that's what the crash shake above is for).
+  const wobble = scene.wobble ?? 0;
+  if (wobble > 0) {
+    const t = scene.time;
+    ctx.translate(width / 2, height / 2);
+    ctx.rotate((Math.sin(t * 1.8) * 0.028 + Math.sin(t * 0.9 + 1.3) * 0.014) * wobble);
+    // Overscan so the roll/sway never exposes bare canvas at the screen edges.
+    const overscan = 1 + 0.06 * wobble;
+    const breathe = overscan * (1 + Math.sin(t * 1.3) * 0.02 * wobble);
+    ctx.scale(breathe, overscan * (1 + Math.cos(t * 1.7) * 0.02 * wobble));
+    ctx.translate(
+      -width / 2 + Math.sin(t * 2.2) * width * 0.02 * wobble,
+      -height / 2 + Math.cos(t * 1.5) * height * 0.014 * wobble,
+    );
+  }
 
   const horizon = clamp(drawn.length ? drawn[drawn.length - 1].p2.screen.y : height * 0.5, height * 0.18, height * 0.62);
   // Primary path: the gpt-image Amalfi horizon backdrops, crossfaded by time of
@@ -460,6 +481,53 @@ export function renderScene(scene: Scene): void {
   if (streak > 0.5 && scene.wipeout === 0) drawSpeedStreaks(ctx, width, height, streak, scene.time);
 
   ctx.restore(); // end off-road shake transform
+
+  // Beer double vision: ghost the finished scene back over itself, drifting on
+  // its own slow sinusoid, then wash the colours with a gently cycling hue.
+  // (Blend modes, not ctx.filter — Safari didn't support canvas filters.)
+  if (wobble > 0) {
+    const t = scene.time;
+    ctx.save();
+    ctx.globalAlpha = 0.22 * wobble;
+    ctx.drawImage(ctx.canvas, Math.sin(t * 2.6) * width * 0.016 * wobble, Math.cos(t * 1.9) * height * 0.008 * wobble);
+    ctx.globalCompositeOperation = 'hue';
+    ctx.globalAlpha = 0.3 * wobble;
+    ctx.fillStyle = `hsl(${(t * 40) % 360}, 80%, 55%)`;
+    ctx.fillRect(0, 0, width, height);
+    ctx.restore();
+  }
+
+  // Fly-agaric trip: the whole frame's hues cycle hard, with a sliding rainbow
+  // sheen over the top — unmistakably psychedelic, HUD still drawn clean above.
+  const trip = scene.trip ?? 0;
+  if (trip > 0) {
+    const t = scene.time;
+    ctx.save();
+    ctx.globalCompositeOperation = 'hue';
+    ctx.globalAlpha = 0.65 * trip;
+    ctx.fillStyle = `hsl(${(t * 160) % 360}, 100%, 55%)`;
+    ctx.fillRect(0, 0, width, height);
+    ctx.globalCompositeOperation = 'overlay';
+    ctx.globalAlpha = 0.4 * trip;
+    const rainbow = ctx.createLinearGradient(0, height, width, 0);
+    for (let i = 0; i <= 6; i += 1) {
+      rainbow.addColorStop(i / 6, `hsl(${(i * 60 + t * 120) % 360}, 100%, 60%)`);
+    }
+    ctx.fillStyle = rainbow;
+    ctx.fillRect(0, 0, width, height);
+    // breathing rainbow rings rippling out from the horizon
+    ctx.globalCompositeOperation = 'lighter';
+    for (let i = 0; i < 4; i += 1) {
+      const p = (t * 0.55 + i / 4) % 1;
+      ctx.globalAlpha = 0.16 * trip * (1 - p);
+      ctx.strokeStyle = `hsl(${(t * 200 + i * 90) % 360}, 100%, 65%)`;
+      ctx.lineWidth = 6 + p * 26;
+      ctx.beginPath();
+      ctx.arc(width / 2, height * 0.55, p * width * 0.6 + 10, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
 
   // Turbo warm-speed vignette (drawn un-shaken, over the scene, under the HUD).
   if (scene.boost > 0) {

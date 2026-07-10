@@ -80,7 +80,9 @@ export type PickupKind =
   | 'timelock'
   | 'fiatnam'
   | 'fourtwenty'
-  | 'shield';
+  | 'shield'
+  | 'beer'
+  | 'shroom';
 
 export interface Pickup {
   z: number;
