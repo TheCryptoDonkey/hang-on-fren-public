@@ -7,7 +7,7 @@ import { createWorld, resetWorld, updateWorld, addPickup, addMarker, signedForwa
 import { createTimer, tickTimer, addRoseTime, addCanTime, timerUrgency, DEFAULT_TIMER } from './timer.js';
 import { createScore, addDistance, addRose, addFuel, addBonus, addStuntBonus, penalise, addOvertake, addNearMiss, registerCrash, summarise, type RunSummary } from './scoring.js';
 import type { PickupKind } from './world.js';
-import { SpriteStore, loadSpriteInto, loadSpritesInto, buildSignVariants, brandPetrol } from './sprites.js';
+import { SpriteStore, loadSpriteInto, loadSpritesInto, buildSignVariants, buildBillboardVariants, brandPetrol } from './sprites.js';
 import { renderScene, drawTitleArt } from './render.js';
 import { drawHud, addPopup, updatePopups, type HudState, type Popup } from './hud.js';
 import { loadBoard, saveBoard, insertScore, qualifies, topScore, type HighScore } from './highscore.js';
@@ -19,6 +19,7 @@ import { connectNostr, fetchGlobalBoard, getIdentity, renameGuest, restoreIdenti
 import { MODES, loadModeIndex, saveModeIndex } from './difficulty.js';
 import { clamp } from './util.js';
 import { assetUrl } from './asset-url.js';
+import { fetchBtcSnapshot, type BtcSnapshot } from './bitcoin.js';
 
 // Voice one-liners lifted from Neon Sentinel for the special treat pickups.
 const VOICE: Partial<Record<PickupKind, string>> = {
@@ -57,6 +58,9 @@ const BEER_SPEED_TIME = 5; // seconds of beer speed-up
 const BEER_SPEED_MUL = 1.3;
 const BEER_WOBBLE_TIME = 8; // seconds of wobbly vision
 // Fly agaric: a few seconds of invincibility inside a full psychedelic trip.
+// It gets its own clock slot (like beer) — buried in the 42s treat lottery it
+// only had a 9% roll, so whole runs went by without a single one spawning.
+const SHROOM_INTERVAL = 63; // a fly agaric sprouts every 63s (3 × 21 numerology)
 const SHROOM_TIME = 6;
 // Slipstream: tuck in behind a car to charge a draft, then break out of the
 // wake for a slingshot — the classic risk-for-speed overtaking move.
@@ -130,6 +134,7 @@ const state = {
   runFinishedAt: 0,
   submitted: false, // this run's score has been handed to the claim service
   submitStatus: '', // shown on the game-over card
+  btc: {} as BtcSnapshot, // block height + price stamped onto saved scores
   titleNotice: { text: '', until: 0 }, // transient identity/publish notice on the title
   globalBoard: [] as GlobalScore[],
   boardFlip: false, // title board alternates local / gamestr
@@ -139,6 +144,7 @@ const state = {
   beerAccum: 0,
   beerSpeed: 0, // seconds of beer speed-up remaining
   beerWobble: 0, // seconds of beer wobbly-vision remaining (outlasts the speed)
+  shroomAccum: 0,
   shroom: 0, // seconds of fly-agaric invincibility/trip remaining
   shield: false, // HODL shield held — absorbs one wipeout
   drafting: 0, // current slipstream intensity 0..1
@@ -693,6 +699,7 @@ function startRun(): void {
   state.beerAccum = 0;
   state.beerSpeed = 0;
   state.beerWobble = 0;
+  state.shroomAccum = 0;
   state.shroom = 0;
   state.shield = false;
   state.drafting = 0;
@@ -730,14 +737,20 @@ function submitRunScore(playerName?: string): void {
   const name = playerName ?? identity.name;
   if (identity.mode === 'guest' && playerName) renameGuest(playerName);
   state.submitStatus = 'CLAIMING ON GAMESTR…';
-  void submitScore(state.summary, {
-    runId: state.runId,
-    playerName: name,
-    level: stageIndexAt(state.summary.distanceM) + 1,
-    startedAt: state.runStartedAt,
-    finishedAt: state.runFinishedAt || Date.now(),
-    endedBy: state.outcome,
-  })
+  const summary = state.summary;
+  // Wait for the chain snapshot (bounded by its own fetch timeout) so the
+  // claim carries the block height + price the run finished at.
+  void (btcFetch ?? Promise.resolve<BtcSnapshot>({}))
+    .then(btc => submitScore(summary, {
+      runId: state.runId,
+      playerName: name,
+      level: stageIndexAt(summary.distanceM) + 1,
+      startedAt: state.runStartedAt,
+      finishedAt: state.runFinishedAt || Date.now(),
+      endedBy: state.outcome,
+      btcBlock: btc.block,
+      btcUsdCents: btc.usdCents,
+    }))
     .then(result => {
       state.submitStatus = result === null
         ? 'SCORE KEPT LOCAL — NO CLAIM SERVICE'
@@ -786,13 +799,12 @@ function quitRun(): void {
  */
 function pickTreatKind(): PickupKind {
   const r = Math.random();
-  if (r < 0.30) return 'rose';
-  if (r < 0.42) return 'cake';
-  if (r < 0.52) return 'meme';
-  if (r < 0.61) return 'shroom';
-  if (r < 0.70) return 'shield';
-  if (r < 0.77) return 'wholecake';
-  if (r < 0.84) return 'ath';
+  if (r < 0.33) return 'rose';
+  if (r < 0.46) return 'cake';
+  if (r < 0.57) return 'meme';
+  if (r < 0.67) return 'shield';
+  if (r < 0.75) return 'wholecake';
+  if (r < 0.83) return 'ath';
   if (r < 0.90) return 'timelock';
   if (r < 0.96) return 'fiatnam';
   return 'fourtwenty';
@@ -831,10 +843,26 @@ function startWipeout(): void {
   addPopup(state.popups, 'WIPEOUT!', W / 2, H * 0.5, '#ff5d78', 1.3);
 }
 
+// The chain snapshot fetch kicked off when a run ends — submitRunScore awaits
+// it so the claim carries the block/price; the resolved values also land in
+// state.btc for the local board save.
+let btcFetch: Promise<BtcSnapshot> | null = null;
+
+function snapshotBitcoin(): void {
+  state.btc = {};
+  btcFetch = fetchBtcSnapshot()
+    .then(snap => {
+      state.btc = snap;
+      return snap;
+    })
+    .catch(() => ({}));
+}
+
 function endRun(endedBy: 'time' | 'crashes'): void {
   state.endedBy = endedBy;
   state.outcome = 'time';
   state.runFinishedAt = Date.now();
+  snapshotBitcoin();
   state.summary = summarise(score, state.runTime, endedBy);
   state.qualifies = qualifies(board, state.summary.score);
   state.nameValue = ''; // blank — the rider types their own name
@@ -851,6 +879,7 @@ function endRun(endedBy: 'time' | 'crashes'): void {
 function winRun(): void {
   state.endedBy = 'time';
   state.outcome = 'finish';
+  snapshotBitcoin();
   state.finishTimeLeft = timer.timeLeft;
   const bonus = Math.ceil(Math.max(0, timer.timeLeft)) * TIME_BONUS_PER_SEC;
   state.finishBonus = bonus;
@@ -877,6 +906,8 @@ function confirmGameOver(): void {
       score: state.summary.score,
       distanceM: state.summary.distanceM,
       roses: state.summary.roses,
+      btcBlock: state.btc.block,
+      btcUsdCents: state.btc.usdCents,
     });
     saveBoard(board);
     state.qualifies = false;
@@ -1155,10 +1186,11 @@ function update(dt: number): void {
   }
   state.drafting = draftNow;
 
-  // Clock-scheduled pickups: a can every 21s, a rose every 42s, and — the safety
-  // net — a definitely-reachable rescue can dropped in your lane when only 2.1s
-  // remain, re-armed once you've topped back up. So there is ALWAYS a way out,
-  // but you have to grab it: miss the rescue can and you're done.
+  // Clock-scheduled pickups: a can every 21s, a rose every 42s, a beer every
+  // 34s, a fly agaric every 63s, and — the safety net — a definitely-reachable
+  // rescue can dropped in your lane when only 2.1s remain, re-armed once you've
+  // topped back up. So there is ALWAYS a way out, but you have to grab it:
+  // miss the rescue can and you're done.
   state.canAccum += dt;
   if (state.canAccum >= CAN_INTERVAL) {
     state.canAccum -= CAN_INTERVAL;
@@ -1173,6 +1205,11 @@ function update(dt: number): void {
   if (state.beerAccum >= BEER_INTERVAL) {
     state.beerAccum -= BEER_INTERVAL;
     addPickup(world, player, track, 'beer');
+  }
+  state.shroomAccum += dt;
+  if (state.shroomAccum >= SHROOM_INTERVAL) {
+    state.shroomAccum -= SHROOM_INTERVAL;
+    addPickup(world, player, track, 'shroom');
   }
   if (timer.timeLeft <= EMERGENCY_AT && state.emergencyArmed) {
     state.emergencyArmed = false;
@@ -1584,7 +1621,7 @@ async function boot(): Promise<void> {
     .catch(() => undefined);
   const store = new SpriteStore();
   brandPetrol(store);
-  decorateTrack(track, buildSignVariants(store));
+  decorateTrack(track, buildSignVariants(store), buildBillboardVariants(store));
   state.store = store;
   state.phase = 'title';
   last = performance.now();
@@ -1593,7 +1630,9 @@ async function boot(): Promise<void> {
     .then(() => loadSpritesInto(store))
     .then(() => {
       brandPetrol(store);
-      decorateTrack(track, buildSignVariants(store));
+      // Rebuild + rescatter now the real art is in — this is also when the
+      // rose-meme billboard first becomes available (its sticker art loads here).
+      decorateTrack(track, buildSignVariants(store), buildBillboardVariants(store));
     })
     .catch(() => undefined);
 }

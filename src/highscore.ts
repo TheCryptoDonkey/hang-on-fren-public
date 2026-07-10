@@ -7,6 +7,10 @@ export interface HighScore {
   score: number;
   distanceM: number;
   roses: number;
+  /** Bitcoin chain tip when the run ended (absent if the fetch failed). */
+  btcBlock?: number;
+  /** BTC price in US cents when the run ended (absent if the fetch failed). */
+  btcUsdCents?: number;
 }
 
 // v2: v1 boards were seeded with (and filled up by) the old "DNI" default name,

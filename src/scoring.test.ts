@@ -76,4 +76,23 @@ describe('scoring', () => {
     expect(content.game).toBe('hangonfren');
     expect(content.run_id).toBe('run-1');
   });
+
+  it('stamps the bitcoin chain snapshot onto the event when provided', () => {
+    const s = createScore();
+    addDistance(s, 500, 150);
+    const sum = summarise(s, 30, 'time');
+    const ev = buildScoreEvent(sum, 'abc123', {
+      runId: 'run-1',
+      btcBlock: 905_432,
+      btcUsdCents: 10_425_000,
+    });
+    expect(ev.tags).toContainEqual(['btc_block', '905432']);
+    expect(ev.tags).toContainEqual(['btc_usd_cents', '10425000']);
+    const content = JSON.parse(ev.content) as Record<string, unknown>;
+    expect(content.btc_block).toBe(905_432);
+    expect(content.btc_usd_cents).toBe(10_425_000);
+    // absent snapshot → no empty tags
+    const bare = buildScoreEvent(sum, 'abc123', { runId: 'run-1' });
+    expect(bare.tags.some(t => t[0] === 'btc_block' || t[0] === 'btc_usd_cents')).toBe(false);
+  });
 });

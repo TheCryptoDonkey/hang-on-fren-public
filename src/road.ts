@@ -170,11 +170,11 @@ export function buildTrack(): Track {
 }
 
 /**
- * Scatter roadside scenery (trees, villas, in-joke signs) across the track.
- * Baked once; loops with the track. `signNames` are the sign-N variants built
- * from the sprite store at load time.
+ * Scatter roadside scenery (trees, villas, in-joke signs, meme billboards)
+ * across the track. Baked once; loops with the track. `signNames` /
+ * `billboardNames` are the variants built from the sprite store at load time.
  */
-export function decorateTrack(track: Track, signNames: readonly string[], seed = 0x5ce7e): void {
+export function decorateTrack(track: Track, signNames: readonly string[], billboardNames: readonly string[] = [], seed = 0x5ce7e): void {
   const rng = makeRng(seed);
   // Scenery is placed as SLOTS (tree / landmark / accent); the renderer resolves
   // each slot to the current stage's kit (stages.ts) so every leg looks distinct.
@@ -186,6 +186,9 @@ export function decorateTrack(track: Track, signNames: readonly string[], seed =
     if (i % 31 === 0) seg.scenery.push({ name: 'slot:landmark', offset: -(2.9 + rng() * 1.3), scale: 1 });
     if (i % 17 === 8) seg.scenery.push({ name: 'slot:accent', offset: (rng() < 0.5 ? -1 : 1) * (1.5 + rng() * 0.55), scale: 1 });
     if (i % 47 === 11 && signNames.length) seg.scenery.push({ name: pick(rng, signNames), offset: 1.7 + rng() * 0.25, scale: 1 });
+    // The big 600B meme hoardings — rarer than the small signs so each one
+    // stays an event, set back further because the panel is huge.
+    if (i % 73 === 37 && billboardNames.length) seg.scenery.push({ name: pick(rng, billboardNames), offset: (rng() < 0.5 ? -1 : 1) * (2.1 + rng() * 0.4), scale: 1 });
   }
 }
 

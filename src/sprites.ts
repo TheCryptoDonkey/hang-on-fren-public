@@ -210,6 +210,27 @@ function fallbackSign(): SpriteImage {
   });
 }
 
+// Big roadside hoarding for the 600B meme billboards: a wide dark panel on two
+// stout legs. Always code-drawn (no art file), so the face rect below is a
+// reliable target for the billboard variants to composite text/art onto.
+const BILLBOARD_FACE = { x: 16, y: 14, w: 348, h: 176 } as const;
+
+function fallbackBillboard(): SpriteImage {
+  return bake(380, 300, ctx => {
+    // legs + cross brace
+    ctx.fillStyle = '#5a4632';
+    ctx.fillRect(58, 196, 18, 104);
+    ctx.fillRect(304, 196, 18, 104);
+    ctx.fillRect(58, 238, 264, 10);
+    // panel frame and dark face
+    ctx.fillStyle = '#26333d';
+    ctx.fillRect(6, 4, 368, 196);
+    ctx.fillStyle = '#0b1620';
+    const f = BILLBOARD_FACE;
+    ctx.fillRect(f.x, f.y, f.w, f.h);
+  });
+}
+
 // Coconut palm — the TROPICO BAY tree: a curved trunk with a burst of fronds and
 // a clutch of coconuts at the crown.
 function fallbackCoconut(): SpriteImage {
@@ -894,6 +915,7 @@ const FALLBACKS: Record<string, () => SpriteImage> = {
   'prop-gate': fallbackGate,
   'prop-finish': fallbackFinish,
   'prop-sign': fallbackSign,
+  'prop-billboard': fallbackBillboard,
   'car-classic': fallbackCar,
   'car-van': fallbackCar,
   'scooter-rival': fallbackCar,
@@ -955,6 +977,9 @@ const ART_URLS: Record<string, string> = {
   'prop-gate': assetUrl('art/prop-gate.png'),
   'prop-finish': assetUrl('art/prop-finish.png'),
   'prop-sign': assetUrl('art/prop-sign.png'),
+  // Raw sticker art for the rose-meme billboard; composited onto the hoarding
+  // by buildBillboardVariants, never drawn directly.
+  'billboard-rose-art': assetUrl('art/billboard-rose.png'),
   rose: assetUrl('pickups/600b/rose.png'),
   'pickup-petrol': assetUrl('art/pickup-petrol.png'),
   'pickup-shield': assetUrl('art/pickup-shield.png'),
@@ -1000,9 +1025,14 @@ export class SpriteStore {
   }
 }
 
-// Roadside billboard texts — DNI-lore in-jokes. Each becomes a sign variant by
+// Roadside sign texts — DNI-lore in-jokes. Each becomes a sign variant by
 // compositing a legible plaque + text onto the generated (or fallback) sign.
-export const SIGN_TEXTS = ['600.wtf', '4.20 AM', 'GM', 'WE ARE\nNOT A CULT'] as const;
+// 'WE ARE NOT A CULT' graduated to the big billboards below.
+export const SIGN_TEXTS = ['600.wtf', '4.20 AM', 'GM'] as const;
+
+// Big-billboard texts — the 600 000 000 000 meme lore, writ large. The digits
+// stack four rows deep, like the neon sign in the sticker art.
+export const BILLBOARD_TEXTS = ['WE ARE\nNOT A CULT', '600\n000\n000\n000'] as const;
 
 function drawFittedText(ctx: CanvasRenderingContext2D, lines: string[], cx: number, cy: number, maxW: number, maxH: number): void {
   const lineCount = lines.length;
@@ -1050,6 +1080,43 @@ export function buildSignVariants(store: SpriteStore): string[] {
     store.set(name, { canvas, w: base.w, h: base.h });
     names.push(name);
   });
+  return names;
+}
+
+/**
+ * Build billboard-N variants: meme texts in glowing capitals, plus — once its
+ * art has loaded — the "THANKS FOR BUYING ROSE!" sticker on its own hoarding.
+ */
+export function buildBillboardVariants(store: SpriteStore): string[] {
+  const base = store.get('prop-billboard');
+  if (!base) return [];
+  const f = BILLBOARD_FACE;
+  const names: string[] = [];
+  const make = (name: string, draw: (ctx: CanvasRenderingContext2D) => void): void => {
+    const { canvas, ctx } = makeCanvas(base.w, base.h);
+    ctx.drawImage(base.canvas, 0, 0);
+    draw(ctx);
+    store.set(name, { canvas, w: base.w, h: base.h });
+    names.push(name);
+  };
+  BILLBOARD_TEXTS.forEach((text, i) => {
+    make(`billboard-${i}`, ctx => {
+      ctx.fillStyle = '#ffd76b';
+      ctx.shadowColor = '#ff8c3b';
+      ctx.shadowBlur = 16;
+      drawFittedText(ctx, text.split('\n'), f.x + f.w / 2, f.y + f.h / 2, f.w * 0.9, f.h * 0.92);
+      ctx.shadowBlur = 0;
+    });
+  });
+  const art = store.get('billboard-rose-art');
+  if (art) {
+    make('billboard-rose', ctx => {
+      const s = Math.min(f.w / art.w, f.h / art.h) * 0.97;
+      const dw = art.w * s;
+      const dh = art.h * s;
+      ctx.drawImage(art.canvas, f.x + (f.w - dw) / 2, f.y + (f.h - dh) / 2, dw, dh);
+    });
+  }
   return names;
 }
 

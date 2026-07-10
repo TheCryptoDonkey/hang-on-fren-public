@@ -345,6 +345,10 @@ export interface SubmitScoreOptions {
   startedAt: number;
   finishedAt: number;
   endedBy: 'time' | 'finish';
+  /** Bitcoin chain tip when the run ended — flavour stamped onto the event. */
+  btcBlock?: number;
+  /** BTC price in US cents when the run ended. */
+  btcUsdCents?: number;
 }
 
 export interface PublishOutcome {
@@ -378,6 +382,8 @@ export async function submitScore(summary: RunSummary, opts: SubmitScoreOptions)
     level: opts.level,
     ended_by: opts.endedBy,
     ...(opts.playerName ? { player_name: opts.playerName } : {}),
+    ...(opts.btcBlock ? { btc_block: opts.btcBlock } : {}),
+    ...(opts.btcUsdCents ? { btc_usd_cents: opts.btcUsdCents } : {}),
     player_mode: identity.mode,
   };
   const bodyJson = JSON.stringify(claim);

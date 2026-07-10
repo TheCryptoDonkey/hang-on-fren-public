@@ -9,7 +9,7 @@ import type { World } from './world.js';
 import { signedForward } from './world.js';
 import type { SpriteStore, SpriteImage } from './sprites.js';
 import { DEFAULT_PALETTE, resolveScenerySprite, type Palette, type SceneryKit, type TimeOfDay } from './stages.js';
-import { SPRITE_WORLD_WIDTH } from './geometry.js';
+import { spriteWorldWidth } from './geometry.js';
 import { drawRider } from './rider.js';
 import { clamp, lerp, wrap } from './util.js';
 
@@ -331,6 +331,9 @@ export interface Scene {
   timeOfDay?: TimeOfDay; // which gpt-image horizon backdrops to crossfade
 }
 
+// Offscreen frame snapshot reused by the trip kaleidoscope (no per-frame alloc).
+let tripSnap: HTMLCanvasElement | null = null;
+
 export function renderScene(scene: Scene): void {
   const { ctx, width, height, track, player, world, store } = scene;
   const palette = scene.palette ?? DEFAULT_PALETTE;
@@ -497,15 +500,45 @@ export function renderScene(scene: Scene): void {
     ctx.restore();
   }
 
-  // Fly-agaric trip: the whole frame's hues cycle hard, with a sliding rainbow
-  // sheen over the top — unmistakably psychedelic, HUD still drawn clean above.
+  // Fly-agaric trip: the world gently MELTS. The frame is redrawn in vertical
+  // slivers, each stretching downward and swaying on its own drifting phase so
+  // the scene runs like warm wax (tops stay anchored — the sky holds while the
+  // road drips). A dreamy echo doubles the edges, then multi-coloured hue bands
+  // slide across the melt so every part of the scene cycles through a different
+  // colour. HUD still drawn clean above. (Blend modes + strip blits, not
+  // ctx.filter — Safari didn't support canvas filters.)
   const trip = scene.trip ?? 0;
   if (trip > 0) {
     const t = scene.time;
+    if (!tripSnap) tripSnap = document.createElement('canvas');
+    if (tripSnap.width !== ctx.canvas.width || tripSnap.height !== ctx.canvas.height) {
+      tripSnap.width = ctx.canvas.width;
+      tripSnap.height = ctx.canvas.height;
+    }
+    tripSnap.getContext('2d')!.drawImage(ctx.canvas, 0, 0);
     ctx.save();
+    // melt: two beat frequencies per sliver keep the drip organic, not
+    // metronomic; the phases change slowly across neighbouring slivers so the
+    // surface reads as liquid rather than torn strips
+    const cols = 80;
+    const cw = Math.ceil(width / cols);
+    for (let i = 0; i < cols; i += 1) {
+      const x = i * cw;
+      const sway = (Math.sin(t * 1.6 + i * 0.21) + Math.sin(t * 0.9 + i * 0.09) * 0.6) * width * 0.006 * trip;
+      const sag = (Math.sin(t * 1.1 + i * 0.16) + 1.4) * height * 0.028 * trip;
+      ctx.drawImage(tripSnap, x, 0, cw, height, x + sway, 0, cw, height + sag);
+    }
+    // dreamy echo orbiting the frame — double vision without the beer hangover
+    ctx.globalAlpha = 0.2 * trip;
+    ctx.drawImage(tripSnap, Math.sin(t * 1.3) * width * 0.012, Math.cos(t * 1.7) * height * 0.009);
+    // multi-coloured: rainbow hue bands slide diagonally across the melt
     ctx.globalCompositeOperation = 'hue';
-    ctx.globalAlpha = 0.65 * trip;
-    ctx.fillStyle = `hsl(${(t * 160) % 360}, 100%, 55%)`;
+    ctx.globalAlpha = 0.7 * trip;
+    const bands = ctx.createLinearGradient(0, 0, width, height * 0.8);
+    for (let i = 0; i <= 8; i += 1) {
+      bands.addColorStop(i / 8, `hsl(${(i * 90 + t * 110) % 360}, 100%, 55%)`);
+    }
+    ctx.fillStyle = bands;
     ctx.fillRect(0, 0, width, height);
     ctx.globalCompositeOperation = 'overlay';
     ctx.globalAlpha = 0.4 * trip;
@@ -633,7 +666,7 @@ function drawEntity(ctx: CanvasRenderingContext2D, width: number, store: SpriteS
   const sprite = store.get(e.sprite);
   if (!sprite) return;
   if (e.scale <= 0) return;
-  const worldW = SPRITE_WORLD_WIDTH[e.sprite] ?? 0.3;
+  const worldW = spriteWorldWidth(e.sprite);
   const destW = e.scale * worldW * ROAD.roadWidth * (width / 2);
   if (destW < 1) return;
   const destH = destW * (sprite.h / sprite.w);

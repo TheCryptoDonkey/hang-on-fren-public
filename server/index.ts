@@ -246,6 +246,8 @@ function buildGameSignedScore(claim: ClaimInput, playerPubkey: string): ReturnTy
     playerMode: claim.player_mode === 'nostr' ? 'nostr' : 'guest',
     level: claim.level,
     siteUrl: SITE_URL,
+    btcBlock: claim.btc_block,
+    btcUsdCents: claim.btc_usd_cents,
   });
 }
 

@@ -35,6 +35,10 @@ export interface ClaimInput {
   ended_by: 'time' | 'finish';
   player_name?: string;
   player_mode?: 'guest' | 'nostr';
+  /** Bitcoin chain tip at run end — flavour, dropped (not refused) if implausible. */
+  btc_block?: number;
+  /** BTC price in US cents at run end — flavour, dropped (not refused) if implausible. */
+  btc_usd_cents?: number;
 }
 
 export type ParseResult =
@@ -90,7 +94,18 @@ export function parseClaim(body: unknown, now = Date.now()): ParseResult {
   const plausibleScore = 10_000 + claim.distance_m * 4 + claim.duration_s * 800;
   if (claim.score > plausibleScore) return { ok: false, status: 422, error: 'implausible_score' };
 
+  // Chain-state flavour: keep only sane values so nonsense never reaches the
+  // signed event, but never refuse a legitimate score over decoration.
+  claim.btc_block = plausibleFlavourInt(claim.btc_block, 100_000_000);
+  claim.btc_usd_cents = plausibleFlavourInt(claim.btc_usd_cents, 10_000_000_000);
+
   return { ok: true, claim };
+}
+
+function plausibleFlavourInt(value: unknown, max: number): number | undefined {
+  return typeof value === 'number' && Number.isInteger(value) && value > 0 && value <= max
+    ? value
+    : undefined;
 }
 
 export function cleanPlayerName(value: unknown): string | null {

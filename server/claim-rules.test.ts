@@ -72,4 +72,28 @@ describe('claim-rules', () => {
     expect(cleanPlayerName(42)).toBeNull();
     expect(cleanPlayerName('x'.repeat(50))).toHaveLength(32);
   });
+
+  it('keeps sane bitcoin chain flavour on the claim', () => {
+    const result = parseClaim(validClaim({ btc_block: 905_432, btc_usd_cents: 10_425_000 }), NOW);
+    expect(result).toMatchObject({ ok: true, claim: { btc_block: 905_432, btc_usd_cents: 10_425_000 } });
+  });
+
+  it('drops implausible bitcoin flavour without refusing the score', () => {
+    const cases: Array<Partial<ClaimInput>> = [
+      { btc_block: -1 },
+      { btc_block: 3.14 },
+      { btc_block: 200_000_000 },
+      { btc_block: '905432' as unknown as number },
+      { btc_usd_cents: 0 },
+      { btc_usd_cents: 100_000_000_000 },
+    ];
+    for (const overrides of cases) {
+      const result = parseClaim(validClaim(overrides), NOW);
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        const key = Object.keys(overrides)[0] as keyof ClaimInput;
+        expect(result.claim[key]).toBeUndefined();
+      }
+    }
+  });
 });

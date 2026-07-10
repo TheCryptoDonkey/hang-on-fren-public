@@ -178,6 +178,10 @@ export interface ScoreEventOptions {
   /** Explicit play URL for the `r`/`source` tags — the claim server passes its
    *  configured public URL; the browser client derives it from `location`. */
   siteUrl?: string;
+  /** Bitcoin chain tip when the run ended — flavour stamped onto the event. */
+  btcBlock?: number;
+  /** BTC price in US cents when the run ended. */
+  btcUsdCents?: number;
 }
 
 /**
@@ -218,6 +222,8 @@ export function buildScoreEvent(summary: RunSummary, playerPubkey = 'guest', opt
   ];
   if (opts.playerName) tags.push(['player', opts.playerName], ['playerName', opts.playerName]);
   if (opts.playerMode) tags.push(['playerMode', opts.playerMode]);
+  if (opts.btcBlock) tags.push(['btc_block', String(opts.btcBlock)]);
+  if (opts.btcUsdCents) tags.push(['btc_usd_cents', String(opts.btcUsdCents)]);
   return {
     kind: SCORE_KIND,
     created_at: Math.floor(Date.now() / 1000),
@@ -234,6 +240,8 @@ export function buildScoreEvent(summary: RunSummary, playerPubkey = 'guest', opt
       ...(opts.runId ? { run_id: opts.runId } : {}),
       ...(opts.playerName ? { player_name: opts.playerName } : {}),
       ...(opts.playerMode ? { player_mode: opts.playerMode } : {}),
+      ...(opts.btcBlock ? { btc_block: opts.btcBlock } : {}),
+      ...(opts.btcUsdCents ? { btc_usd_cents: opts.btcUsdCents } : {}),
     }),
     tags,
   };

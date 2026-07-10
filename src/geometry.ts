@@ -39,6 +39,7 @@ export const SPRITE_WORLD_WIDTH: Record<string, number> = {
   'prop-beachhut': 0.92,
   'prop-chalet': 1.0,
   'prop-sign': 0.4,
+  'prop-billboard': 1.5,
   // regions 4–9 props
   'prop-cactus': 0.42,
   'prop-adobe': 1.0,
@@ -58,9 +59,19 @@ export const SPRITE_WORLD_WIDTH: Record<string, number> = {
 
 export const DEFAULT_SPRITE_WIDTH = 0.3;
 
+/**
+ * Composited variants (sign-N in-jokes, billboard-N memes) share their base
+ * prop's footprint — they're the same structure with different faces.
+ */
+function baseSprite(sprite: string): string {
+  if (sprite.startsWith('sign-')) return 'prop-sign';
+  if (sprite.startsWith('billboard-')) return 'prop-billboard';
+  return sprite;
+}
+
 /** Drawn width of a sprite in road-offset units (full road spans -1..1 → width 2). */
 export function spriteWorldWidth(sprite: string): number {
-  return SPRITE_WORLD_WIDTH[sprite] ?? DEFAULT_SPRITE_WIDTH;
+  return SPRITE_WORLD_WIDTH[baseSprite(sprite)] ?? DEFAULT_SPRITE_WIDTH;
 }
 
 // Solid roadside footprints in road-offset units. These are intentionally not
@@ -81,6 +92,7 @@ const SCENERY_HIT_HALF_WIDTH: Record<string, number | null> = {
   'prop-lamp': 0.05,
   'prop-parasol': 0.07,
   'prop-sign': 0.1,
+  'prop-billboard': 0.14, // legs only — the panel floats above head height
   'prop-villa': 0.38,
   'prop-beachhut': 0.34,
   'prop-chalet': 0.36,
@@ -99,7 +111,8 @@ const SCENERY_HIT_HALF_WIDTH: Record<string, number | null> = {
 };
 
 export function sceneryHitHalfWidth(sprite: string): number | null {
-  return Object.prototype.hasOwnProperty.call(SCENERY_HIT_HALF_WIDTH, sprite)
-    ? SCENERY_HIT_HALF_WIDTH[sprite]
+  const name = baseSprite(sprite);
+  return Object.prototype.hasOwnProperty.call(SCENERY_HIT_HALF_WIDTH, name)
+    ? SCENERY_HIT_HALF_WIDTH[name]
     : 0.08;
 }
