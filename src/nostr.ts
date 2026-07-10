@@ -593,7 +593,11 @@ function fetchScoresFromRelay(relay: string): Promise<SignedEvent[]> {
     const subId = `hof-${Math.random().toString(36).slice(2, 10)}`;
     ws.onopen = () => {
       try {
-        ws.send(JSON.stringify(['REQ', subId, { kinds: [SCORE_KIND], authors: [GAME_PUBKEY], '#game': [GAME_ID], limit: 200 }]));
+        // No '#game' tag filter: relays only index single-letter tags (NIP-01),
+        // so filtering on the multi-letter `game` tag returns nothing on most
+        // of them. Kind + author narrows it enough; isValidScoreEvent checks
+        // the game tag client-side.
+        ws.send(JSON.stringify(['REQ', subId, { kinds: [SCORE_KIND], authors: [GAME_PUBKEY], limit: 200 }]));
       } catch {
         settle();
       }
