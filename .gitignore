@@ -11,3 +11,4 @@ npm-debug.log*
 /scratch-*.png
 /hero-straight-upright.png
 art-originals/
+server-dist/

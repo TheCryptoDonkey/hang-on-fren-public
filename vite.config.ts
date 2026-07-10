@@ -22,6 +22,12 @@ export default defineConfig({
   server: {
     port: 5191,
     host: true,
+    // Dev claim service (server/index.ts) — run it with `npm run dev:api`.
+    // changeOrigin must stay OFF so the original Host header reaches the
+    // service: NIP-98 auth validates the URL the browser actually signed.
+    proxy: {
+      '/api': { target: 'http://127.0.0.1:3191', changeOrigin: false },
+    },
   },
   build: {
     target: 'es2022',
