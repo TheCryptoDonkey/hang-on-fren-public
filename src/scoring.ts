@@ -134,30 +134,107 @@ export function summarise(state: ScoreState, durationS: number, endedBy: 'time' 
   };
 }
 
+// Gamestr identity of this game. Boards (pallasite, gamestr-arcade) filter
+// kind-30762 events on the `game` tag, need `score` > 0 and attribute runs to
+// the `p` tag — no registration required anywhere.
+export const GAME_ID = 'hangonfren';
+export const SCORE_KIND = 30762;
+export const GAME_TITLE = 'Hang On, Fren';
+// The game's official Nostr identity (hex pubkey for
+// npub12ycjmydvdlrwx5q9cgm9dv80lg2eez0ykg09dcz56kh49tw8cfeqnap6qw, derived at
+// nsec-tree path hang-on-fren@0 — the nsec itself stays offline, never in this
+// repo). Not used for signing today (scores are player-signed); this is the
+// identity for the game's kind-0 profile and any future game-signed board.
+export const GAME_PUBKEY = '51312d91ac6fc6e35005c23656b0effa159c89e4b21e56e054d5af52adc7c272';
+// The public host is deliberately not committed (see deploy/README.md), so the
+// discovery URL is derived from wherever the game is actually being served.
+// (globalThis lookup, not bare `location` — this module is shared with the
+// claim server's node build, which has no DOM lib.)
+function browserLocation(): { origin: string; pathname: string; host: string } | undefined {
+  return (globalThis as { location?: { origin: string; pathname: string; host: string } }).location;
+}
+function gameUrl(): string {
+  const loc = browserLocation();
+  return loc ? `${loc.origin}${loc.pathname}` : 'https://github.com/TheCryptoDonkey/hang-on-fren-public';
+}
+function gameSource(): string {
+  return browserLocation()?.host ?? 'hang-on-fren';
+}
+function hostOf(url: string): string {
+  try {
+    return new URL(url).host;
+  } catch {
+    return url;
+  }
+}
+
+export interface ScoreEventOptions {
+  /** Unique per run — keeps each run its own replaceable event (`d` tag). */
+  runId?: string;
+  playerName?: string;
+  playerMode?: 'guest' | 'nostr';
+  /** 1-based level/region reached (gamestr-wide `level` discovery tag). */
+  level?: number;
+  /** Explicit play URL for the `r`/`source` tags — the claim server passes its
+   *  configured public URL; the browser client derives it from `location`. */
+  siteUrl?: string;
+}
+
 /**
- * Seam for the future Nostr leaderboard. Shapes a run into the tag list a
- * kind 30762 score event would carry. Nothing is signed or published today.
+ * Shape a run into an unsigned kind-30762 gamestr score event, mirroring
+ * neon-sentinel's tag set so any gamestr leaderboard client can render it.
+ * Signing/publishing lives in nostr.ts.
  */
-export function buildScoreEvent(summary: RunSummary, playerPubkey = 'guest'): {
+export function buildScoreEvent(summary: RunSummary, playerPubkey = 'guest', opts: ScoreEventOptions = {}): {
   kind: number;
+  created_at: number;
+  content: string;
   tags: string[][];
 } {
+  const siteUrl = opts.siteUrl ?? gameUrl();
+  const source = opts.siteUrl ? hostOf(opts.siteUrl) : gameSource();
+  const tags = [
+    ['d', `${GAME_ID}:${playerPubkey}:${opts.runId ?? 'run'}`],
+    ['game', GAME_ID],
+    ['score', String(summary.score)],
+    ['p', playerPubkey],
+    ['state', 'final'],
+    ['distance', String(summary.distanceM)],
+    ['roses', String(summary.roses)],
+    ['overtakes', String(summary.overtakes)],
+    ['crashes', String(summary.crashes)],
+    ['duration', String(summary.durationS)],
+    ['ended_by', summary.endedBy],
+    // Gamestr-wide discovery tags: boards render any game's event from these
+    // without game-specific knowledge.
+    ['title', GAME_TITLE],
+    ['level', String(opts.level ?? 1)],
+    ['r', siteUrl],
+    ['source', source],
+    ['platform', 'web'],
+    ['t', 'arcade'],
+    ['t', 'racer'],
+    ['t', GAME_ID],
+  ];
+  if (opts.playerName) tags.push(['player', opts.playerName], ['playerName', opts.playerName]);
+  if (opts.playerMode) tags.push(['playerMode', opts.playerMode]);
   return {
-    kind: 30762,
-    tags: [
-      ['d', `hangonfren:${playerPubkey}:run`],
-      ['game', 'hangonfren'],
-      ['score', String(summary.score)],
-      ['state', 'final'],
-      ['distance', String(summary.distanceM)],
-      ['roses', String(summary.roses)],
-      ['overtakes', String(summary.overtakes)],
-      ['crashes', String(summary.crashes)],
-      ['duration', String(summary.durationS)],
-      ['ended_by', summary.endedBy],
-      ['t', 'arcade'],
-      ['t', 'racer'],
-      ['t', 'hangonfren'],
-    ],
+    kind: SCORE_KIND,
+    created_at: Math.floor(Date.now() / 1000),
+    content: JSON.stringify({
+      game: GAME_ID,
+      score: summary.score,
+      distance_m: summary.distanceM,
+      duration_s: summary.durationS,
+      roses: summary.roses,
+      overtakes: summary.overtakes,
+      crashes: summary.crashes,
+      top_speed_kph: summary.topSpeedKph,
+      ended_by: summary.endedBy,
+      ...(opts.runId ? { run_id: opts.runId } : {}),
+      ...(opts.playerName ? { player_name: opts.playerName } : {}),
+      ...(opts.playerMode ? { player_mode: opts.playerMode } : {}),
+    }),
+    tags,
   };
 }

@@ -15,6 +15,7 @@ import { unlockAudio, updateEngine, updateRumble, updateScreech, updateTurbo, pl
 import { initMusic, startMusic } from './music.js';
 import { paletteAt, stageAt, stageIndexAt, sceneryKitAt, timeOfDayAt, marketPhaseAt, CHECKPOINT_BONUS, LEVELS, STAGE_M, FINISH_M } from './stages.js';
 import { appendChar, backspace, cleanName, layout as nameLayout, keyAt as nameKeyAt, drawNameEntry } from './nameentry.js';
+import { connectNostr, fetchGlobalBoard, getIdentity, renameGuest, restoreIdentity, submitScore, useGuestMode, type GlobalScore } from './nostr.js';
 import { MODES, loadModeIndex, saveModeIndex } from './difficulty.js';
 import { clamp } from './util.js';
 import { assetUrl } from './asset-url.js';
@@ -49,6 +50,14 @@ const VOICE_COOLDOWN = 1.3;
 const PICKUP_GRACE = 0.3; // brief crash-immunity when grabbing a pickup
 const ROSE_BOOST_TIME = 4.5; // seconds of nitro after a rose
 const BOOST_SPEED_MUL = 1.4;
+// Beer: a cheeky speed-up whose wobbly-vision hangover OUTLASTS the speed —
+// the classic risk/reward trade: take the pace, ride the wobble.
+const BEER_INTERVAL = 34; // a beer rolls onto the road every 34s
+const BEER_SPEED_TIME = 5; // seconds of beer speed-up
+const BEER_SPEED_MUL = 1.3;
+const BEER_WOBBLE_TIME = 8; // seconds of wobbly vision
+// Fly agaric: a few seconds of invincibility inside a full psychedelic trip.
+const SHROOM_TIME = 6;
 // Slipstream: tuck in behind a car to charge a draft, then break out of the
 // wake for a slingshot — the classic risk-for-speed overtaking move.
 const DRAFT_CHARGE_TIME = 1.1; // seconds tucked in for a full charge
@@ -115,9 +124,22 @@ const state = {
   finishSpawned: false, // finish arch dropped yet?
   confettiAccum: 0, // drip-feeds confetti on the victory screen
   qualifies: false,
+  // --- gamestr (nostr) layer ---
+  runId: '',
+  runStartedAt: 0, // wall-clock ms — the claim service sanity-checks the run window
+  runFinishedAt: 0,
+  submitted: false, // this run's score has been handed to the claim service
+  submitStatus: '', // shown on the game-over card
+  titleNotice: { text: '', until: 0 }, // transient identity/publish notice on the title
+  globalBoard: [] as GlobalScore[],
+  boardFlip: false, // title board alternates local / gamestr
   sparks: [] as Spark[],
   flash: 0, // brief flash on pickup
   boost: 0, // seconds of rose nitro remaining
+  beerAccum: 0,
+  beerSpeed: 0, // seconds of beer speed-up remaining
+  beerWobble: 0, // seconds of beer wobbly-vision remaining (outlasts the speed)
+  shroom: 0, // seconds of fly-agaric invincibility/trip remaining
   shield: false, // HODL shield held — absorbs one wipeout
   drafting: 0, // current slipstream intensity 0..1
   draftCharge: 0, // banked draft 0..1 — converts to a slingshot on wake exit
@@ -349,6 +371,12 @@ function mobileHudBottomInset(): number {
   return isTouch && state.phase === 'playing' ? 126 * uiScale() : 0;
 }
 
+/** Name-entry keyboard layout, lifted clear of the browser's bottom tap-zone on
+ *  touch devices (Safari steals taps on the last ~40px for its own chrome). */
+function nameEntryLayout(): ReturnType<typeof nameLayout> {
+  return nameLayout(W, H, uiScale(), isTouch ? 44 * uiScale() : 0);
+}
+
 function syncDomState(): void {
   document.body.dataset.phase = state.phase;
 }
@@ -439,6 +467,7 @@ function onKeyDown(e: KeyboardEvent): void {
     if (k === 'enter' || k === ' ') startRun();
     else if (k === 'arrowleft' || k === 'a') { unlockAudio(); cycleMode(-1); }
     else if (k === 'arrowright' || k === 'd') { unlockAudio(); cycleMode(1); }
+    else if (k === 'n') { unlockAudio(); toggleIdentity(); }
   } else if (state.phase === 'gameover') handleGameOverKey(e.key);
   // While typing a name, M is a letter — don't hijack it for mute.
   const typingName = state.phase === 'gameover' && state.qualifies;
@@ -465,13 +494,16 @@ function canvasPoint(clientX: number, clientY: number): { x: number; y: number }
   return { x: (clientX - rect.left) * sx, y: (clientY - rect.top) * sy };
 }
 
-// Vertical band of the title-screen difficulty selector (fractions of H).
+// Vertical bands of the title-screen difficulty selector and the identity
+// (guest/nostr) row (fractions of H).
 const MODE_ROW_Y = 0.57;
+const IDENTITY_ROW_Y = 0.775;
 
 function pointerAction(clientX: number, clientY: number): void {
   // Tap advances title; during play it is handled by steering zones.
   if (state.phase === 'title') {
-    // Tapping the difficulty row picks that mode; anywhere else starts the run.
+    // Tapping the difficulty row picks that mode; the identity row toggles
+    // guest/nostr; anywhere else starts the run.
     const { x, y } = canvasPoint(clientX, clientY);
     const u = uiScale();
     const rowMid = H * MODE_ROW_Y;
@@ -482,6 +514,11 @@ function pointerAction(clientX: number, clientY: number): void {
         saveModeIndex(modeIndex);
         playSfx('combo', 0.8, 1 + modeIndex * 0.12);
       }
+      return;
+    }
+    const identMid = H * IDENTITY_ROW_Y;
+    if (y > identMid - 18 * u && y < identMid + 12 * u) {
+      toggleIdentity();
       return;
     }
     startRun();
@@ -495,7 +532,7 @@ function pointerAction(clientX: number, clientY: number): void {
   }
   // New best: hit-test the on-screen keyboard so touch users can type a name.
   const { x, y } = canvasPoint(clientX, clientY);
-  const key = nameKeyAt(nameLayout(W, H, uiScale()).rects, x, y);
+  const key = nameKeyAt(nameEntryLayout().rects, x, y);
   if (!key) return;
   if (key.act === 'char' && key.ch) state.nameValue = appendChar(state.nameValue, key.ch);
   else if (key.act === 'space') state.nameValue = appendChar(state.nameValue, ' ');
@@ -653,14 +690,87 @@ function startRun(): void {
   state.sparks = [];
   state.flash = 0;
   state.boost = 0;
+  state.beerAccum = 0;
+  state.beerSpeed = 0;
+  state.beerWobble = 0;
+  state.shroom = 0;
   state.shield = false;
   state.drafting = 0;
   state.draftCharge = 0;
   state.slingshot = 0;
   state.slingCooldown = 0;
   player.maxSpeed = BASE_MAX_SPEED;
+  state.runId = typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID()
+    : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+  state.runStartedAt = Date.now();
+  state.runFinishedAt = 0;
+  state.submitted = false;
+  state.submitStatus = '';
   state.paused = false;
   state.phase = 'playing';
+}
+
+// ---- gamestr submission ------------------------------------------------------
+
+function setTitleNotice(text: string, seconds = 4): void {
+  state.titleNotice = { text, until: state.time + seconds };
+}
+
+/**
+ * Hand the finished run to the gamestr claim service exactly once (it signs
+ * the board event with the GAME key after plausibility checks). For a
+ * board-qualifying run this is deferred to confirmGameOver so the typed
+ * callsign rides along on the event (and renames the guest profile).
+ */
+function submitRunScore(playerName?: string): void {
+  if (state.submitted || !state.summary) return;
+  state.submitted = true;
+  const identity = getIdentity();
+  const name = playerName ?? identity.name;
+  if (identity.mode === 'guest' && playerName) renameGuest(playerName);
+  state.submitStatus = 'CLAIMING ON GAMESTR…';
+  void submitScore(state.summary, {
+    runId: state.runId,
+    playerName: name,
+    level: stageIndexAt(state.summary.distanceM) + 1,
+    startedAt: state.runStartedAt,
+    finishedAt: state.runFinishedAt || Date.now(),
+    endedBy: state.outcome,
+  })
+    .then(result => {
+      state.submitStatus = result === null
+        ? 'SCORE KEPT LOCAL — NO CLAIM SERVICE'
+        : result.status === 'published'
+          ? `SCORE ON GAMESTR ✓  ${result.ok}/${result.total} relays`
+          : 'SCORE ACCEPTED — PUBLISHING SOON';
+      setTitleNotice(state.submitStatus);
+      if (result !== null) {
+        void fetchGlobalBoard(5, true)
+          .then(board => { state.globalBoard = board; })
+          .catch(() => undefined);
+      }
+    })
+    .catch(() => {
+      state.submitStatus = 'SCORE KEPT LOCAL';
+      setTitleNotice(state.submitStatus);
+    });
+}
+
+/** Toggle guest ↔ nostr identity from the title screen (N or tap). The nostr
+ *  path opens the signet-login picker (extension / QR / bunker / nsec /
+ *  Amber), so it works on phones with no extension. */
+function toggleIdentity(): void {
+  if (getIdentity().mode === 'guest') {
+    setTitleNotice('SIGN IN WITH NOSTR — PICK A METHOD…', 180);
+    void connectNostr().then(pk => {
+      setTitleNotice(pk ? 'NOSTR CONNECTED — SCORES CLAIM AS YOU' : 'SIGN-IN CANCELLED — STAYING GUEST');
+    });
+  } else {
+    useGuestMode();
+    setTitleNotice('GUEST MODE — LOCAL KEY CLAIMS YOUR SCORES');
+  }
+  playSfx('combo', 0.7, 1.2);
 }
 
 /** Abandon the run from the pause screen — no score entry, straight home. */
@@ -676,12 +786,13 @@ function quitRun(): void {
  */
 function pickTreatKind(): PickupKind {
   const r = Math.random();
-  if (r < 0.32) return 'rose';
-  if (r < 0.46) return 'cake';
-  if (r < 0.57) return 'meme';
-  if (r < 0.67) return 'shield';
-  if (r < 0.75) return 'wholecake';
-  if (r < 0.83) return 'ath';
+  if (r < 0.30) return 'rose';
+  if (r < 0.42) return 'cake';
+  if (r < 0.52) return 'meme';
+  if (r < 0.61) return 'shroom';
+  if (r < 0.70) return 'shield';
+  if (r < 0.77) return 'wholecake';
+  if (r < 0.84) return 'ath';
   if (r < 0.90) return 'timelock';
   if (r < 0.96) return 'fiatnam';
   return 'fourtwenty';
@@ -723,10 +834,14 @@ function startWipeout(): void {
 function endRun(endedBy: 'time' | 'crashes'): void {
   state.endedBy = endedBy;
   state.outcome = 'time';
+  state.runFinishedAt = Date.now();
   state.summary = summarise(score, state.runTime, endedBy);
   state.qualifies = qualifies(board, state.summary.score);
   state.nameValue = ''; // blank — the rider types their own name
   state.phase = 'gameover';
+  // A board run submits on name confirm (so the callsign rides along);
+  // anything else publishes straight away under the stored identity.
+  if (!state.qualifies) submitRunScore();
   playSfx('milestone', 0.8);
 }
 
@@ -740,11 +855,13 @@ function winRun(): void {
   const bonus = Math.ceil(Math.max(0, timer.timeLeft)) * TIME_BONUS_PER_SEC;
   state.finishBonus = bonus;
   score.score += bonus; // flat goal bonus (no streak multiplier)
+  state.runFinishedAt = Date.now();
   state.summary = summarise(score, state.runTime, 'time');
   state.qualifies = qualifies(board, state.summary.score);
   state.nameValue = '';
   state.phase = 'gameover';
   state.confettiAccum = 0;
+  if (!state.qualifies) submitRunScore();
   playSfx('milestone', 1);
   playSfx('combo', 0.9);
   playSting(STING.checkpoint, 1);
@@ -754,14 +871,16 @@ function winRun(): void {
 function confirmGameOver(): void {
   if (state.phase !== 'gameover' || !state.summary) return;
   if (state.qualifies) {
+    const name = cleanName(state.nameValue);
     board = insertScore(board, {
-      name: cleanName(state.nameValue),
+      name,
       score: state.summary.score,
       distanceM: state.summary.distanceM,
       roses: state.summary.roses,
     });
     saveBoard(board);
     state.qualifies = false;
+    submitRunScore(name);
   }
   state.phase = 'title';
 }
@@ -821,9 +940,13 @@ function update(dt: number): void {
   if (state.boost > 0) state.boost = Math.max(0, state.boost - dt);
   if (state.slingshot > 0) state.slingshot = Math.max(0, state.slingshot - dt);
   if (state.slingCooldown > 0) state.slingCooldown -= dt;
+  if (state.beerSpeed > 0) state.beerSpeed = Math.max(0, state.beerSpeed - dt);
+  if (state.beerWobble > 0) state.beerWobble = Math.max(0, state.beerWobble - dt);
+  if (state.shroom > 0) state.shroom = Math.max(0, state.shroom - dt);
   player.maxSpeed = BASE_MAX_SPEED
     * (state.boost > 0 ? BOOST_SPEED_MUL : 1)
-    * (state.slingshot > 0 ? SLING_SPEED_MUL : 1);
+    * (state.slingshot > 0 ? SLING_SPEED_MUL : 1)
+    * (state.beerSpeed > 0 ? BEER_SPEED_MUL : 1);
 
   if (state.wipeout > 0) {
     // Spin-out: kill throttle, bleed speed, run the tumble animation.
@@ -857,8 +980,9 @@ function update(dt: number): void {
 
   // Turbo (rose boost) NO LONGER makes you a ghost through traffic — that made
   // collisions feel broken. It keeps its speed/time/score reward; you still have
-  // to dodge. Only the post-wipeout grace + pickup grace suppress crashes.
-  const shielded = state.invuln > 0 || state.wipeout > 0;
+  // to dodge. Only the post-wipeout grace, pickup grace and the fly-agaric trip
+  // suppress crashes.
+  const shielded = state.invuln > 0 || state.wipeout > 0 || state.shroom > 0;
   const events = updateWorld(world, player, track, dt, shielded);
   for (const ev of events) {
     if (ev.type === 'pickup') {
@@ -929,6 +1053,28 @@ function update(dt: number): void {
           playVoice('fourtwenty');
           spawnRoseBurst(bx, by, 'rose');
           addPopup(state.popups, '4:20 — CLOCK PAUSED 21s', W / 2, H * 0.5, '#c8ff8f', 1.9);
+          break;
+        case 'beer':
+          // Beer: faster for a bit — but the world goes wobbly for longer.
+          addBonus(score, 150);
+          state.beerSpeed = BEER_SPEED_TIME;
+          state.beerWobble = BEER_WOBBLE_TIME;
+          playSfx('rose', 1, 0.85);
+          playSfx('combo', 0.7, 0.8);
+          spawnRoseBurst(bx, by, 'petrol');
+          addPopup(state.popups, 'BEER!', bx, by - H * 0.06, '#f5b53c', 1.4);
+          addPopup(state.popups, 'FASTER… WOBBLIER', W / 2, H * 0.5, '#ffe9a8', 1.2);
+          break;
+        case 'shroom':
+          // Fly agaric: untouchable for a few seconds — inside a full-on trip.
+          addBonus(score, 300);
+          state.shroom = SHROOM_TIME;
+          state.flash = 0.7;
+          playSfx('milestone', 0.9);
+          playSfx('combo', 0.9, 1.5);
+          spawnRoseBurst(bx, by, 'rose');
+          addPopup(state.popups, 'FLY AGARIC!', bx, by - H * 0.06, '#e5342e', 1.5);
+          addPopup(state.popups, `INVINCIBLE ${SHROOM_TIME}s`, W / 2, H * 0.5, '#8fe6c4', 1.6);
           break;
         case 'shield':
           // HODL shield: hold through the next wipeout unscathed.
@@ -1022,6 +1168,11 @@ function update(dt: number): void {
   if (state.roseAccum >= ROSE_INTERVAL) {
     state.roseAccum -= ROSE_INTERVAL;
     addPickup(world, player, track, pickTreatKind());
+  }
+  state.beerAccum += dt;
+  if (state.beerAccum >= BEER_INTERVAL) {
+    state.beerAccum -= BEER_INTERVAL;
+    addPickup(world, player, track, 'beer');
   }
   if (timer.timeLeft <= EMERGENCY_AT && state.emergencyArmed) {
     state.emergencyArmed = false;
@@ -1124,11 +1275,12 @@ function update(dt: number): void {
   // One rushing-air chain serves three intensities: the rose turbo roars, a
   // slingshot whooshes, and a held draft whispers as the wake builds.
   updateTurbo({
-    active: (state.boost > 0 || state.slingshot > 0 || state.drafting > 0) && state.wipeout === 0,
+    active: (state.boost > 0 || state.slingshot > 0 || state.drafting > 0 || state.beerSpeed > 0) && state.wipeout === 0,
     intensity: Math.max(
       state.boost / ROSE_BOOST_TIME,
       state.slingshot > 0 ? 0.7 * (state.slingshot / SLING_TIME_MAX) + 0.2 : 0,
       state.draftCharge * 0.35,
+      state.beerSpeed > 0 ? 0.35 : 0,
     ),
   });
 }
@@ -1145,24 +1297,32 @@ function render(): void {
     return;
   }
 
-  renderScene({ ctx, width: W, height: H, track, player, world, store, time: state.time, wipeout: state.wipeout, boost: state.boost > 0 ? state.boost / ROSE_BOOST_TIME : 0, sling: state.slingshot > 0 ? state.slingshot / SLING_TIME_MAX : 0, draft: state.draftCharge, palette: paletteAt(score.distance), scenery: sceneryKitAt(score.distance), timeOfDay: timeOfDayAt(score.distance) });
+  // Beer wobble / shroom trip ramp in fast and ease out at the tail, so neither
+  // effect ever snaps on or off mid-frame.
+  const wobble = clamp(Math.min(state.beerWobble / 1.5, (BEER_WOBBLE_TIME - state.beerWobble) / 0.6), 0, 1);
+  const trip = clamp(Math.min(state.shroom / 1.2, (SHROOM_TIME - state.shroom) / 0.4), 0, 1);
+  renderScene({ ctx, width: W, height: H, track, player, world, store, time: state.time, wipeout: state.wipeout, boost: state.boost > 0 ? state.boost / ROSE_BOOST_TIME : 0, sling: state.slingshot > 0 ? state.slingshot / SLING_TIME_MAX : 0, draft: state.draftCharge, wobble, trip, palette: paletteAt(score.distance), scenery: sceneryKitAt(score.distance), timeOfDay: timeOfDayAt(score.distance) });
   drawSparks(ctx);
 
-  const hud: HudState = {
-    score: score.score,
-    hiScore: topScore(board),
-    timeLeft: timer.timeLeft,
-    urgency: timerUrgency(timer),
-    speedKph: speedKph(player),
-    distanceM: score.distance,
-    roseStreak: score.roseStreak,
-    level: stageIndexAt(score.distance) + 1,
-    levels: LEVELS,
-    region: stageAt(score.distance).name,
-    shield: state.shield,
-    popups: state.popups,
-  };
-  drawHud(ctx, W, H, hud, { bottomInset: mobileHudBottomInset() });
+  // The game-over card carries the score/stats itself — drawing the live HUD
+  // under it just bled the speed/distance pills through the name-entry keys.
+  if (state.phase !== 'gameover') {
+    const hud: HudState = {
+      score: score.score,
+      hiScore: topScore(board),
+      timeLeft: timer.timeLeft,
+      urgency: timerUrgency(timer),
+      speedKph: speedKph(player),
+      distanceM: score.distance,
+      roseStreak: score.roseStreak,
+      level: stageIndexAt(score.distance) + 1,
+      levels: LEVELS,
+      region: stageAt(score.distance).name,
+      shield: state.shield,
+      popups: state.popups,
+    };
+    drawHud(ctx, W, H, hud, { bottomInset: mobileHudBottomInset() });
+  }
 
   if (state.phase === 'playing' && state.paused) renderPaused();
   if (state.phase === 'gameover') renderGameOver(store);
@@ -1231,13 +1391,33 @@ function renderTitle(store: SpriteStore): void {
   ctx.font = `600 ${18 * u}px 'Trebuchet MS', sans-serif`;
   outlinedText('◄ ► steer   ·   grab fuel for time   ·   roses = turbo   ·   don’t wipe out', W / 2, H * 0.73, '#bdeddb', u, 4);
 
-  // high score board
+  // identity row: who signs your gamestr scores (tap / N to switch)
+  ctx.font = `700 ${14 * u}px 'Trebuchet MS', sans-serif`;
+  if (state.titleNotice.text && state.time < state.titleNotice.until) {
+    outlinedText(state.titleNotice.text, W / 2, H * IDENTITY_ROW_Y, '#8fe6c4', u, 4);
+  } else {
+    const id = getIdentity();
+    const label = id.mode === 'nostr'
+      ? `RIDING AS  NOSTR · ${id.name}   —   N / TAP FOR GUEST`
+      : `RIDING AS  GUEST · ${id.name}   —   N / TAP FOR NOSTR`;
+    outlinedText(label, W / 2, H * IDENTITY_ROW_Y, '#9fd0ff', u, 4);
+  }
+
+  // score board — alternates between the local best riders and the global
+  // gamestr board (when the fetch has produced one).
+  const showGlobal = state.globalBoard.length > 0 && Math.floor(state.time / 6) % 2 === 1;
   ctx.font = `800 ${17 * u}px 'Trebuchet MS', sans-serif`;
-  outlinedText('BEST RIDERS', W / 2, H * 0.81, '#ffd76b', u, 4);
+  outlinedText(showGlobal ? 'TOP FRENS — GAMESTR' : 'BEST RIDERS', W / 2, H * 0.81, '#ffd76b', u, 4);
   ctx.font = `700 ${16 * u}px 'Trebuchet MS', sans-serif`;
-  board.slice(0, 5).forEach((e, i) => {
-    outlinedText(`${i + 1}.  ${e.name}   ${e.score.toLocaleString('en-GB')}`, W / 2, H * 0.85 + i * 22 * u, '#ffffff', u, 4);
-  });
+  if (showGlobal) {
+    state.globalBoard.slice(0, 5).forEach((e, i) => {
+      outlinedText(`${i + 1}.  ${e.name}   ${e.score.toLocaleString('en-GB')}`, W / 2, H * 0.85 + i * 22 * u, '#ffffff', u, 4);
+    });
+  } else {
+    board.slice(0, 5).forEach((e, i) => {
+      outlinedText(`${i + 1}.  ${e.name}   ${e.score.toLocaleString('en-GB')}`, W / 2, H * 0.85 + i * 22 * u, '#ffffff', u, 4);
+    });
+  }
 }
 
 function renderPaused(): void {
@@ -1297,8 +1477,16 @@ function renderGameOver(_store: SpriteStore): void {
     won ? H * 0.46 : H * 0.44,
   );
 
+  // gamestr publish status (non-qualifying runs publish immediately; a board
+  // run publishes on DONE and the title notice carries the outcome instead).
+  if (state.submitStatus && !state.qualifies) {
+    ctx.font = `700 ${15 * u}px 'Trebuchet MS', sans-serif`;
+    ctx.fillStyle = '#9fd0ff';
+    ctx.fillText(state.submitStatus, W / 2, won ? H * 0.52 : H * 0.5);
+  }
+
   if (state.qualifies) {
-    drawNameEntry(ctx, W, uiScale(), state.nameValue, state.time, nameLayout(W, H, uiScale()));
+    drawNameEntry(ctx, W, uiScale(), state.nameValue, state.time, nameEntryLayout());
   } else {
     const blink = Math.floor(state.time * 2) % 2 === 0;
     if (blink) {
@@ -1388,6 +1576,12 @@ async function boot(): Promise<void> {
     navigator.serviceWorker.register(assetUrl('sw.js')).catch(() => undefined);
   }
   initMusic(MUSIC_URL);
+  // Restore the persisted identity (reconnects a NIP-07 session quietly) and
+  // warm the global gamestr board for the title screen. Both best-effort.
+  void restoreIdentity().catch(() => undefined);
+  void fetchGlobalBoard()
+    .then(entries => { state.globalBoard = entries; })
+    .catch(() => undefined);
   const store = new SpriteStore();
   brandPetrol(store);
   decorateTrack(track, buildSignVariants(store));

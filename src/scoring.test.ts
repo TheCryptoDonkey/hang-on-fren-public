@@ -56,4 +56,24 @@ describe('scoring', () => {
     expect(ev.tags).toContainEqual(['score', String(sum.score)]);
     expect(ev.tags).toContainEqual(['ended_by', 'time']);
   });
+
+  it('carries the gamestr identity/discovery tags when options are given', () => {
+    const s = createScore();
+    addDistance(s, 500, 150);
+    const sum = summarise(s, 30, 'time');
+    const ev = buildScoreEvent(sum, 'abc123', {
+      runId: 'run-1',
+      playerName: 'DNI',
+      playerMode: 'guest',
+      level: 3,
+    });
+    expect(ev.tags).toContainEqual(['d', 'hangonfren:abc123:run-1']);
+    expect(ev.tags).toContainEqual(['p', 'abc123']);
+    expect(ev.tags).toContainEqual(['playerName', 'DNI']);
+    expect(ev.tags).toContainEqual(['playerMode', 'guest']);
+    expect(ev.tags).toContainEqual(['level', '3']);
+    const content = JSON.parse(ev.content) as Record<string, unknown>;
+    expect(content.game).toBe('hangonfren');
+    expect(content.run_id).toBe('run-1');
+  });
 });
