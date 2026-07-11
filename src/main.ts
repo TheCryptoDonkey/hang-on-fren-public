@@ -1600,6 +1600,7 @@ if ((import.meta as { env?: { DEV?: boolean } }).env?.DEV) {
     state,
     player,
     world,
+    track,
     get timer() { return timer; },
     get score() { return score; },
   };

@@ -64,6 +64,15 @@ export interface Segment {
 export interface Track {
   segments: Segment[];
   length: number; // total world length
+  /** Named authored set-pieces, used by tests and the dev visual harness. */
+  features: Record<TrackFeatureName, TrackFeature>;
+}
+
+export type TrackFeatureName = 'billion-bend' | 'blind-summit-west' | 'blind-summit-east';
+
+export interface TrackFeature {
+  startIndex: number;
+  endIndex: number;
 }
 
 function lastY(segments: Segment[]): number {
@@ -106,7 +115,27 @@ function addRoad(
   }
 }
 
-const LEN = { short: 25, medium: 50, long: 100 };
+/** Carry curvature continuously from one authored section into the next. Unlike
+ *  addRoad (which always eases back to straight), this is what lets us build a
+ *  kilometre-long tightening sweeper that snaps directly across into the
+ *  opposite bend without an artificial straight between them. */
+function addTransition(
+  segments: Segment[],
+  length: number,
+  fromCurve: number,
+  toCurve: number,
+  height: number,
+): void {
+  const startY = lastY(segments);
+  const endY = startY + height;
+  for (let i = 0; i < length; i += 1) {
+    const t = (i + 1) / length;
+    const eased = easeInOut(t);
+    addSegment(segments, lerp(fromCurve, toCurve, eased), lerp(startY, endY, eased));
+  }
+}
+
+const LEN = { short: 25, medium: 50, long: 100, epic: 180, ultra: 260 };
 const CURVE = { easy: 2, medium: 4, hard: 6.5, evil: 8.5, hairpin: 11 };
 const HILL = { low: 1100, medium: 3000, high: 6200, huge: 9500 };
 
@@ -120,15 +149,49 @@ const HILL = { low: 1100, medium: 3000, high: 6200, huge: 9500 };
  */
 export function buildTrack(): Track {
   const s: Segment[] = [];
+  const features = {} as Record<TrackFeatureName, TrackFeature>;
+  const markFeature = (name: TrackFeatureName, build: () => void): void => {
+    const startIndex = s.length;
+    build();
+    features[name] = { startIndex, endIndex: s.length - 1 };
+  };
+
   addRoad(s, LEN.short, LEN.medium, LEN.short, 0, 0); // flat start straight
   // gentle warm-up bends
   addRoad(s, LEN.medium, LEN.medium, LEN.medium, CURVE.medium, HILL.low);
   addRoad(s, LEN.medium, LEN.short, LEN.medium, -CURVE.hard, -HILL.low);
+
+  // THE BILLION BEND — more than two kilometres of one continuous set-piece.
+  // A long left starts lazy, keeps tightening until the rider is fully loaded,
+  // hits a hairpin-strength compression, then snaps across into a long right
+  // that only gradually releases. There is no fake recovery straight anywhere.
+  markFeature('billion-bend', () => {
+    addTransition(s, LEN.medium, 0, -CURVE.easy, HILL.low);
+    addTransition(s, LEN.ultra, -CURVE.easy, -CURVE.medium, HILL.medium);
+    addTransition(s, LEN.epic, -CURVE.medium, -CURVE.hard, HILL.low);
+    addTransition(s, LEN.short, -CURVE.hard, -CURVE.hairpin, 0);
+    addTransition(s, LEN.short, -CURVE.hairpin, CURVE.hard, -HILL.low);
+    addTransition(s, LEN.epic, CURVE.hard, CURVE.medium, -HILL.medium);
+    addTransition(s, LEN.ultra, CURVE.medium, CURVE.easy, -HILL.low);
+    addTransition(s, LEN.medium, CURVE.easy, 0, 0);
+  });
+
   // big climb into a long right-hander cresting a huge hill
   addRoad(s, LEN.medium, LEN.long, LEN.medium, CURVE.medium, HILL.huge);
   // long left sweeper plunging back down the far side
   addRoad(s, LEN.medium, LEN.long, LEN.long, -CURVE.hard, -HILL.high);
   addRoad(s, LEN.short, LEN.medium, LEN.short, 0, -HILL.medium); // steep drop-away
+
+  // BLIND SUMMIT WEST — the climb shows only sky. The tight left and most of
+  // the plunge are deliberately over the crown, hidden until the front wheel
+  // gets light at the top.
+  markFeature('blind-summit-west', () => {
+    addRoad(s, LEN.medium, LEN.long, LEN.short, 0, HILL.huge);
+    addTransition(s, LEN.short, 0, -CURVE.hairpin, -HILL.low);
+    addTransition(s, LEN.long, -CURVE.hairpin, -CURVE.hard, -(HILL.huge - HILL.low));
+    addTransition(s, LEN.medium, -CURVE.hard, 0, 0);
+  });
+
   // THE SNAKE — hard esses flicking left-right-left with NO recovery straights:
   // each bend hands straight into the next, so the bike is always loaded up.
   addRoad(s, LEN.medium, LEN.short, LEN.short, CURVE.hard, HILL.low);
@@ -141,6 +204,16 @@ export function buildTrack(): Track {
   // climb to a second crest, then a long downhill right sweeper
   addRoad(s, LEN.medium, LEN.long, LEN.medium, -CURVE.medium, HILL.high);
   addRoad(s, LEN.medium, LEN.long, LEN.long, CURVE.hard, -HILL.high);
+
+  // BLIND SUMMIT EAST — a second skyline trap with the opposite turn direction,
+  // so learning the first crest does not make every summit predictable.
+  markFeature('blind-summit-east', () => {
+    addRoad(s, LEN.medium, LEN.long, LEN.medium, CURVE.easy, HILL.high);
+    addTransition(s, LEN.short, 0, CURVE.hairpin, -HILL.low);
+    addTransition(s, LEN.long, CURVE.hairpin, CURVE.medium, -(HILL.high - HILL.low));
+    addTransition(s, LEN.medium, CURVE.medium, 0, 0);
+  });
+
   // THE TRAP — a deceptive double-apex right: it eases mid-corner just long
   // enough to tempt you back onto the throttle, then tightens again.
   addRoad(s, LEN.medium, LEN.short, LEN.short, CURVE.evil, HILL.low);
@@ -166,7 +239,7 @@ export function buildTrack(): Track {
   const residual = lastY(s);
   if (Math.abs(residual) > 0.5) addRoad(s, LEN.medium, LEN.short, LEN.medium, 0, -residual);
 
-  return { segments: s, length: s.length * ROAD.segmentLength };
+  return { segments: s, length: s.length * ROAD.segmentLength, features };
 }
 
 /**
@@ -186,9 +259,23 @@ export function decorateTrack(track: Track, signNames: readonly string[], billbo
     if (i % 31 === 0) seg.scenery.push({ name: 'slot:landmark', offset: -(2.9 + rng() * 1.3), scale: 1 });
     if (i % 17 === 8) seg.scenery.push({ name: 'slot:accent', offset: (rng() < 0.5 ? -1 : 1) * (1.5 + rng() * 0.55), scale: 1 });
     if (i % 47 === 11 && signNames.length) seg.scenery.push({ name: pick(rng, signNames), offset: 1.7 + rng() * 0.25, scale: 1 });
-    // The big 600B meme hoardings — rarer than the small signs so each one
-    // stays an event, set back further because the panel is huge.
-    if (i % 73 === 37 && billboardNames.length) seg.scenery.push({ name: pick(rng, billboardNames), offset: (rng() < 0.5 ? -1 : 1) * (2.1 + rng() * 0.4), scale: 1 });
+  }
+
+  // The big 600B meme hoardings get a short clear sight-line on both sides.
+  // Without this second pass, nearer trees/signs frequently covered the punchline
+  // during the one second the rider was close enough to read it.
+  if (billboardNames.length) {
+    for (let i = 97; i < track.segments.length; i += 211) {
+      for (let d = -20; d <= 20; d += 1) {
+        const clearIndex = (i + d + track.segments.length) % track.segments.length;
+        track.segments[clearIndex].scenery = [];
+      }
+      track.segments[i].scenery.push({
+        name: pick(rng, billboardNames),
+        offset: (rng() < 0.5 ? -1 : 1) * (2.1 + rng() * 0.4),
+        scale: 1,
+      });
+    }
   }
 }
 

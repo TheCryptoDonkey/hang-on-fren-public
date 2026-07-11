@@ -217,17 +217,40 @@ const BILLBOARD_FACE = { x: 16, y: 14, w: 348, h: 176 } as const;
 
 function fallbackBillboard(): SpriteImage {
   return bake(380, 300, ctx => {
-    // legs + cross brace
-    ctx.fillStyle = '#5a4632';
-    ctx.fillRect(58, 196, 18, 104);
-    ctx.fillRect(304, 196, 18, 104);
-    ctx.fillRect(58, 238, 264, 10);
-    // panel frame and dark face
-    ctx.fillStyle = '#26333d';
-    ctx.fillRect(6, 4, 368, 196);
+    // steel legs + cross braces — deliberately chunky so the hoarding remains
+    // grounded and readable when it flashes past at speed.
+    ctx.fillStyle = '#343c43';
+    ctx.fillRect(54, 194, 22, 106);
+    ctx.fillRect(304, 194, 22, 106);
+    ctx.fillStyle = '#56616a';
+    ctx.fillRect(60, 194, 6, 106);
+    ctx.fillRect(310, 194, 6, 106);
+    ctx.save();
+    ctx.translate(64, 246);
+    ctx.rotate(-0.18);
+    ctx.fillRect(0, -5, 252, 10);
+    ctx.restore();
+    // deep gold-edged cabinet frame and inset face.
+    ctx.fillStyle = '#111820';
+    ctx.fillRect(4, 2, 372, 202);
+    ctx.fillStyle = '#d89b32';
+    ctx.fillRect(8, 6, 364, 194);
+    ctx.fillStyle = '#25313a';
+    ctx.fillRect(12, 10, 356, 186);
     ctx.fillStyle = '#0b1620';
     const f = BILLBOARD_FACE;
     ctx.fillRect(f.x, f.y, f.w, f.h);
+    // marquee bulbs survive down-scaling better than another hairline border.
+    for (let i = 0; i < 12; i += 1) {
+      const x = 22 + i * 30;
+      ctx.fillStyle = i % 2 ? '#ff5a42' : '#ffd76b';
+      ctx.beginPath();
+      ctx.arc(x, 9, 3, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(x, 195, 3, 0, Math.PI * 2);
+      ctx.fill();
+    }
   });
 }
 
@@ -980,6 +1003,9 @@ const ART_URLS: Record<string, string> = {
   // Raw sticker art for the rose-meme billboard; composited onto the hoarding
   // by buildBillboardVariants, never drawn directly.
   'billboard-rose-art': assetUrl('art/billboard-rose.png'),
+  // Bespoke wide arcade-poster face: a donkey demolishing an absurdly lavish
+  // cake. Text is composited in code so the meme stays perfectly legible.
+  'billboard-donkey-cake-art': assetUrl('art/billboard-donkey-cake.webp'),
   rose: assetUrl('pickups/600b/rose.png'),
   'pickup-petrol': assetUrl('art/pickup-petrol.png'),
   'pickup-shield': assetUrl('art/pickup-shield.png'),
@@ -1032,7 +1058,7 @@ export const SIGN_TEXTS = ['600.wtf', '4.20 AM', 'GM'] as const;
 
 // Big-billboard texts — the 600 000 000 000 meme lore, writ large. The digits
 // stack four rows deep, like the neon sign in the sticker art.
-export const BILLBOARD_TEXTS = ['WE ARE\nNOT A CULT', '600\n000\n000\n000'] as const;
+export const BILLBOARD_TEXTS = ['WE ARE\nNOT A CULT', '600\nBILLION', 'LET THEM EAT\n600 BILLION'] as const;
 
 function drawFittedText(ctx: CanvasRenderingContext2D, lines: string[], cx: number, cy: number, maxW: number, maxH: number): void {
   const lineCount = lines.length;
@@ -1046,6 +1072,31 @@ function drawFittedText(ctx: CanvasRenderingContext2D, lines: string[], cx: numb
   const lh = size * 1.05;
   const startY = cy - ((lineCount - 1) * lh) / 2;
   lines.forEach((l, i) => ctx.fillText(l, cx, startY + i * lh));
+}
+
+function drawImageCover(
+  ctx: CanvasRenderingContext2D,
+  art: SpriteImage,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+): void {
+  const scale = Math.max(w / art.w, h / art.h);
+  const sw = w / scale;
+  const sh = h / scale;
+  const sx = (art.w - sw) / 2;
+  const sy = (art.h - sh) / 2;
+  ctx.drawImage(art.canvas, sx, sy, sw, sh, x, y, w, h);
+}
+
+function billboardFaceGradient(ctx: CanvasRenderingContext2D, top: string, bottom: string): void {
+  const f = BILLBOARD_FACE;
+  const g = ctx.createLinearGradient(f.x, f.y, f.x, f.y + f.h);
+  g.addColorStop(0, top);
+  g.addColorStop(1, bottom);
+  ctx.fillStyle = g;
+  ctx.fillRect(f.x, f.y, f.w, f.h);
 }
 
 /** Build sign-N variants by drawing each in-joke onto the billboard sprite. */
@@ -1084,8 +1135,9 @@ export function buildSignVariants(store: SpriteStore): string[] {
 }
 
 /**
- * Build billboard-N variants: meme texts in glowing capitals, plus — once its
- * art has loaded — the "THANKS FOR BUYING ROSE!" sticker on its own hoarding.
+ * Build billboard variants as proper one-glance arcade posters rather than text
+ * floating on black: strong colour fields, giant type, simple meme imagery and
+ * — once loaded — two bespoke illustrated faces.
  */
 export function buildBillboardVariants(store: SpriteStore): string[] {
   const base = store.get('prop-billboard');
@@ -1099,22 +1151,101 @@ export function buildBillboardVariants(store: SpriteStore): string[] {
     store.set(name, { canvas, w: base.w, h: base.h });
     names.push(name);
   };
-  BILLBOARD_TEXTS.forEach((text, i) => {
-    make(`billboard-${i}`, ctx => {
-      ctx.fillStyle = '#ffd76b';
-      ctx.shadowColor = '#ff8c3b';
-      ctx.shadowBlur = 16;
-      drawFittedText(ctx, text.split('\n'), f.x + f.w / 2, f.y + f.h / 2, f.w * 0.9, f.h * 0.92);
+  // Cult disclaimer: red warning-stripe energy with a deliberately ridiculous
+  // halo/rose seal. The joke is readable before the small details are.
+  make('billboard-not-a-cult', ctx => {
+    billboardFaceGradient(ctx, '#251035', '#090d18');
+    ctx.save();
+    ctx.translate(f.x + f.w * 0.2, f.y + f.h * 0.5);
+    ctx.strokeStyle = '#ff4d6d';
+    ctx.lineWidth = 8;
+    ctx.beginPath();
+    ctx.arc(0, 0, f.h * 0.31, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.fillStyle = '#e52d53';
+    for (let i = 0; i < 10; i += 1) {
+      ctx.rotate(Math.PI * 2 / 10);
+      ctx.beginPath();
+      ctx.ellipse(0, -f.h * 0.19, f.h * 0.08, f.h * 0.18, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.fillStyle = '#ffd76b';
+    ctx.beginPath();
+    ctx.arc(0, 0, f.h * 0.09, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+    ctx.fillStyle = '#fff4d6';
+    ctx.shadowColor = '#ff4d6d';
+    ctx.shadowBlur = 12;
+    drawFittedText(ctx, BILLBOARD_TEXTS[0].split('\n'), f.x + f.w * 0.66, f.y + f.h * 0.5, f.w * 0.57, f.h * 0.68);
+    ctx.shadowBlur = 0;
+  });
+
+  // The number itself gets a premium banknote / market-ticker treatment instead
+  // of four cramped rows of digits.
+  make('billboard-600-billion', ctx => {
+    billboardFaceGradient(ctx, '#062b30', '#07131c');
+    ctx.strokeStyle = 'rgba(143,230,196,0.24)';
+    ctx.lineWidth = 2;
+    for (let x = f.x - f.h; x < f.x + f.w + f.h; x += 24) {
+      ctx.beginPath();
+      ctx.moveTo(x, f.y + f.h);
+      ctx.lineTo(x + f.h, f.y);
+      ctx.stroke();
+    }
+    ctx.fillStyle = '#8fe6c4';
+    ctx.font = `900 ${f.h * 0.67}px 'Trebuchet MS', sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.shadowColor = '#16d6af';
+    ctx.shadowBlur = 14;
+    ctx.fillText('600', f.x + f.w * 0.31, f.y + f.h * 0.49);
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = '#ffd76b';
+    drawFittedText(ctx, ['BILLION'], f.x + f.w * 0.72, f.y + f.h * 0.46, f.w * 0.48, f.h * 0.42);
+    ctx.fillStyle = '#ffffff';
+    ctx.font = `800 ${f.h * 0.105}px 'Trebuchet MS', sans-serif`;
+    ctx.fillText('STILL NOT ENOUGH CAKE', f.x + f.w * 0.69, f.y + f.h * 0.77);
+  });
+
+  const donkeyCake = store.get('billboard-donkey-cake-art');
+  if (donkeyCake) {
+    make('billboard-donkey-cake', ctx => {
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(f.x, f.y, f.w, f.h);
+      ctx.clip();
+      drawImageCover(ctx, donkeyCake, f.x, f.y, f.w, f.h);
+      const shade = ctx.createLinearGradient(f.x, f.y + f.h * 0.52, f.x, f.y + f.h);
+      shade.addColorStop(0, 'rgba(0,0,0,0)');
+      shade.addColorStop(1, 'rgba(0,0,0,0.88)');
+      ctx.fillStyle = shade;
+      ctx.fillRect(f.x, f.y, f.w, f.h);
+      ctx.restore();
+      ctx.fillStyle = '#fff4d6';
+      ctx.shadowColor = '#000000';
+      ctx.shadowBlur = 8;
+      drawFittedText(ctx, BILLBOARD_TEXTS[2].split('\n'), f.x + f.w / 2, f.y + f.h * 0.79, f.w * 0.9, f.h * 0.3);
       ctx.shadowBlur = 0;
     });
-  });
+  }
+
   const art = store.get('billboard-rose-art');
   if (art) {
     make('billboard-rose', ctx => {
-      const s = Math.min(f.w / art.w, f.h / art.h) * 0.97;
-      const dw = art.w * s;
-      const dh = art.h * s;
-      ctx.drawImage(art.canvas, f.x + (f.w - dw) / 2, f.y + (f.h - dh) / 2, dw, dh);
+      billboardFaceGradient(ctx, '#1d0b0b', '#070a0d');
+      const side = f.h * 0.9;
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(f.x + 4, f.y + 4, side, f.h - 8);
+      ctx.clip();
+      drawImageCover(ctx, art, f.x + 4, f.y + 4, side, f.h - 8);
+      ctx.restore();
+      ctx.fillStyle = '#ff5d78';
+      ctx.shadowColor = '#ff3b30';
+      ctx.shadowBlur = 12;
+      drawFittedText(ctx, ['THANKS', 'FOR BUYING', 'ROSE!'], f.x + f.w * 0.72, f.y + f.h * 0.5, f.w * 0.48, f.h * 0.68);
+      ctx.shadowBlur = 0;
     });
   }
   return names;

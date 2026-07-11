@@ -5,6 +5,7 @@
 // be unit-tested with the rest of the suite.
 
 import { GAME_ID } from '../src/scoring.js';
+import { FINISH_M } from '../src/stages.js';
 
 /** Milliseconds a finished run may lag before a claim is refused. Generous —
  *  a board run only submits after the callsign is typed. */
@@ -12,8 +13,9 @@ export const STALE_RUN_MS = 10 * 60 * 1000;
 export const FUTURE_SLACK_MS = 60 * 1000;
 /** The clock economy makes multi-hour runs impossible; an hour is generous. */
 export const MAX_DURATION_S = 60 * 60;
-/** Ten 2000 m stages + slack for the final frame past the line. */
-export const MAX_DISTANCE_M = 21_000;
+/** The shared finish distance + slack for the final integrator frame. Keeping
+ *  this derived prevents a longer client journey from being rejected here. */
+export const MAX_DISTANCE_M = FINISH_M + 1_000;
 /** Top speed is 260 km/h ≈ 72 m/s; 80 m/s allows integrator slack. */
 export const MAX_SPEED_M_PER_S = 80;
 
@@ -80,7 +82,7 @@ export function parseClaim(body: unknown, now = Date.now()): ParseResult {
   }
 
   // Racer physics: you cannot cover ground faster than the bike's top speed,
-  // and the journey is a fixed 20 km.
+  // and distance cannot meaningfully exceed the shared finish line.
   if (claim.distance_m > MAX_DISTANCE_M) return { ok: false, status: 422, error: 'implausible_distance' };
   if (claim.distance_m > claim.duration_s * MAX_SPEED_M_PER_S) {
     return { ok: false, status: 422, error: 'implausible_distance' };

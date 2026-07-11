@@ -3,6 +3,10 @@
 A browser arcade racer built with Vite, TypeScript, Canvas2D, generated art, and
 local-only high scores.
 
+The main run is a 42 km grand tour through ten 4.2 km regions. Its 10.4 km road
+loop includes two blind-summit traps and the two-kilometre Billion Bend: a long
+tightening left that snaps through a hard transition into a long right.
+
 ## Development
 
 ```sh

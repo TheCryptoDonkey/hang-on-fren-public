@@ -26,7 +26,8 @@ describe('stages: ten finite levels', () => {
 
   it('puts the finish line at ten legs of road', () => {
     expect(FINISH_M).toBe(LEVELS * STAGE_M);
-    expect(FINISH_M).toBe(20000);
+    expect(STAGE_M).toBe(4200);
+    expect(FINISH_M).toBe(42000);
   });
 
   it('gives sampled regions their own car roster', () => {
@@ -40,6 +41,8 @@ describe('stages: ten finite levels', () => {
     expect(sceneryKitAt(held(1)).landmark).toBe('prop-beachhut');
     expect(sceneryKitAt(held(3)).trees).toContain('prop-cactus');
     expect(sceneryKitAt(held(4)).landmark).toBe('prop-skyscraper');
+    expect(sceneryKitAt(held(4)).trees).toContain('prop-lamp');
+    expect(sceneryKitAt(held(4)).trees).toContain('prop-neon');
     expect(sceneryKitAt(held(5)).trees).toContain('prop-blossom');
     expect(sceneryKitAt(held(8)).landmark).toBe('prop-lavarock');
     // Finale reuses the Amalfi kit for the run home.

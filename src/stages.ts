@@ -44,15 +44,15 @@ export interface Stage {
 
 /** How many levels/regions the journey is made of. */
 export const LEVELS = 10;
-/** Metres of road per stage / between checkpoints. Stretched from the original
- *  1600 — longer legs mean each checkpoint has to be EARNED, and the nasty
- *  mid-track geometry (the snake / trap / corkscrew) comes round more often
- *  per region. */
-export const STAGE_M = 2000;
+/** Metres of road per stage / between checkpoints. 4.2 km turns the ten-region
+ *  trip into a proper 42 km grand tour (and keeps the game's 4.20 / 42 lore),
+ *  long enough for each biome and its road features to establish a rhythm. */
+export const STAGE_M = 4200;
 /** Distance at which the finish line sits — completing the tenth level wins. */
 export const FINISH_M = LEVELS * STAGE_M;
-/** Seconds granted when the rider crosses into a new stage (OutRun checkpoint). */
-export const CHECKPOINT_BONUS = 15;
+/** Seconds granted when the rider crosses into a new stage (OutRun checkpoint).
+ *  The longer 4.2 km legs earn a full petrol-can-sized top-up. */
+export const CHECKPOINT_BONUS = 21;
 /** Fraction of a leg (measured from its end) over which the biome morphs into
  *  the next one. The biome is held for the rest of the leg so each region reads
  *  as its own distinct place, with the change happening on the run into the
@@ -236,8 +236,9 @@ const SCENERY_KITS: readonly SceneryKit[] = [
   { trees: ['prop-fir'], accent: 'prop-lamp', landmark: 'prop-chalet' },
   // 4 DESERT MESA — saguaro cacti, adobe pueblo.
   { trees: ['prop-cactus'], accent: 'prop-cactus', landmark: 'prop-adobe' },
-  // 5 NEON CITY — neon pylons, street lamps, skyscraper.
-  { trees: ['prop-neon'], accent: 'prop-lamp', landmark: 'prop-skyscraper' },
+  // 5 NEON CITY — mostly lamps with occasional arcade pylons, so the skyline
+  // and billboards stay visible instead of becoming a wall of repeated signs.
+  { trees: ['prop-lamp', 'prop-lamp', 'prop-neon'], accent: 'prop-lamp', landmark: 'prop-skyscraper' },
   // 6 CHERRY VALLEY — cherry blossom, flower verges, pagoda.
   { trees: ['prop-blossom'], accent: 'prop-flowers', landmark: 'prop-pagoda' },
   // 7 AUTUMN FOREST — autumn maples, flower verges, red barn.
@@ -354,7 +355,8 @@ export const DEFAULT_PALETTE = RIVIERA;
 const BIOME_NAMES = [
   'riviera', 'beach', 'alpine', 'desert', 'city', 'valley', 'autumn', 'lake', 'volcano', 'finale',
 ] as const;
-export type TimeOfDay = { a: string; b: string; t: number };
+export type BiomeBackdrop = typeof BIOME_NAMES[number];
+export type TimeOfDay = { a: BiomeBackdrop; b: BiomeBackdrop; t: number };
 
 /** The two horizon backdrops to crossfade at a distance, and the blend 0..1 —
  *  the same leg schedule as `paletteAt`, so art and colour turn over together. */

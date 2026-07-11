@@ -8,7 +8,7 @@ import type { Track, Player, Segment } from './road.js';
 import type { World } from './world.js';
 import { signedForward } from './world.js';
 import type { SpriteStore, SpriteImage } from './sprites.js';
-import { DEFAULT_PALETTE, resolveScenerySprite, type Palette, type SceneryKit, type TimeOfDay } from './stages.js';
+import { DEFAULT_PALETTE, resolveScenerySprite, type BiomeBackdrop, type Palette, type SceneryKit, type TimeOfDay } from './stages.js';
 import { spriteWorldWidth } from './geometry.js';
 import { drawRider } from './rider.js';
 import { clamp, lerp, wrap } from './util.js';
@@ -115,6 +115,300 @@ function drawHorizonArt(
   draw(b, tod?.t ?? 0);
   ctx.globalAlpha = 1;
   return true;
+}
+
+// ---- layered biome parallax ------------------------------------------------
+
+function firstTiledIndex(shift: number, step: number): number {
+  return Math.floor(-shift / step) - 2;
+}
+
+function drawRidgeLayer(
+  ctx: CanvasRenderingContext2D,
+  w: number,
+  baseY: number,
+  amp: number,
+  step: number,
+  shift: number,
+  seed: number,
+  colour: string,
+  jagged = 0.35,
+): void {
+  const first = firstTiledIndex(shift, step);
+  const last = Math.ceil((w - shift) / step) + 2;
+  ctx.fillStyle = colour;
+  ctx.beginPath();
+  ctx.moveTo(0, baseY + 2);
+  for (let i = first; i <= last; i += 1) {
+    const x = i * step + shift;
+    const rolling = 0.45 + 0.25 * Math.sin(i * 1.17 + seed);
+    const detail = (hash(i * 2.71 + seed) - 0.5) * jagged;
+    ctx.lineTo(x, baseY - amp * clamp(rolling + detail, 0.15, 1));
+  }
+  ctx.lineTo(w, baseY + 2);
+  ctx.closePath();
+  ctx.fill();
+}
+
+function drawAlpineLayer(ctx: CanvasRenderingContext2D, w: number, horizon: number, shift: number, palette: Palette): void {
+  const step = w * 0.115;
+  const first = firstTiledIndex(shift, step);
+  const last = Math.ceil((w - shift) / step) + 2;
+  for (let i = first; i <= last; i += 1) {
+    const x = i * step + shift;
+    const peakH = step * (0.72 + hash(i * 4.1 + 8) * 0.58);
+    ctx.fillStyle = mix(palette.hillsNear, '#243b52', 0.34);
+    ctx.beginPath();
+    ctx.moveTo(x - step * 0.72, horizon + 2);
+    ctx.lineTo(x, horizon - peakH);
+    ctx.lineTo(x + step * 0.72, horizon + 2);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = mix('#f7fbff', palette.skyHorizon, 0.3);
+    ctx.beginPath();
+    ctx.moveTo(x, horizon - peakH);
+    ctx.lineTo(x - step * 0.2, horizon - peakH * 0.65);
+    ctx.lineTo(x, horizon - peakH * 0.72);
+    ctx.lineTo(x + step * 0.18, horizon - peakH * 0.62);
+    ctx.closePath();
+    ctx.fill();
+  }
+}
+
+function drawMesaLayer(ctx: CanvasRenderingContext2D, w: number, horizon: number, shift: number, palette: Palette): void {
+  const step = w * 0.19;
+  const first = firstTiledIndex(shift, step);
+  const last = Math.ceil((w - shift) / step) + 2;
+  for (let i = first; i <= last; i += 1) {
+    const x = i * step + shift;
+    const height = step * (0.22 + hash(i * 5.3 + 2) * 0.22);
+    const topW = step * (0.22 + hash(i * 3.9 + 4) * 0.25);
+    ctx.fillStyle = mix(palette.hillsNear, '#71351f', 0.25);
+    ctx.beginPath();
+    ctx.moveTo(x - step * 0.5, horizon + 2);
+    ctx.lineTo(x - topW * 0.72, horizon - height * 0.45);
+    ctx.lineTo(x - topW / 2, horizon - height);
+    ctx.lineTo(x + topW / 2, horizon - height);
+    ctx.lineTo(x + topW * 0.72, horizon - height * 0.45);
+    ctx.lineTo(x + step * 0.5, horizon + 2);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = rgba('#ffe0a8', 0.17);
+    ctx.fillRect(x - topW / 2, horizon - height, topW, Math.max(2, height * 0.08));
+  }
+}
+
+function drawCityLayer(ctx: CanvasRenderingContext2D, w: number, horizon: number, shift: number, palette: Palette): void {
+  const step = Math.max(24, w * 0.035);
+  const first = firstTiledIndex(shift, step);
+  const last = Math.ceil((w - shift) / step) + 2;
+  for (let i = first; i <= last; i += 1) {
+    const x = i * step + shift;
+    const bw = step * (0.58 + hash(i * 7.1) * 0.34);
+    const bh = step * (1.2 + hash(i * 4.7 + 2) * 2.6);
+    ctx.fillStyle = i % 3 === 0 ? '#151d38' : mix(palette.hillsNear, '#080d22', 0.62);
+    ctx.fillRect(x - bw / 2, horizon - bh, bw, bh + 2);
+    const cols = Math.max(1, Math.floor(bw / 10));
+    const rows = Math.max(2, Math.floor(bh / 13));
+    for (let cy = 0; cy < rows; cy += 1) {
+      for (let cx = 0; cx < cols; cx += 1) {
+        if (hash(i * 47 + cx * 5 + cy * 13) < 0.48) continue;
+        ctx.fillStyle = (i + cx + cy) % 3 === 0 ? '#ff5dba' : '#46d9ff';
+        ctx.globalAlpha *= 0.7;
+        ctx.fillRect(x - bw * 0.36 + cx * (bw * 0.72 / cols), horizon - bh * 0.88 + cy * (bh * 0.72 / rows), Math.max(1, bw * 0.055), 2);
+        ctx.globalAlpha /= 0.7;
+      }
+    }
+  }
+}
+
+function drawTreeLine(ctx: CanvasRenderingContext2D, w: number, horizon: number, shift: number, palette: Palette, autumn: boolean): void {
+  const step = Math.max(20, w * 0.028);
+  const first = firstTiledIndex(shift, step);
+  const last = Math.ceil((w - shift) / step) + 2;
+  const colours = autumn
+    ? ['#8d3c24', '#bf642d', '#d99632', '#74402b']
+    : [mix(palette.hillsNear, '#1f5a36', 0.35), '#4f9360', '#d67aa0'];
+  for (let i = first; i <= last; i += 1) {
+    const x = i * step + shift;
+    const r = step * (0.55 + hash(i * 3.3 + 1) * 0.35);
+    ctx.fillStyle = colours[Math.abs(i) % colours.length];
+    ctx.beginPath();
+    ctx.arc(x, horizon - r * 0.6, r, 0, Math.PI * 2);
+    ctx.fill();
+    if (!autumn && i % 4 === 0) {
+      ctx.fillStyle = '#ffd1e0';
+      ctx.beginPath();
+      ctx.arc(x - r * 0.2, horizon - r * 0.8, r * 0.15, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+}
+
+function drawCoastLayer(ctx: CanvasRenderingContext2D, w: number, h: number, horizon: number, shift: number, palette: Palette, golden: boolean): void {
+  drawRidgeLayer(ctx, w, horizon + 2, h * 0.095, w * 0.075, shift, 22, mix(palette.hillsNear, '#355b45', 0.24), 0.5);
+  const step = Math.max(28, w * 0.04);
+  const first = firstTiledIndex(shift * 1.16, step);
+  const last = Math.ceil((w - shift * 1.16) / step) + 2;
+  const walls = golden ? ['#ffe5a4', '#e9a866', '#f2c27d'] : ['#f4d9b0', '#e8b89a', '#e6a4a0'];
+  for (let i = first; i <= last; i += 1) {
+    if (hash(i * 9.7 + 5) < 0.42) continue;
+    const x = i * step + shift * 1.16;
+    const bw = step * 0.55;
+    const bh = step * (0.35 + hash(i * 4.6) * 0.45);
+    ctx.fillStyle = walls[Math.abs(i) % walls.length];
+    ctx.fillRect(x - bw / 2, horizon - bh, bw, bh);
+    ctx.fillStyle = '#bd5b3f';
+    ctx.beginPath();
+    ctx.moveTo(x - bw * 0.62, horizon - bh);
+    ctx.lineTo(x, horizon - bh - bw * 0.22);
+    ctx.lineTo(x + bw * 0.62, horizon - bh);
+    ctx.closePath();
+    ctx.fill();
+  }
+}
+
+function drawIslandLayer(ctx: CanvasRenderingContext2D, w: number, h: number, horizon: number, shift: number, palette: Palette, reeds: boolean): void {
+  drawRidgeLayer(ctx, w, horizon + 2, h * (reeds ? 0.045 : 0.075), w * 0.11, shift, reeds ? 41 : 31, mix(palette.hillsNear, palette.sea, 0.24), 0.55);
+  const step = Math.max(22, w * 0.035);
+  const first = firstTiledIndex(shift * 1.25, step);
+  const last = Math.ceil((w - shift * 1.25) / step) + 2;
+  ctx.strokeStyle = reeds ? '#65756f' : '#286b47';
+  ctx.lineWidth = Math.max(1, w * 0.0018);
+  for (let i = first; i <= last; i += 1) {
+    if (i % (reeds ? 2 : 5) !== 0) continue;
+    const x = i * step + shift * 1.25;
+    const height = step * (reeds ? 0.7 : 1.35);
+    ctx.beginPath();
+    ctx.moveTo(x, horizon + 2);
+    ctx.quadraticCurveTo(x - step * 0.2, horizon - height * 0.55, x + step * 0.05, horizon - height);
+    ctx.stroke();
+    if (!reeds) {
+      ctx.fillStyle = '#2d8053';
+      for (let j = 0; j < 5; j += 1) {
+        ctx.save();
+        ctx.translate(x + step * 0.05, horizon - height);
+        ctx.rotate((j - 2) * 0.55);
+        ctx.beginPath();
+        ctx.ellipse(0, -step * 0.26, step * 0.09, step * 0.34, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
+    }
+  }
+}
+
+function drawVolcanoLayer(ctx: CanvasRenderingContext2D, w: number, h: number, horizon: number, shift: number, palette: Palette): void {
+  drawRidgeLayer(ctx, w, horizon + 2, h * 0.14, w * 0.095, shift, 73, mix(palette.hillsNear, '#12090c', 0.55), 1);
+  const cx = w * 0.68 + shift * 0.42;
+  const peakY = horizon - h * 0.18;
+  ctx.fillStyle = '#211014';
+  ctx.beginPath();
+  ctx.moveTo(cx - w * 0.16, horizon + 2);
+  ctx.lineTo(cx - w * 0.035, peakY + h * 0.02);
+  ctx.lineTo(cx + w * 0.018, peakY);
+  ctx.lineTo(cx + w * 0.16, horizon + 2);
+  ctx.closePath();
+  ctx.fill();
+  const glow = ctx.createRadialGradient(cx, peakY, 0, cx, peakY, h * 0.11);
+  glow.addColorStop(0, 'rgba(255,104,38,0.68)');
+  glow.addColorStop(1, 'rgba(255,64,18,0)');
+  ctx.fillStyle = glow;
+  ctx.fillRect(cx - h * 0.11, peakY - h * 0.11, h * 0.22, h * 0.22);
+}
+
+function drawBiomeLayer(
+  ctx: CanvasRenderingContext2D,
+  w: number,
+  h: number,
+  horizon: number,
+  shift: number,
+  biome: BiomeBackdrop,
+  palette: Palette,
+  alpha: number,
+): void {
+  if (alpha <= 0) return;
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  switch (biome) {
+    case 'riviera': drawCoastLayer(ctx, w, h, horizon, shift, palette, false); break;
+    case 'finale': drawCoastLayer(ctx, w, h, horizon, shift, palette, true); break;
+    case 'beach': drawIslandLayer(ctx, w, h, horizon, shift, palette, false); break;
+    case 'alpine': drawAlpineLayer(ctx, w, horizon, shift, palette); break;
+    case 'desert': drawMesaLayer(ctx, w, horizon, shift, palette); break;
+    case 'city': drawCityLayer(ctx, w, horizon, shift, palette); break;
+    case 'valley': drawTreeLine(ctx, w, horizon, shift, palette, false); break;
+    case 'autumn': drawTreeLine(ctx, w, horizon, shift, palette, true); break;
+    case 'lake': drawIslandLayer(ctx, w, h, horizon, shift, palette, true); break;
+    case 'volcano': drawVolcanoLayer(ctx, w, h, horizon, shift, palette); break;
+  }
+  ctx.restore();
+}
+
+function biomeLayerOpacity(biome: BiomeBackdrop): number {
+  switch (biome) {
+    case 'city': return 0.68; // dark hard-edged buildings tolerate more presence
+    case 'volcano': return 0.6;
+    case 'autumn': return 0.52;
+    case 'valley': return 0.46;
+    case 'desert': return 0.46;
+    case 'beach': return 0.42;
+    case 'lake': return 0.38;
+    case 'riviera': return 0.38;
+    case 'finale': return 0.42;
+    case 'alpine': return 0.3; // generated art already contains strong peaks
+  }
+}
+
+/** Add two transparent, independently moving detail planes over the flattened
+ * panorama. The image remains the far world; a hazy ridge moves a little faster,
+ * and the biome silhouette faster again. Curves and rider lean now produce a
+ * depth cue instead of sliding one giant photograph sideways. */
+function drawParallaxDetails(
+  ctx: CanvasRenderingContext2D,
+  w: number,
+  h: number,
+  horizon: number,
+  curveShift: number,
+  tod: TimeOfDay | undefined,
+  palette: Palette,
+): void {
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(0, Math.max(0, horizon - h * 0.31), w, h * 0.32 + 4);
+  ctx.clip();
+
+  // Hazy middle-distance ridge: deliberately subtle so it reads as atmosphere,
+  // not a cardboard cut-out laid over the generated panorama.
+  ctx.globalAlpha = 0.3;
+  drawRidgeLayer(
+    ctx,
+    w,
+    horizon + 2,
+    h * 0.085,
+    w * 0.085,
+    -curveShift * 0.58,
+    13,
+    mix(palette.hillsFar, palette.skyHorizon, 0.34),
+    0.5,
+  );
+  ctx.globalAlpha = 1;
+
+  const a = tod?.a ?? 'riviera';
+  const b = tod?.b ?? a;
+  const t = tod?.t ?? 0;
+  const aAlpha = biomeLayerOpacity(a);
+  const bAlpha = biomeLayerOpacity(b);
+  drawBiomeLayer(ctx, w, h, horizon, -curveShift * 1.02, a, palette, b === a ? aAlpha : aAlpha * (1 - t));
+  if (b !== a) drawBiomeLayer(ctx, w, h, horizon, -curveShift * 1.02, b, palette, bAlpha * t);
+
+  // Atmospheric seam binds the artwork, silhouette and projected road together.
+  const haze = ctx.createLinearGradient(0, horizon - h * 0.055, 0, horizon + 2);
+  haze.addColorStop(0, rgba(palette.fog, 0));
+  haze.addColorStop(1, rgba(palette.fog, 0.42));
+  ctx.fillStyle = haze;
+  ctx.fillRect(0, horizon - h * 0.055, w, h * 0.06);
+  ctx.restore();
 }
 
 /**
@@ -396,9 +690,11 @@ export function renderScene(scene: Scene): void {
   // Primary path: the gpt-image Amalfi horizon backdrops, crossfaded by time of
   // day and scrolled for parallax. Falls back to the code-drawn seascape only if
   // the backdrop art isn't loaded.
-  if (!drawHorizonArt(ctx, width, horizon, x * 0.02, store, scene.timeOfDay, palette)) {
-    drawBackground(ctx, width, height, horizon, x * 0.02, palette, scene.time);
+  const horizonShift = x * 0.02 + player.x * width * 0.08;
+  if (!drawHorizonArt(ctx, width, horizon, horizonShift, store, scene.timeOfDay, palette)) {
+    drawBackground(ctx, width, height, horizon, horizonShift, palette, scene.time);
   }
+  drawParallaxDetails(ctx, width, height, horizon, horizonShift, scene.timeOfDay, palette);
 
   // Road, far to near so nearer segments overwrite fog on farther ones.
   for (let i = drawn.length - 1; i >= 0; i -= 1) {

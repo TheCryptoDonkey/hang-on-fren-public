@@ -54,7 +54,18 @@ describe('claim-rules', () => {
   it('rejects physically impossible distance', () => {
     // 8 km in 60 s is 133 m/s — nearly double the bike's top speed.
     expect(parseClaim(validClaim({ duration_s: 60, started_at: NOW - 70_000 }), NOW)).toMatchObject({ ok: false, error: 'implausible_distance' });
-    expect(parseClaim(validClaim({ distance_m: 25_000, duration_s: 600, started_at: NOW - 700_000 }), NOW)).toMatchObject({ ok: false, error: 'implausible_distance' });
+    expect(parseClaim(validClaim({ distance_m: 44_000, duration_s: 600, started_at: NOW - 700_000 }), NOW)).toMatchObject({ ok: false, error: 'implausible_distance' });
+  });
+
+  it('accepts a plausible finish of the shared 42 km grand tour', () => {
+    const result = parseClaim(validClaim({
+      distance_m: 42_000,
+      duration_s: 600,
+      started_at: NOW - 610_000,
+      level: 10,
+      ended_by: 'finish',
+    }), NOW);
+    expect(result.ok).toBe(true);
   });
 
   it('rejects an implausible score for the ground covered', () => {
