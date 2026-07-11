@@ -76,6 +76,9 @@ jobs:
       - name: Build for custom domain
         run: npm run build
 
+      - name: Build score-claim service
+        run: npm run build:server
+
       - name: Configure SSH
         env:
           DEPLOY_HOST: ${{ secrets.HOF_DEPLOY_HOST }}
@@ -98,3 +101,18 @@ jobs:
           ssh -i ~/.ssh/hang-on-fren-deploy "$DEPLOY_USER@$DEPLOY_HOST" "mkdir -p '$remote'"
           rsync -az --delete -e "ssh -i ~/.ssh/hang-on-fren-deploy" dist/ "$DEPLOY_USER@$DEPLOY_HOST:$remote/"
           ssh -i ~/.ssh/hang-on-fren-deploy "$DEPLOY_USER@$DEPLOY_HOST" "ln -sfn '$remote' '$DEPLOY_ROOT/current'"
+
+      - name: Publish score-claim service
+        env:
+          DEPLOY_HOST: ${{ secrets.HOF_DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.HOF_DEPLOY_USER }}
+        run: |
+          set -euo pipefail
+          staged="/tmp/hangonfren-api-${GITHUB_SHA}.js"
+          rsync -az -e "ssh -i ~/.ssh/hang-on-fren-deploy" server-dist/index.js "$DEPLOY_USER@$DEPLOY_HOST:$staged"
+          ssh -i ~/.ssh/hang-on-fren-deploy "$DEPLOY_USER@$DEPLOY_HOST" \
+            "sudo install -m 0644 '$staged' /opt/hangonfren/api/index.js.next && \
+             sudo mv /opt/hangonfren/api/index.js.next /opt/hangonfren/api/index.js && \
+             rm -f '$staged' && \
+             sudo systemctl restart hangonfren-api.service && \
+             curl --retry 8 --retry-delay 1 --retry-connrefused --retry-all-errors -fsS http://127.0.0.1:3191/healthz"

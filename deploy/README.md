@@ -14,7 +14,10 @@ POSTs a finished run to `/api/claim` with NIP-98 auth and the claim service
 (`server/index.ts`) validates it, signs the kind-30762 with the game key and
 publishes to the write relays. Without the service, scores stay local.
 
-Build a self-contained bundle (nostr-tools inlined — the VPS only needs node):
+The custom-domain CI job builds this service, atomically replaces the configured
+systemd entrypoint and restarts it after the static release. For initial setup or
+manual recovery, build the self-contained bundle locally (nostr-tools is inlined,
+so the VPS only needs Node):
 
 ```
 npm run build:server        # → server-dist/index.js

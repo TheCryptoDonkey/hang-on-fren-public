@@ -32,7 +32,7 @@ import {
   validateEventUrlTag,
 } from 'nostr-tools/nip98';
 import { buildScoreEvent, GAME_ID, GAME_PUBKEY, SCORE_KIND, type RunSummary } from '../src/scoring.js';
-import { parseClaim, cleanPlayerName, STALE_RUN_MS, type ClaimInput } from './claim-rules.js';
+import { parseClaim, cleanPlayerName, MAX_DISTANCE_M, STALE_RUN_MS, type ClaimInput } from './claim-rules.js';
 
 const DEFAULT_WRITE_RELAYS = [
   'wss://relay.gamestr.io',
@@ -138,6 +138,7 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
       publish_enabled: PUBLISH_ENABLED,
       game_pubkey: gamePubkey,
       expected_game_npub: EXPECTED_GAME_NPUB,
+      max_distance_m: MAX_DISTANCE_M,
       write_relays: WRITE_RELAYS,
       claims_seen: claims.size,
     }, req);
