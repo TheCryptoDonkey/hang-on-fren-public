@@ -76,7 +76,7 @@ interface StoredClaim {
 const gameSecret = loadGameSecret();
 const expectedGamePubkey = decodeNpub(EXPECTED_GAME_NPUB);
 const gamePubkey = resolveGamePubkey(gameSecret);
-const claims = await loadClaims();
+const { claims, bestScores } = await loadClaims();
 pruneStaleClaims();
 const claimRateLimiter = createRateLimiter(CLAIM_RATE_LIMIT.limit, CLAIM_RATE_LIMIT.windowMs);
 
@@ -141,6 +141,7 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
       max_distance_m: MAX_DISTANCE_M,
       write_relays: WRITE_RELAYS,
       claims_seen: claims.size,
+      best_scores_tracked: bestScores.size,
     }, req);
     return;
   }
@@ -202,8 +203,17 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     return;
   }
 
+  // Kind 30762 is addressable: the `d` tag is game:player:level, so publishing
+  // a worse run would REPLACE the player's better score for that level on the
+  // relays. Sign and log every accepted claim, but only publish improvements.
+  const bestKey = `${auth.pubkey}:${claim.level}`;
+  const improves = claim.score > (bestScores.get(bestKey) ?? 0);
+  if (improves) bestScores.set(bestKey, claim.score);
+
   const signed = finalizeEvent(buildGameSignedScore(claim, auth.pubkey), gameSecret);
-  const published = await publishSignedScore(signed);
+  const published = improves
+    ? await publishSignedScore(signed)
+    : { ok: 0, total: WRITE_RELAYS.length };
   const stored: StoredClaim = {
     key,
     pubkey: auth.pubkey,
@@ -222,6 +232,7 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     score_event_id: signed.id,
     status: published.ok > 0 ? 'published' : 'accepted',
     published,
+    ...(improves ? {} : { reason: 'below_best' }),
   }, req);
 }
 
@@ -239,7 +250,7 @@ function buildGameSignedScore(claim: ClaimInput, playerPubkey: string): ReturnTy
     bestRoseStreak: 0,
     topSpeedKph: claim.top_speed_kph,
     durationS: claim.duration_s,
-    endedBy: 'time',
+    endedBy: claim.ended_by,
   };
   return buildScoreEvent(summary, playerPubkey, {
     runId: claim.run_id,
@@ -334,25 +345,36 @@ async function appendClaim(stored: StoredClaim, claim: ClaimInput): Promise<void
   await appendFile(CLAIM_LOG, `${JSON.stringify({ ...stored, claim })}\n`, { encoding: 'utf8' });
 }
 
-async function loadClaims(): Promise<Map<string, StoredClaim>> {
+async function loadClaims(): Promise<{ claims: Map<string, StoredClaim>; bestScores: Map<string, number> }> {
   const map = new Map<string, StoredClaim>();
+  // Best accepted score per `${pubkey}:${level}` — the publish gate for the
+  // per-level addressable events. Rebuilt from the full append-only log so a
+  // restart can never let a worse run replace a better one on the relays.
+  const best = new Map<string, number>();
   try {
     const raw = await readFile(CLAIM_LOG, 'utf8');
     for (const line of raw.split('\n')) {
       if (!line.trim()) continue;
       try {
-        const parsed = JSON.parse(line) as Partial<StoredClaim>;
+        const parsed = JSON.parse(line) as Partial<StoredClaim> & { claim?: { score?: unknown; level?: unknown } };
         if (typeof parsed.key === 'string' && typeof parsed.score_event_id === 'string') {
           const acceptedAt = String(parsed.accepted_at ?? '');
+          const pubkey = String(parsed.pubkey ?? '');
           map.set(parsed.key, {
             key: parsed.key,
-            pubkey: String(parsed.pubkey ?? ''),
+            pubkey,
             run_id: String(parsed.run_id ?? ''),
             score_event_id: parsed.score_event_id,
             published: isPublished(parsed.published) ? parsed.published : { ok: 0, total: WRITE_RELAYS.length },
             accepted_at: acceptedAt,
             finished_at: typeof parsed.finished_at === 'number' ? parsed.finished_at : Date.parse(acceptedAt) || 0,
           });
+          const score = parsed.claim?.score;
+          const level = parsed.claim?.level;
+          if (pubkey && typeof score === 'number' && typeof level === 'number') {
+            const key = `${pubkey}:${level}`;
+            if (score > (best.get(key) ?? 0)) best.set(key, score);
+          }
         }
       } catch {
         // Ignore malformed audit rows; future writes remain append-only.
@@ -361,7 +383,7 @@ async function loadClaims(): Promise<Map<string, StoredClaim>> {
   } catch {
     // First deploy starts with no claim log.
   }
-  return map;
+  return { claims: map, bestScores: best };
 }
 
 function pruneStaleClaims(): void {

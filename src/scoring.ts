@@ -115,10 +115,10 @@ export interface RunSummary {
   bestRoseStreak: number;
   topSpeedKph: number;
   durationS: number;
-  endedBy: 'time' | 'crashes';
+  endedBy: 'time' | 'crashes' | 'finish';
 }
 
-export function summarise(state: ScoreState, durationS: number, endedBy: 'time' | 'crashes'): RunSummary {
+export function summarise(state: ScoreState, durationS: number, endedBy: 'time' | 'crashes' | 'finish'): RunSummary {
   return {
     score: Math.round(state.score),
     distanceM: Math.round(state.distance),
@@ -169,7 +169,8 @@ function hostOf(url: string): string {
 }
 
 export interface ScoreEventOptions {
-  /** Unique per run — keeps each run its own replaceable event (`d` tag). */
+  /** Unique per run — provenance stamped as a `run_id` tag (the `d` tag is
+   *  per-level per the gamestr spec, so runs at the same level replace). */
   runId?: string;
   playerName?: string;
   playerMode?: 'guest' | 'nostr';
@@ -184,10 +185,24 @@ export interface ScoreEventOptions {
   btcUsdCents?: number;
 }
 
+/** The human-readable line gamestr renders as the event body (their spec wants
+ *  a message here, not data — the run's numbers all live in tags). */
+function scoreMessage(summary: RunSummary, level: number, playerName?: string): string {
+  const rider = playerName ?? 'A fren';
+  const km = (summary.distanceM / 1000).toFixed(1);
+  if (summary.endedBy === 'finish') {
+    return `${rider} finished the grand tour — ${summary.score} points over ${km} km on ${GAME_TITLE}!`;
+  }
+  return `${rider} scored ${summary.score} points over ${km} km on ${GAME_TITLE} (level ${level}).`;
+}
+
 /**
- * Shape a run into an unsigned kind-30762 gamestr score event, mirroring
- * neon-sentinel's tag set so any gamestr leaderboard client can render it.
- * Signing/publishing lives in nostr.ts.
+ * Shape a run into an unsigned kind-30762 gamestr score event, following the
+ * gamestr score-event spec: `d` is `game-id:player-pubkey:level` (addressable —
+ * a player's later run at the same level REPLACES this event on relays, so the
+ * claim service only publishes improvements), `content` is a human-readable
+ * message, and the run's data rides in tags. Signing/publishing lives in
+ * nostr.ts / server/index.ts.
  */
 export function buildScoreEvent(summary: RunSummary, playerPubkey = 'guest', opts: ScoreEventOptions = {}): {
   kind: number;
@@ -197,22 +212,24 @@ export function buildScoreEvent(summary: RunSummary, playerPubkey = 'guest', opt
 } {
   const siteUrl = opts.siteUrl ?? gameUrl();
   const source = opts.siteUrl ? hostOf(opts.siteUrl) : gameSource();
+  const level = opts.level ?? 1;
   const tags = [
-    ['d', `${GAME_ID}:${playerPubkey}:${opts.runId ?? 'run'}`],
+    ['d', `${GAME_ID}:${playerPubkey}:${level}`],
     ['game', GAME_ID],
     ['score', String(summary.score)],
     ['p', playerPubkey],
-    ['state', 'final'],
+    ['state', 'active'],
     ['distance', String(summary.distanceM)],
     ['roses', String(summary.roses)],
     ['overtakes', String(summary.overtakes)],
     ['crashes', String(summary.crashes)],
     ['duration', String(summary.durationS)],
+    ['top_speed_kph', String(summary.topSpeedKph)],
     ['ended_by', summary.endedBy],
     // Gamestr-wide discovery tags: boards render any game's event from these
     // without game-specific knowledge.
     ['title', GAME_TITLE],
-    ['level', String(opts.level ?? 1)],
+    ['level', String(level)],
     ['r', siteUrl],
     ['source', source],
     ['platform', 'web'],
@@ -220,6 +237,7 @@ export function buildScoreEvent(summary: RunSummary, playerPubkey = 'guest', opt
     ['t', 'racer'],
     ['t', GAME_ID],
   ];
+  if (opts.runId) tags.push(['run_id', opts.runId]);
   if (opts.playerName) tags.push(['player', opts.playerName], ['playerName', opts.playerName]);
   if (opts.playerMode) tags.push(['playerMode', opts.playerMode]);
   if (opts.btcBlock) tags.push(['btc_block', String(opts.btcBlock)]);
@@ -227,22 +245,7 @@ export function buildScoreEvent(summary: RunSummary, playerPubkey = 'guest', opt
   return {
     kind: SCORE_KIND,
     created_at: Math.floor(Date.now() / 1000),
-    content: JSON.stringify({
-      game: GAME_ID,
-      score: summary.score,
-      distance_m: summary.distanceM,
-      duration_s: summary.durationS,
-      roses: summary.roses,
-      overtakes: summary.overtakes,
-      crashes: summary.crashes,
-      top_speed_kph: summary.topSpeedKph,
-      ended_by: summary.endedBy,
-      ...(opts.runId ? { run_id: opts.runId } : {}),
-      ...(opts.playerName ? { player_name: opts.playerName } : {}),
-      ...(opts.playerMode ? { player_mode: opts.playerMode } : {}),
-      ...(opts.btcBlock ? { btc_block: opts.btcBlock } : {}),
-      ...(opts.btcUsdCents ? { btc_usd_cents: opts.btcUsdCents } : {}),
-    }),
+    content: scoreMessage(summary, level, opts.playerName),
     tags,
   };
 }

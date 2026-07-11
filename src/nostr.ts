@@ -354,7 +354,9 @@ export interface SubmitScoreOptions {
 export interface PublishOutcome {
   ok: number;
   total: number;
-  /** 'published' = live on relays; 'accepted' = signed, publish pending. */
+  /** 'published' = live on relays; 'accepted' = signed but not on relays (all
+   *  publishes failed, or the run didn't beat the player's best at that level —
+   *  score events are per-level addressable, so only improvements go out). */
   status: 'published' | 'accepted';
 }
 

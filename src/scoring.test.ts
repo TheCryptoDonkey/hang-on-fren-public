@@ -67,14 +67,28 @@ describe('scoring', () => {
       playerMode: 'guest',
       level: 3,
     });
-    expect(ev.tags).toContainEqual(['d', 'hangonfren:abc123:run-1']);
+    // Spec d format: game-id:player-pubkey:level — the addressable unit is the
+    // player's score AT a level, so improvements replace and runs stay stable.
+    expect(ev.tags).toContainEqual(['d', 'hangonfren:abc123:3']);
     expect(ev.tags).toContainEqual(['p', 'abc123']);
+    expect(ev.tags).toContainEqual(['state', 'active']);
+    expect(ev.tags).toContainEqual(['run_id', 'run-1']);
     expect(ev.tags).toContainEqual(['playerName', 'DNI']);
     expect(ev.tags).toContainEqual(['playerMode', 'guest']);
     expect(ev.tags).toContainEqual(['level', '3']);
-    const content = JSON.parse(ev.content) as Record<string, unknown>;
-    expect(content.game).toBe('hangonfren');
-    expect(content.run_id).toBe('run-1');
+    // Content is the human-readable message gamestr displays — data lives in tags.
+    expect(ev.content).toContain('DNI');
+    expect(ev.content).toContain(String(sum.score));
+  });
+
+  it('defaults the d tag to level 1 and mentions the finish on a full tour', () => {
+    const s = createScore();
+    addDistance(s, 42_000, 220);
+    const sum = summarise(s, 600, 'finish');
+    const ev = buildScoreEvent(sum, 'abc123');
+    expect(ev.tags).toContainEqual(['d', 'hangonfren:abc123:1']);
+    expect(ev.content).toContain('finished the grand tour');
+    expect(ev.tags).toContainEqual(['ended_by', 'finish']);
   });
 
   it('stamps the bitcoin chain snapshot onto the event when provided', () => {
@@ -88,9 +102,6 @@ describe('scoring', () => {
     });
     expect(ev.tags).toContainEqual(['btc_block', '905432']);
     expect(ev.tags).toContainEqual(['btc_usd_cents', '10425000']);
-    const content = JSON.parse(ev.content) as Record<string, unknown>;
-    expect(content.btc_block).toBe(905_432);
-    expect(content.btc_usd_cents).toBe(10_425_000);
     // absent snapshot → no empty tags
     const bare = buildScoreEvent(sum, 'abc123', { runId: 'run-1' });
     expect(bare.tags.some(t => t[0] === 'btc_block' || t[0] === 'btc_usd_cents')).toBe(false);
