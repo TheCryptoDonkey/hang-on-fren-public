@@ -138,6 +138,8 @@ function addTransition(
 const LEN = { short: 25, medium: 50, long: 100, epic: 180, ultra: 260 };
 const CURVE = { easy: 2, medium: 4, hard: 6.5, evil: 8.5, hairpin: 11 };
 const HILL = { low: 1100, medium: 3000, high: 6200, huge: 9500 };
+/** Curvature at which roadside chevrons start warning the rider. */
+export const TIGHT_CURVE_THRESHOLD = 8;
 
 /**
  * Build a long, varied, seamless-looping Riviera track with real menace: big
@@ -259,6 +261,34 @@ export function decorateTrack(track: Track, signNames: readonly string[], billbo
     if (i % 31 === 0) seg.scenery.push({ name: 'slot:landmark', offset: -(2.9 + rng() * 1.3), scale: 1 });
     if (i % 17 === 8) seg.scenery.push({ name: 'slot:accent', offset: (rng() < 0.5 ? -1 : 1) * (1.5 + rng() * 0.55), scale: 1 });
     if (i % 47 === 11 && signNames.length) seg.scenery.push({ name: pick(rng, signNames), offset: 1.7 + rng() * 0.25, scale: 1 });
+  }
+
+  // Tight-corner warning rows. These follow the OUTSIDE of evil bends and
+  // hairpins, with arrows pointing into the turn: positive curvature is a
+  // right-hander (the bike is pushed left), negative is a left-hander. Reset
+  // the cadence at every direction change so the first board always appears
+  // near the corner entry instead of at an arbitrary global segment modulus.
+  let tightRun = 0;
+  let lastDirection = 0;
+  for (let i = 0; i < track.segments.length; i += 1) {
+    const seg = track.segments[i];
+    const direction = Math.sign(seg.curve);
+    if (Math.abs(seg.curve) < TIGHT_CURVE_THRESHOLD || direction === 0) {
+      tightRun = 0;
+      lastDirection = 0;
+      continue;
+    }
+    if (direction !== lastDirection) tightRun = 0;
+    tightRun += 1;
+    lastDirection = direction;
+    // Start four segments into the warning-strength bend, then repeat densely
+    // enough to read as a continuous arcade chevron wall at full speed.
+    if (tightRun < 4 || (tightRun - 4) % 9 !== 0) continue;
+    seg.scenery.push({
+      name: direction > 0 ? 'prop-chevron-right' : 'prop-chevron-left',
+      offset: direction > 0 ? -1.3 : 1.3,
+      scale: 1,
+    });
   }
 
   // The big 600B meme hoardings get a short clear sight-line on both sides.

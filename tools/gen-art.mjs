@@ -269,6 +269,16 @@ const ASSETS = [
       'pattern. The whole MIDDLE is OPEN and empty (see-through) so a vehicle can drive between the posts and under ' +
       'the banner. No text. ' + SPRITE_STYLE,
   },
+  {
+    name: 'finish-line-girls', model: 'gpt-image-1.5', size: '1536x1024', quality: 'high',
+    prompt:
+      'Three glamorous adult women, all clearly age 25 or older, celebrating at a Mediterranean road-race finish ' +
+      'line. Full-body standing group with all feet on one baseline: fashionable bright bikinis with tasteful opaque ' +
+      'coverage, white boots and flower accessories; one waves a black-and-white checkered racing flag while the ' +
+      'others cheer and wave. Confident, playful, non-explicit pin-up energy, lively distinct poses, crisp hand-pixeled ' +
+      '32-bit late-1980s/early-1990s Japanese racing-cabinet character art, chunky readable colour clusters. Every ' +
+      'character must unmistakably be an adult; no nudity, no transparent fabric, no explicit sexual pose. ' + SPRITE_STYLE,
+  },
   // Horizon backdrops — one per time of day. Wide Amalfi-coast panoramas with a
   // clean central horizon line; the renderer crossfades between them by distance
   // and scrolls them for parallax. Opaque, so gpt-image-2.

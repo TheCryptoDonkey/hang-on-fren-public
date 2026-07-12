@@ -55,6 +55,8 @@ export const SPRITE_WORLD_WIDTH: Record<string, number> = {
   // road-spanning gate / finish arches (wider than the tarmac so posts sit off it)
   'prop-gate': 2.7,
   'prop-finish': 2.7,
+  'prop-chevron-left': 0.62,
+  'prop-chevron-right': 0.62,
 };
 
 export const DEFAULT_SPRITE_WIDTH = 0.3;
@@ -108,6 +110,9 @@ const SCENERY_HIT_HALF_WIDTH: Record<string, number | null> = {
   // Marker arches are driven through and handled separately as non-colliding.
   'prop-gate': null,
   'prop-finish': null,
+  // Warning boards sit just beyond the verge and are guidance, not hazards.
+  'prop-chevron-left': null,
+  'prop-chevron-right': null,
 };
 
 export function sceneryHitHalfWidth(sprite: string): number | null {

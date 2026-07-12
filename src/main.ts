@@ -77,8 +77,12 @@ const MARKER_LOOKAHEAD_M = 340;
 // End-of-race time bonus: every whole second still on the clock at the finish
 // line is worth this many points (classic OutRun goal bonus).
 const TIME_BONUS_PER_SEC = 100;
+// Hold on the bespoke goal celebration before the score/name card appears.
+// Long enough to enjoy the finish cast and several firework volleys, short
+// enough that repeat runs still flow like an arcade game.
+const VICTORY_SHOW_TIME = 5.5;
 
-type Phase = 'loading' | 'title' | 'playing' | 'gameover';
+type Phase = 'loading' | 'title' | 'playing' | 'victory' | 'gameover';
 
 const canvas = document.getElementById('game') as HTMLCanvasElement;
 const ctx = canvas.getContext('2d')!;
@@ -127,6 +131,8 @@ const state = {
   lastGateSpawned: 0, // highest checkpoint boundary index a gate has been dropped for
   finishSpawned: false, // finish arch dropped yet?
   confettiAccum: 0, // drip-feeds confetti on the victory screen
+  fireworkAccum: 0,
+  victoryTime: 0,
   qualifies: false,
   // --- gamestr (nostr) layer ---
   runId: '',
@@ -139,6 +145,7 @@ const state = {
   globalBoard: [] as GlobalScore[],
   boardFlip: false, // title board alternates local / gamestr
   sparks: [] as Spark[],
+  fireworks: [] as FireworkParticle[],
   flash: 0, // brief flash on pickup
   boost: 0, // seconds of rose nitro remaining
   beerAccum: 0,
@@ -165,6 +172,18 @@ interface Spark {
   vr: number;
   color: string;
   petal: boolean;
+}
+
+interface FireworkParticle {
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  life: number;
+  ttl: number;
+  color: string;
+  size: number;
+  twinkle: number;
 }
 
 function spawnRoseBurst(x: number, y: number, kind: 'petrol' | 'rose' = 'rose'): void {
@@ -227,6 +246,34 @@ function spawnConfetti(count = 60): void {
   }
 }
 
+/** Explode a saturated arcade firework in the upper half of the screen. */
+function spawnFireworkBurst(x = W * (0.12 + Math.random() * 0.76), y = H * (0.08 + Math.random() * 0.38)): void {
+  const palettes = [
+    ['#ff3b72', '#ff9bc4', '#fff3f8'],
+    ['#ffd23f', '#ff8c2a', '#fff4b0'],
+    ['#42e8ff', '#58a6ff', '#e7fbff'],
+    ['#8cff66', '#34d399', '#efffe8'],
+    ['#c86bff', '#ff71ce', '#f8e6ff'],
+  ];
+  const colors = palettes[Math.floor(Math.random() * palettes.length)];
+  const spokes = 42;
+  const twist = Math.random() * Math.PI * 2;
+  for (let i = 0; i < spokes; i += 1) {
+    const a = twist + (i / spokes) * Math.PI * 2 + (Math.random() - 0.5) * 0.06;
+    const speed = 90 + Math.random() * 230;
+    state.fireworks.push({
+      x, y,
+      vx: Math.cos(a) * speed,
+      vy: Math.sin(a) * speed,
+      life: 0.95 + Math.random() * 0.65,
+      ttl: 1.6,
+      color: colors[i % colors.length],
+      size: 2 + Math.random() * 3.5,
+      twinkle: Math.random() * Math.PI * 2,
+    });
+  }
+}
+
 function updateSparks(dt: number): void {
   if (state.flash > 0) state.flash = Math.max(0, state.flash - dt * 2.2);
   for (let i = state.sparks.length - 1; i >= 0; i -= 1) {
@@ -242,6 +289,45 @@ function updateSparks(dt: number): void {
     s.y += s.vy * dt;
     s.rot += s.vr * dt;
   }
+}
+
+function updateFireworks(dt: number): void {
+  for (let i = state.fireworks.length - 1; i >= 0; i -= 1) {
+    const p = state.fireworks[i];
+    p.life -= dt;
+    if (p.life <= 0) {
+      state.fireworks.splice(i, 1);
+      continue;
+    }
+    p.vy += 105 * dt;
+    p.vx *= 1 - dt * 0.42;
+    p.vy *= 1 - dt * 0.18;
+    p.x += p.vx * dt;
+    p.y += p.vy * dt;
+  }
+}
+
+function drawFireworks(ctx2: CanvasRenderingContext2D): void {
+  ctx2.save();
+  ctx2.globalCompositeOperation = 'lighter';
+  for (const p of state.fireworks) {
+    const a = Math.min(1, p.life / Math.min(0.45, p.ttl));
+    const trail = 0.085;
+    ctx2.globalAlpha = a * (0.65 + Math.sin(state.time * 18 + p.twinkle) * 0.25);
+    ctx2.strokeStyle = p.color;
+    ctx2.lineWidth = Math.max(2, p.size);
+    ctx2.shadowColor = p.color;
+    ctx2.shadowBlur = 9;
+    ctx2.beginPath();
+    ctx2.moveTo(p.x, p.y);
+    ctx2.lineTo(p.x - p.vx * trail, p.y - p.vy * trail);
+    ctx2.stroke();
+    // Square hot core keeps the burst unmistakably 32-bit arcade rather than
+    // soft modern particle fluff.
+    ctx2.fillStyle = p.color;
+    ctx2.fillRect(Math.round(p.x - p.size / 2), Math.round(p.y - p.size / 2), Math.ceil(p.size + 1), Math.ceil(p.size + 1));
+  }
+  ctx2.restore();
 }
 
 function drawSparks(ctx2: CanvasRenderingContext2D): void {
@@ -686,6 +772,8 @@ function startRun(): void {
   state.finishBonus = 0;
   state.finishTimeLeft = 0;
   state.confettiAccum = 0;
+  state.fireworkAccum = 0;
+  state.victoryTime = 0;
   state.canAccum = 0;
   state.roseAccum = 0;
   state.emergencyArmed = true;
@@ -694,6 +782,7 @@ function startRun(): void {
   state.stingCooldown = 0;
   state.popups = [];
   state.sparks = [];
+  state.fireworks = [];
   state.flash = 0;
   state.boost = 0;
   state.beerAccum = 0;
@@ -885,16 +974,22 @@ function winRun(): void {
   state.finishBonus = bonus;
   score.score += bonus; // flat goal bonus (no streak multiplier)
   state.runFinishedAt = Date.now();
-  state.summary = summarise(score, state.runTime, 'time');
+  state.summary = summarise(score, state.runTime, 'finish');
   state.qualifies = qualifies(board, state.summary.score);
   state.nameValue = '';
-  state.phase = 'gameover';
+  state.phase = 'victory';
+  state.victoryTime = 0;
   state.confettiAccum = 0;
+  state.fireworkAccum = 0;
+  state.fireworks = [];
   if (!state.qualifies) submitRunScore();
   playSfx('milestone', 1);
   playSfx('combo', 0.9);
   playSting(STING.checkpoint, 1);
   spawnConfetti(90);
+  spawnFireworkBurst(W * 0.22, H * 0.22);
+  spawnFireworkBurst(W * 0.5, H * 0.13);
+  spawnFireworkBurst(W * 0.78, H * 0.25);
 }
 
 function confirmGameOver(): void {
@@ -934,6 +1029,7 @@ function update(dt: number): void {
   state.time += dt;
   updatePopups(state.popups, dt);
   updateSparks(dt);
+  updateFireworks(dt);
   if (devPaused) return; // dev-only: freeze physics so art can be inspected
   if (state.phase !== 'playing') {
     pollPadMenu();
@@ -942,13 +1038,23 @@ function update(dt: number): void {
     updateRumble({ active: false, intensity: 0, speed: 0 });
     updateScreech({ active: false, load: 0, speed: 0 });
     updateTurbo({ active: false, intensity: 0 });
-    // Keep the confetti falling while the victory card is up.
-    if (state.phase === 'gameover' && state.outcome === 'finish') {
+    // Keep the whole finish spectacular alive through the hero shot and the
+    // following score card.
+    if ((state.phase === 'victory' || state.phase === 'gameover') && state.outcome === 'finish') {
       state.confettiAccum += dt;
-      if (state.confettiAccum >= 0.5) {
-        state.confettiAccum -= 0.5;
+      if (state.confettiAccum >= 0.45) {
+        state.confettiAccum -= 0.45;
         spawnConfetti(16);
       }
+      state.fireworkAccum += dt;
+      if (state.fireworkAccum >= 0.58) {
+        state.fireworkAccum -= 0.58;
+        spawnFireworkBurst();
+      }
+    }
+    if (state.phase === 'victory') {
+      state.victoryTime += dt;
+      if (state.victoryTime >= VICTORY_SHOW_TIME) state.phase = 'gameover';
     }
     return;
   }
@@ -1339,11 +1445,11 @@ function render(): void {
   const wobble = clamp(Math.min(state.beerWobble / 1.5, (BEER_WOBBLE_TIME - state.beerWobble) / 0.6), 0, 1);
   const trip = clamp(Math.min(state.shroom / 1.2, (SHROOM_TIME - state.shroom) / 0.4), 0, 1);
   renderScene({ ctx, width: W, height: H, track, player, world, store, time: state.time, wipeout: state.wipeout, boost: state.boost > 0 ? state.boost / ROSE_BOOST_TIME : 0, sling: state.slingshot > 0 ? state.slingshot / SLING_TIME_MAX : 0, draft: state.draftCharge, wobble, trip, palette: paletteAt(score.distance), scenery: sceneryKitAt(score.distance), timeOfDay: timeOfDayAt(score.distance) });
-  drawSparks(ctx);
+  if (state.phase === 'playing') drawSparks(ctx);
 
   // The game-over card carries the score/stats itself — drawing the live HUD
   // under it just bled the speed/distance pills through the name-entry keys.
-  if (state.phase !== 'gameover') {
+  if (state.phase === 'playing') {
     const hud: HudState = {
       score: score.score,
       hiScore: topScore(board),
@@ -1362,9 +1468,10 @@ function render(): void {
   }
 
   if (state.phase === 'playing' && state.paused) renderPaused();
+  if (state.phase === 'victory') renderVictory(store);
   if (state.phase === 'gameover') renderGameOver(store);
-  // Confetti pops over the victory card, not behind its scrim.
-  if (state.phase === 'gameover' && state.outcome === 'finish') drawSparks(ctx);
+  // Confetti pops over both celebration layers, never behind their scrims.
+  if ((state.phase === 'victory' || state.phase === 'gameover') && state.outcome === 'finish') drawSparks(ctx);
   if (isMuted()) renderMuteBadge();
 }
 
@@ -1470,6 +1577,81 @@ function renderPaused(): void {
   outlinedText('Q — QUIT TO TITLE', W / 2, H * 0.58, '#bdeddb', u, 4);
 }
 
+function drawCheckeredRibbon(y: number, height: number): void {
+  const sq = Math.max(10, Math.round(height / 2));
+  for (let row = 0; row < 2; row += 1) {
+    for (let x = 0, col = 0; x < W; x += sq, col += 1) {
+      ctx.fillStyle = (row + col) % 2 ? '#f7f4df' : '#11131a';
+      ctx.fillRect(x, y + row * sq, sq + 1, sq + 1);
+    }
+  }
+}
+
+function drawFinishCast(store: SpriteStore): void {
+  const cast = store.get('finish-line-girls');
+  if (!cast) return;
+  const portrait = H > W;
+  const maxW = W * (portrait ? 0.94 : 0.64);
+  const maxH = H * (portrait ? 0.5 : 0.62);
+  const scale = Math.min(maxW / cast.w, maxH / cast.h);
+  const dw = cast.w * scale;
+  const dh = cast.h * scale;
+  const bounce = Math.round(Math.abs(Math.sin(state.victoryTime * 5.5)) * 4 * uiScale());
+  const dx = Math.round((W - dw) / 2);
+  const dy = Math.round(H * 0.98 - dh - bounce);
+  ctx.save();
+  ctx.imageSmoothingEnabled = false;
+  ctx.shadowColor = 'rgba(255,210,63,0.48)';
+  ctx.shadowBlur = 18 * uiScale();
+  ctx.drawImage(cast.canvas, dx, dy, dw, dh);
+  ctx.restore();
+}
+
+/** The dedicated five-second finish tableau: race scene still visible behind
+ *  fireworks, checkered ribbons, the flag marshal cast and the banked bonus. */
+function renderVictory(store: SpriteStore): void {
+  const u = uiScale();
+  const topShade = ctx.createLinearGradient(0, 0, 0, H * 0.5);
+  topShade.addColorStop(0, 'rgba(15,10,30,0.76)');
+  topShade.addColorStop(0.72, 'rgba(15,10,30,0.18)');
+  topShade.addColorStop(1, 'rgba(15,10,30,0)');
+  ctx.fillStyle = topShade;
+  ctx.fillRect(0, 0, W, H * 0.55);
+  const groundGlow = ctx.createLinearGradient(0, H * 0.62, 0, H);
+  groundGlow.addColorStop(0, 'rgba(255,87,51,0)');
+  groundGlow.addColorStop(1, 'rgba(255,70,110,0.36)');
+  ctx.fillStyle = groundGlow;
+  ctx.fillRect(0, H * 0.6, W, H * 0.4);
+
+  // Above the darkening scrims so every burst punches through the bright
+  // golden sky, but behind the cast and typography.
+  drawFireworks(ctx);
+
+  drawCheckeredRibbon(0, 28 * u);
+  drawCheckeredRibbon(H - 24 * u, 24 * u);
+  drawFinishCast(store);
+
+  ctx.textAlign = 'center';
+  const pulse = 1 + Math.sin(state.time * 6) * 0.035;
+  ctx.save();
+  ctx.translate(W / 2, H * 0.16);
+  ctx.scale(pulse, pulse);
+  ctx.font = `900 ${Math.min(92 * u, W * 0.16)}px 'Trebuchet MS', sans-serif`;
+  outlinedText('GOAL!', 0, 0, '#ffd23f', u, 10);
+  ctx.restore();
+  ctx.font = `900 ${Math.min(31 * u, W * 0.055)}px 'Trebuchet MS', sans-serif`;
+  outlinedText('GRAND TOUR COMPLETE', W / 2, H * 0.24, '#ffffff', u, 6);
+  ctx.font = `800 ${Math.min(23 * u, W * 0.042)}px 'Trebuchet MS', sans-serif`;
+  outlinedText(
+    `TIME BONUS  ${Math.ceil(state.finishTimeLeft)}s × ${TIME_BONUS_PER_SEC}  =  +${state.finishBonus.toLocaleString('en-GB')}`,
+    W / 2,
+    H * 0.305,
+    '#8fe6c4',
+    u,
+    5,
+  );
+}
+
 function renderGameOver(_store: SpriteStore): void {
   const s = state.summary;
   if (!s) return;
@@ -1478,6 +1660,7 @@ function renderGameOver(_store: SpriteStore): void {
   // A darker scrim for a defeat, a warmer one for the victory card.
   ctx.fillStyle = won ? 'rgba(10,26,20,0.66)' : 'rgba(6,19,28,0.72)';
   ctx.fillRect(0, 0, W, H);
+  if (won) drawFireworks(ctx);
   ctx.textAlign = 'center';
 
   if (won) {
@@ -1583,6 +1766,17 @@ if ((import.meta as { env?: { DEV?: boolean } }).env?.DEV) {
     setDistance: (m: number) => { score.distance = m; },
     freezeSpeed: (mul: number) => { player.speed = player.maxSpeed * mul; },
     pause: (v: boolean) => { devPaused = v; },
+    showTightCorner: () => {
+      const target = track.segments.find(seg => seg.scenery.some(item => item.name.startsWith('prop-chevron-')));
+      if (!target) return;
+      player.z = Math.max(0, target.index - 24) * ROAD.segmentLength;
+      player.speed = player.maxSpeed * 0.72;
+    },
+    showVictory: () => {
+      if (state.phase !== 'playing') startRun();
+      score.distance = FINISH_M;
+      winRun();
+    },
     // Nudge the rider off the tarmac so the off-road rumble can be exercised.
     setLateral: (x: number) => { player.x = x; },
     // Slam a stopped car into the rider's path to force a wipeout on demand.

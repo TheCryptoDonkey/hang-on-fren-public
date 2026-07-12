@@ -539,6 +539,77 @@ function fallbackFinish(): SpriteImage {
   });
 }
 
+// Repeating roadside chevrons for the genuinely tight bends. The arrow itself
+// is deliberately oversized: at racing speed it must communicate direction in
+// a glance, not read like another decorative sign.
+function fallbackChevron(direction: 'left' | 'right'): SpriteImage {
+  return bake(180, 118, ctx => {
+    ctx.fillStyle = '#f7f1df';
+    ctx.fillRect(8, 8, 164, 78);
+    ctx.strokeStyle = '#15171b';
+    ctx.lineWidth = 8;
+    ctx.strokeRect(8, 8, 164, 78);
+    ctx.fillStyle = '#e62e3b';
+    for (let i = 0; i < 3; i += 1) {
+      const cx = 42 + i * 49;
+      ctx.beginPath();
+      if (direction === 'left') {
+        ctx.moveTo(cx + 18, 18);
+        ctx.lineTo(cx - 12, 47);
+        ctx.lineTo(cx + 18, 76);
+        ctx.lineTo(cx + 31, 64);
+        ctx.lineTo(cx + 14, 47);
+        ctx.lineTo(cx + 31, 30);
+      } else {
+        ctx.moveTo(cx - 18, 18);
+        ctx.lineTo(cx + 12, 47);
+        ctx.lineTo(cx - 18, 76);
+        ctx.lineTo(cx - 31, 64);
+        ctx.lineTo(cx - 14, 47);
+        ctx.lineTo(cx - 31, 30);
+      }
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.fillStyle = '#4a4d52';
+    ctx.fillRect(38, 86, 10, 32);
+    ctx.fillRect(132, 86, 10, 32);
+  });
+}
+
+// Lightweight fallback for the generated finish-line cast: three unmistakably
+// adult arcade flag marshals in bright beachwear. The shipped generated sprite
+// replaces this, but offline/missing-art play still gets the complete finale.
+function fallbackFinishGirls(): SpriteImage {
+  return bake(540, 400, ctx => {
+    const drawMarshal = (cx: number, suit: string, wave: -1 | 1, flag: boolean): void => {
+      ctx.fillStyle = '#e7a36f';
+      ctx.beginPath(); ctx.arc(cx, 72, 30, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#3b231d';
+      ctx.beginPath(); ctx.arc(cx, 62, 32, Math.PI, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = suit;
+      ctx.beginPath(); ctx.moveTo(cx - 38, 112); ctx.lineTo(cx + 38, 112); ctx.lineTo(cx + 26, 230); ctx.lineTo(cx - 26, 230); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = '#e7a36f';
+      ctx.fillRect(cx - 22, 224, 17, 112); ctx.fillRect(cx + 5, 224, 17, 112);
+      ctx.save(); ctx.translate(cx - 28 * wave, 122); ctx.rotate(wave * -0.65); ctx.fillRect(-8, -6, 16, 116); ctx.restore();
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(cx - 27, 316, 24, 76); ctx.fillRect(cx + 3, 316, 24, 76);
+      if (flag) {
+        ctx.strokeStyle = '#e9edf2'; ctx.lineWidth = 8;
+        ctx.beginPath(); ctx.moveTo(cx - 76, 125); ctx.lineTo(cx - 105, 6); ctx.stroke();
+        const sq = 18;
+        for (let y = 0; y < 3; y += 1) for (let x = 0; x < 4; x += 1) {
+          ctx.fillStyle = (x + y) % 2 ? '#fff' : '#111';
+          ctx.fillRect(cx - 105 + x * sq, 6 + y * sq, sq, sq);
+        }
+      }
+    };
+    drawMarshal(115, '#ff4f91', -1, false);
+    drawMarshal(270, '#ffd23f', 1, true);
+    drawMarshal(425, '#f03b35', 1, false);
+  });
+}
+
 function fallbackCar(): SpriteImage {
   return bake(150, 110, ctx => {
     ctx.fillStyle = '#e7d3b0';
@@ -937,6 +1008,9 @@ const FALLBACKS: Record<string, () => SpriteImage> = {
   'prop-lavarock': fallbackLavaRock,
   'prop-gate': fallbackGate,
   'prop-finish': fallbackFinish,
+  'prop-chevron-left': () => fallbackChevron('left'),
+  'prop-chevron-right': () => fallbackChevron('right'),
+  'finish-line-girls': fallbackFinishGirls,
   'prop-sign': fallbackSign,
   'prop-billboard': fallbackBillboard,
   'car-classic': fallbackCar,
@@ -999,6 +1073,7 @@ const ART_URLS: Record<string, string> = {
   'prop-lavarock': assetUrl('art/prop-lavarock.png'),
   'prop-gate': assetUrl('art/prop-gate.png'),
   'prop-finish': assetUrl('art/prop-finish.png'),
+  'finish-line-girls': assetUrl('art/finish-line-girls.png'),
   'prop-sign': assetUrl('art/prop-sign.png'),
   // Raw sticker art for the rose-meme billboard; composited onto the hoarding
   // by buildBillboardVariants, never drawn directly.

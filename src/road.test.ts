@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildTrack, decorateTrack, findSegment, createPlayer, updatePlayer, ROAD, DEFAULT_TUNING } from './road.js';
+import { buildTrack, decorateTrack, findSegment, createPlayer, updatePlayer, ROAD, DEFAULT_TUNING, TIGHT_CURVE_THRESHOLD } from './road.js';
 
 describe('road', () => {
   it('builds a seamless loop whose ends are flat', () => {
@@ -48,6 +48,24 @@ describe('road', () => {
         if (d === 0) continue;
         const nearby = t.segments[(index + d + t.segments.length) % t.segments.length];
         expect(nearby.scenery).toHaveLength(0);
+      }
+    }
+  });
+
+  it('lines tight corners with correctly oriented outside chevrons', () => {
+    const t = buildTrack();
+    decorateTrack(t, []);
+    const marked = t.segments.filter(s => s.scenery.some(item => item.name.startsWith('prop-chevron-')));
+    expect(marked.length).toBeGreaterThan(40);
+    for (const seg of marked) {
+      expect(Math.abs(seg.curve)).toBeGreaterThanOrEqual(TIGHT_CURVE_THRESHOLD);
+      const chevron = seg.scenery.find(item => item.name.startsWith('prop-chevron-'))!;
+      if (seg.curve > 0) {
+        expect(chevron.name).toBe('prop-chevron-right');
+        expect(chevron.offset).toBeLessThan(-1);
+      } else {
+        expect(chevron.name).toBe('prop-chevron-left');
+        expect(chevron.offset).toBeGreaterThan(1);
       }
     }
   });
