@@ -9,6 +9,7 @@
     "dev:api": "vite build --config vite.server.config.ts && HANGONFREN_PUBLISH=0 node server-dist/index.js",
     "build": "npm run typecheck && vite build",
     "build:server": "vite build --config vite.server.config.ts",
+    "build:migrate": "vite build --config vite.migrate.config.ts",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit && tsc --noEmit --project tsconfig.server.json",
     "test": "vitest run",
