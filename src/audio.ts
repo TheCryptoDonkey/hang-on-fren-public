@@ -12,13 +12,19 @@ interface AudioSettings {
   muted: boolean;
 }
 
-const STORAGE_KEY = 'hangonfren:audio:v1';
-const DEFAULTS: AudioSettings = { master: 0.86, music: 0.5, sfx: 1, muted: false };
-const SFX_ARCADE_GAIN = 1.3;
+const STORAGE_KEY = 'hangonfren:audio:v2';
+const LEGACY_STORAGE_KEY = 'hangonfren:audio:v1';
+// Keep the bed out of the way and let one-shot game feedback land clearly.
+// The vehicle bus is deliberately quieter still: it runs continuously, while
+// pickups, crashes and tyre squeal are allowed to jump forward in the mix.
+const DEFAULTS: AudioSettings = { master: 0.78, music: 0.32, sfx: 1, muted: false };
+const SFX_ARCADE_GAIN = 1.45;
+const VEHICLE_MIX_GAIN = 0.68;
 
 let audioCtx: AudioContext | null = null;
 let master: GainNode | null = null;
 let sfxBus: GainNode | null = null;
+let vehicleBus: GainNode | null = null;
 let musicBus: GainNode | null = null;
 let compressor: DynamicsCompressorNode | null = null;
 let engineOsc: OscillatorNode | null = null;
@@ -26,6 +32,10 @@ let engineGain: GainNode | null = null;
 let engineFilter: BiquadFilterNode | null = null;
 let engineSubOsc: OscillatorNode | null = null;
 let engineSubGain: GainNode | null = null;
+let engineSubFilter: BiquadFilterNode | null = null;
+let engineNoiseSrc: AudioBufferSourceNode | null = null;
+let engineNoiseGain: GainNode | null = null;
+let engineNoiseFilter: BiquadFilterNode | null = null;
 // Continuous off-road rumble (like the engine, driven every frame): a broadband
 // gravel/grass ROAR plus a low corrugation BUZZ for the rumble strip.
 let rumbleNoiseSrc: AudioBufferSourceNode | null = null;
@@ -39,6 +49,10 @@ let rumbleBuzzGain: GainNode | null = null;
 let screechNoiseSrc: AudioBufferSourceNode | null = null;
 let screechFilter: BiquadFilterNode | null = null;
 let screechGain: GainNode | null = null;
+let screechWhineFilter: BiquadFilterNode | null = null;
+let screechWhineGain: GainNode | null = null;
+let screechToneOsc: OscillatorNode | null = null;
+let screechToneGain: GainNode | null = null;
 // Continuous TURBO whoosh (rose nitro): a bright noise rush whose filter sweeps
 // up with boost intensity, silent otherwise.
 let turboNoiseSrc: AudioBufferSourceNode | null = null;
@@ -75,20 +89,33 @@ export interface EngineFrame {
 }
 
 export function updateEngine(frame: EngineFrame): void {
-  if (!audioCtx || !engineOsc || !engineGain || !engineFilter || !engineSubOsc || !engineSubGain) return;
+  if (!audioCtx || !engineOsc || !engineGain || !engineFilter || !engineSubOsc || !engineSubGain ||
+      !engineSubFilter || !engineNoiseGain || !engineNoiseFilter) return;
   const now = audioCtx.currentTime;
   const speed = clamp(frame.speed, 0, 1);
   const throttle = clamp(frame.throttle, 0, 1);
-  const moving = clamp(speed * 0.7 + throttle * 0.4, 0, 1);
-  // Buzzy two-stroke rasp: a fast putter plus a higher grain, both scaling with
-  // how hard the scooter is working.
-  const flutter = Math.sin(now * 7.4) * (3 + moving * 8) + Math.sin(now * 23) * moving * 5;
-  const level = frame.playing ? 0.06 + moving * 0.2 : 0;
-  engineOsc.frequency.setTargetAtTime(72 + speed * 168 + throttle * 52 + flutter, now, 0.05);
-  engineFilter.frequency.setTargetAtTime(260 + moving * 1500 + throttle * 420, now, 0.07);
-  engineGain.gain.setTargetAtTime(level * settings.sfx, now, 0.06);
-  engineSubOsc.frequency.setTargetAtTime(34 + speed * 30, now, 0.09);
-  engineSubGain.gain.setTargetAtTime((frame.playing ? 0.05 + moving * 0.12 : 0) * settings.sfx, now, 0.08);
+  const moving = clamp(speed * 0.78 + throttle * 0.28, 0, 1);
+  // A Vespa's two-stroke note is a low firing pulse with a thick ladder of
+  // harmonics and ragged exhaust noise. Keep the firing rate below the old
+  // synth-like whine, then open the resonances and rasp as revs rise.
+  const flutter = Math.sin(now * 5.3) * (1.2 + moving * 2.8) + Math.sin(now * 13.7) * (0.5 + throttle * 1.8);
+  const firingRate = 48 + speed * 112 + throttle * 22 + flutter;
+  const level = frame.playing ? 0.052 + moving * 0.105 + throttle * 0.018 : 0;
+  engineOsc.frequency.setTargetAtTime(firingRate, now, 0.045);
+  engineFilter.frequency.setTargetAtTime(720 + moving * 1700 + throttle * 420, now, 0.06);
+  engineFilter.Q.setTargetAtTime(1.15 + moving * 0.65, now, 0.08);
+  engineGain.gain.setTargetAtTime(level, now, 0.055);
+
+  // Half-rate crankcase thump gives the exhaust pulse some body without the
+  // oversized sub-bass drone the previous engine carried.
+  engineSubOsc.frequency.setTargetAtTime(Math.max(24, firingRate * 0.5), now, 0.065);
+  engineSubFilter.frequency.setTargetAtTime(150 + moving * 160, now, 0.08);
+  engineSubGain.gain.setTargetAtTime(frame.playing ? 0.012 + moving * 0.03 : 0, now, 0.07);
+
+  // Filtered noise supplies the breathy, metallic two-stroke rasp visible in
+  // the reference spectrum between the main exhaust harmonics.
+  engineNoiseFilter.frequency.setTargetAtTime(620 + moving * 1900 + throttle * 380, now, 0.055);
+  engineNoiseGain.gain.setTargetAtTime(frame.playing ? 0.007 + moving * 0.032 + throttle * 0.012 : 0, now, 0.06);
 }
 
 export interface RumbleFrame {
@@ -110,13 +137,13 @@ export function updateRumble(frame: RumbleFrame): void {
   const spd = clamp(frame.speed, 0, 1);
   // Roar: broadband grass/gravel hiss. Present even at a crawl (so you hear the
   // verge), but it opens up with speed. Filter brightens as you go deeper/faster.
-  const roar = i * (0.22 + spd * 0.5);
-  rumbleNoiseGain.gain.setTargetAtTime(roar * settings.sfx, now, 0.05);
+  const roar = i * (0.08 + spd * 0.22);
+  rumbleNoiseGain.gain.setTargetAtTime(roar, now, 0.05);
   rumbleNoiseFilter.frequency.setTargetAtTime(340 + i * 480 + spd * 620, now, 0.08);
   // Buzz: the rumble-strip corrugation whir, pitch climbing with speed. Needs
   // both off-road AND motion, so a stationary drift off the edge won't drone.
-  const buzz = i * spd * 0.15;
-  rumbleBuzzGain.gain.setTargetAtTime(buzz * settings.sfx, now, 0.06);
+  const buzz = i * spd * 0.06;
+  rumbleBuzzGain.gain.setTargetAtTime(buzz, now, 0.06);
   rumbleBuzzOsc.frequency.setTargetAtTime(46 + spd * 88, now, 0.05);
 }
 
@@ -133,16 +160,26 @@ export interface ScreechFrame {
  * bandpass centre rises with load so a hard corner squeals brighter.
  */
 export function updateScreech(frame: ScreechFrame): void {
-  if (!audioCtx || !screechGain || !screechFilter) return;
+  if (!audioCtx || !screechGain || !screechFilter || !screechWhineGain ||
+      !screechWhineFilter || !screechToneGain || !screechToneOsc) return;
   const now = audioCtx.currentTime;
   const load = frame.active ? clamp(frame.load, 0, 1) : 0;
   const spd = clamp(frame.speed, 0, 1);
-  // Only really speaks once both load AND speed are up — a slow, gentle drift
-  // shouldn't squeal. Attack fast (a corner bites now), release a touch slower.
-  const target = load * load * (0.12 + spd * 0.5);
-  const smoothing = target > screechGain.gain.value ? 0.02 : 0.09;
-  screechGain.gain.setTargetAtTime(target * settings.sfx, now, smoothing);
-  screechFilter.frequency.setTargetAtTime(1900 + load * 1500 + spd * 400, now, 0.05);
+  // Rubber squeal has a broad scrub, a narrow resonant whine, and a small tonal
+  // edge. Their pitches wander independently so a held turn never becomes a
+  // static band of hiss. Speed gates the sound at a crawl.
+  const speedGate = clamp((spd - 0.2) / 0.58, 0, 1);
+  const chatter = 0.9 + Math.sin(now * 12.3) * 0.06 + Math.sin(now * 21.7) * 0.04;
+  const body = Math.pow(load, 1.35) * speedGate * (0.08 + spd * 0.15) * chatter;
+  const whine = Math.pow(load, 1.9) * speedGate * (0.018 + spd * 0.072);
+  const tone = Math.pow(load, 2.3) * speedGate * (0.008 + spd * 0.022);
+  const smoothing = body > screechGain.gain.value ? 0.018 : 0.085;
+  screechGain.gain.setTargetAtTime(body, now, smoothing);
+  screechFilter.frequency.setTargetAtTime(1050 + load * 650 + spd * 420 + Math.sin(now * 8.7) * 70, now, 0.045);
+  screechWhineGain.gain.setTargetAtTime(whine, now, whine > screechWhineGain.gain.value ? 0.014 : 0.075);
+  screechWhineFilter.frequency.setTargetAtTime(2350 + load * 1050 + spd * 520 + Math.sin(now * 15.1) * 120, now, 0.035);
+  screechToneGain.gain.setTargetAtTime(tone, now, tone > screechToneGain.gain.value ? 0.012 : 0.07);
+  screechToneOsc.frequency.setTargetAtTime(1680 + load * 720 + spd * 380 + Math.sin(now * 17.3) * 55, now, 0.035);
 }
 
 export interface TurboFrame {
@@ -160,7 +197,7 @@ export function updateTurbo(frame: TurboFrame): void {
   if (!audioCtx || !turboGain || !turboFilter) return;
   const now = audioCtx.currentTime;
   const i = frame.active ? clamp(frame.intensity, 0, 1) : 0;
-  turboGain.gain.setTargetAtTime(i * 0.22 * settings.sfx, now, i > 0 ? 0.03 : 0.12);
+  turboGain.gain.setTargetAtTime(i * 0.16, now, i > 0 ? 0.03 : 0.12);
   turboFilter.frequency.setTargetAtTime(700 + i * 2600 + Math.sin(now * 9) * 200, now, 0.05);
 }
 
@@ -322,42 +359,64 @@ function getCtx(): AudioContext {
   master = audioCtx.createGain();
   master.gain.value = settings.muted ? 0 : settings.master;
   compressor = audioCtx.createDynamicsCompressor();
-  compressor.threshold.value = -18;
-  compressor.knee.value = 22;
-  compressor.ratio.value = 5.5;
+  compressor.threshold.value = -14;
+  compressor.knee.value = 18;
+  compressor.ratio.value = 4;
   compressor.attack.value = 0.004;
   compressor.release.value = 0.18;
 
   sfxBus = audioCtx.createGain();
   sfxBus.gain.value = settings.sfx * SFX_ARCADE_GAIN;
+  vehicleBus = audioCtx.createGain();
+  vehicleBus.gain.value = settings.sfx * VEHICLE_MIX_GAIN;
   musicBus = audioCtx.createGain();
   musicBus.gain.value = settings.music;
 
   sfxBus.connect(master);
+  vehicleBus.connect(master);
   musicBus.connect(master);
   master.connect(compressor);
   compressor.connect(audioCtx.destination);
 
   engineOsc = audioCtx.createOscillator();
-  engineOsc.type = 'sawtooth';
+  engineOsc.setPeriodicWave(createVespaWave(audioCtx));
   engineGain = audioCtx.createGain();
   engineFilter = audioCtx.createBiquadFilter();
   engineFilter.type = 'lowpass';
-  engineFilter.frequency.value = 300;
-  engineFilter.Q.value = 0.5;
+  engineFilter.frequency.value = 760;
+  engineFilter.Q.value = 1.15;
   engineGain.gain.value = 0;
   engineOsc.connect(engineFilter);
   engineFilter.connect(engineGain);
-  engineGain.connect(sfxBus);
+  engineGain.connect(vehicleBus);
   engineOsc.start();
 
   engineSubOsc = audioCtx.createOscillator();
-  engineSubOsc.type = 'sine';
+  engineSubOsc.type = 'triangle';
   engineSubGain = audioCtx.createGain();
+  engineSubFilter = audioCtx.createBiquadFilter();
+  engineSubFilter.type = 'lowpass';
+  engineSubFilter.frequency.value = 150;
+  engineSubFilter.Q.value = 0.7;
   engineSubGain.gain.value = 0;
-  engineSubOsc.connect(engineSubGain);
-  engineSubGain.connect(sfxBus);
+  engineSubOsc.connect(engineSubFilter);
+  engineSubFilter.connect(engineSubGain);
+  engineSubGain.connect(vehicleBus);
   engineSubOsc.start();
+
+  engineNoiseSrc = audioCtx.createBufferSource();
+  engineNoiseSrc.buffer = getBrightNoiseBuffer();
+  engineNoiseSrc.loop = true;
+  engineNoiseFilter = audioCtx.createBiquadFilter();
+  engineNoiseFilter.type = 'bandpass';
+  engineNoiseFilter.frequency.value = 620;
+  engineNoiseFilter.Q.value = 0.9;
+  engineNoiseGain = audioCtx.createGain();
+  engineNoiseGain.gain.value = 0;
+  engineNoiseSrc.connect(engineNoiseFilter);
+  engineNoiseFilter.connect(engineNoiseGain);
+  engineNoiseGain.connect(vehicleBus);
+  engineNoiseSrc.start();
 
   // Off-road rumble chain — a looping noise ROAR and a low sawtooth BUZZ, both
   // held at zero gain until updateRumble() opens them when a wheel leaves the road.
@@ -372,7 +431,7 @@ function getCtx(): AudioContext {
   rumbleNoiseGain.gain.value = 0;
   rumbleNoiseSrc.connect(rumbleNoiseFilter);
   rumbleNoiseFilter.connect(rumbleNoiseGain);
-  rumbleNoiseGain.connect(sfxBus);
+  rumbleNoiseGain.connect(vehicleBus);
   rumbleNoiseSrc.start();
 
   rumbleBuzzOsc = audioCtx.createOscillator();
@@ -386,25 +445,43 @@ function getCtx(): AudioContext {
   rumbleBuzzGain.gain.value = 0;
   rumbleBuzzOsc.connect(rumbleBuzzFilter);
   rumbleBuzzFilter.connect(rumbleBuzzGain);
-  rumbleBuzzGain.connect(sfxBus);
+  rumbleBuzzGain.connect(vehicleBus);
   rumbleBuzzOsc.start();
 
-  // Tyre-screech chain — a looping noise source through a resonant bandpass,
-  // held at zero gain until updateScreech() opens it when the bike is loaded up
-  // hard in a corner.
+  // Tyre-screech chain — one bright noise source feeds a wide rubber scrub and
+  // a narrower resonant squeal; a quiet triangle supplies the pitched edge.
   screechNoiseSrc = audioCtx.createBufferSource();
   screechNoiseSrc.buffer = getBrightNoiseBuffer();
   screechNoiseSrc.loop = true;
   screechFilter = audioCtx.createBiquadFilter();
   screechFilter.type = 'bandpass';
-  screechFilter.frequency.value = 2400;
-  screechFilter.Q.value = 6;
+  screechFilter.frequency.value = 1200;
+  screechFilter.Q.value = 2.2;
   screechGain = audioCtx.createGain();
   screechGain.gain.value = 0;
   screechNoiseSrc.connect(screechFilter);
   screechFilter.connect(screechGain);
   screechGain.connect(sfxBus);
+
+  screechWhineFilter = audioCtx.createBiquadFilter();
+  screechWhineFilter.type = 'bandpass';
+  screechWhineFilter.frequency.value = 2600;
+  screechWhineFilter.Q.value = 9;
+  screechWhineGain = audioCtx.createGain();
+  screechWhineGain.gain.value = 0;
+  screechNoiseSrc.connect(screechWhineFilter);
+  screechWhineFilter.connect(screechWhineGain);
+  screechWhineGain.connect(sfxBus);
+
+  screechToneOsc = audioCtx.createOscillator();
+  screechToneOsc.type = 'triangle';
+  screechToneOsc.frequency.value = 1800;
+  screechToneGain = audioCtx.createGain();
+  screechToneGain.gain.value = 0;
+  screechToneOsc.connect(screechToneGain);
+  screechToneGain.connect(sfxBus);
   screechNoiseSrc.start();
+  screechToneOsc.start();
 
   // Turbo-whoosh chain — bright looping noise through a wide bandpass, held at
   // zero gain until updateTurbo() opens it during a rose boost.
@@ -528,10 +605,24 @@ function getBrightNoiseBuffer(): AudioBuffer {
   return buffer;
 }
 
+/** Dense, asymmetric exhaust harmonics rather than a mathematically clean saw. */
+function createVespaWave(ctx: AudioContext): PeriodicWave {
+  const real = new Float32Array([0, 1, 0.82, 0.61, 0.48, 0.36, 0.29, 0.23, 0.18, 0.14, 0.11, 0.09, 0.07, 0.05]);
+  const imag = new Float32Array([0, 0, 0.16, -0.12, 0.1, -0.08, 0.07, -0.06, 0.05, -0.04, 0.035, -0.03, 0.025, -0.02]);
+  return ctx.createPeriodicWave(real, imag);
+}
+
 function loadSettings(): AudioSettings {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return { ...DEFAULTS };
+    if (!raw) {
+      // Preserve only the user's mute choice across the v2 rebalance. Carrying
+      // the old gain defaults forward would defeat the quieter new mix.
+      const legacy = localStorage.getItem(LEGACY_STORAGE_KEY);
+      if (!legacy) return { ...DEFAULTS };
+      const previous = JSON.parse(legacy) as Partial<AudioSettings>;
+      return { ...DEFAULTS, muted: typeof previous.muted === 'boolean' ? previous.muted : DEFAULTS.muted };
+    }
     const p = JSON.parse(raw) as Partial<AudioSettings>;
     return {
       master: clamp(typeof p.master === 'number' ? p.master : DEFAULTS.master, 0, 1),

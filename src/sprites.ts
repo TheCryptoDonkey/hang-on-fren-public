@@ -543,37 +543,69 @@ function fallbackFinish(): SpriteImage {
 // is deliberately oversized: at racing speed it must communicate direction in
 // a glance, not read like another decorative sign.
 function fallbackChevron(direction: 'left' | 'right'): SpriteImage {
-  return bake(180, 118, ctx => {
-    ctx.fillStyle = '#f7f1df';
-    ctx.fillRect(8, 8, 164, 78);
-    ctx.strokeStyle = '#15171b';
-    ctx.lineWidth = 8;
-    ctx.strokeRect(8, 8, 164, 78);
-    ctx.fillStyle = '#e62e3b';
-    for (let i = 0; i < 3; i += 1) {
-      const cx = 42 + i * 49;
+  return bake(256, 168, ctx => {
+    ctx.imageSmoothingEnabled = false;
+    const poly = (points: Array<[number, number]>, fill: string): void => {
+      ctx.fillStyle = fill;
       ctx.beginPath();
-      if (direction === 'left') {
-        ctx.moveTo(cx + 18, 18);
-        ctx.lineTo(cx - 12, 47);
-        ctx.lineTo(cx + 18, 76);
-        ctx.lineTo(cx + 31, 64);
-        ctx.lineTo(cx + 14, 47);
-        ctx.lineTo(cx + 31, 30);
-      } else {
-        ctx.moveTo(cx - 18, 18);
-        ctx.lineTo(cx + 12, 47);
-        ctx.lineTo(cx - 18, 76);
-        ctx.lineTo(cx - 31, 64);
-        ctx.lineTo(cx - 14, 47);
-        ctx.lineTo(cx - 31, 30);
-      }
+      ctx.moveTo(points[0][0], points[0][1]);
+      for (let i = 1; i < points.length; i += 1) ctx.lineTo(points[i][0], points[i][1]);
       ctx.closePath();
       ctx.fill();
+    };
+
+    // Deep arcade drop-shadow, steel feet and striped posts ground the panel.
+    ctx.fillStyle = 'rgba(5,9,18,0.45)';
+    ctx.fillRect(18, 139, 220, 12);
+    for (const x of [37, 207]) {
+      ctx.fillStyle = '#07101d'; ctx.fillRect(x - 7, 116, 18, 42);
+      ctx.fillStyle = '#34465a'; ctx.fillRect(x - 4, 116, 12, 39);
+      ctx.fillStyle = '#a9c2d2'; ctx.fillRect(x - 2, 118, 4, 35);
+      ctx.fillStyle = '#07101d'; ctx.fillRect(x - 14, 153, 32, 7);
+      ctx.fillStyle = '#f0c54a'; ctx.fillRect(x - 11, 154, 26, 3);
     }
-    ctx.fillStyle = '#4a4d52';
-    ctx.fillRect(38, 86, 10, 32);
-    ctx.fillRect(132, 86, 10, 32);
+
+    // Chamfered 32-bit sign cabinet with stepped highlights and chunky pixels.
+    const shell: Array<[number, number]> = [[8, 20], [19, 9], [237, 9], [248, 20], [248, 113], [237, 124], [19, 124], [8, 113]];
+    poly(shell.map(([x, y]) => [x + 3, y + 5] as [number, number]), '#07101d');
+    poly(shell, '#111b2c');
+    poly([[13, 23], [23, 14], [233, 14], [243, 23], [243, 109], [233, 119], [23, 119], [13, 109]], '#d9e5e6');
+    poly([[18, 26], [26, 19], [230, 19], [238, 26], [238, 106], [230, 114], [26, 114], [18, 106]], '#f2c94d');
+    poly([[23, 29], [29, 24], [227, 24], [233, 29], [233, 103], [227, 109], [29, 109], [23, 103]], '#7f1327');
+    ctx.fillStyle = '#b61e33'; ctx.fillRect(27, 29, 202, 75);
+    ctx.fillStyle = '#e44842'; ctx.fillRect(29, 31, 198, 7);
+    ctx.fillStyle = '#741023'; ctx.fillRect(29, 96, 198, 6);
+
+    // Rivets and alternating lamps make each board feel like a real cabinet.
+    for (let x = 32; x <= 224; x += 16) {
+      ctx.fillStyle = '#4f0a19'; ctx.fillRect(x - 3, 15, 7, 5);
+      ctx.fillStyle = x % 32 === 0 ? '#fff4b0' : '#62e8df'; ctx.fillRect(x - 2, 14, 5, 5);
+      ctx.fillStyle = '#ffffff'; ctx.fillRect(x - 1, 14, 2, 2);
+    }
+
+    // Four large, outlined direction marks. Draw canonical right arrows, then
+    // mirror the whole arrow strip for a left bend so the silhouettes match.
+    ctx.save();
+    if (direction === 'left') { ctx.translate(256, 0); ctx.scale(-1, 1); }
+    for (let i = 0; i < 4; i += 1) {
+      const ox = 31 + i * 51;
+      const arrow = (dx: number, dy: number): Array<[number, number]> => [
+        [ox + dx, 42 + dy], [ox + 19 + dx, 42 + dy], [ox + 43 + dx, 66 + dy],
+        [ox + 19 + dx, 90 + dy], [ox + dx, 90 + dy], [ox + 24 + dx, 66 + dy],
+      ];
+      poly(arrow(3, 4), '#390713');
+      poly(arrow(0, 0), '#fff0b5');
+      poly([[ox + 7, 49], [ox + 17, 49], [ox + 34, 66], [ox + 17, 83], [ox + 7, 83], [ox + 24, 66]], '#151b2b');
+      ctx.fillStyle = '#ffffff'; ctx.fillRect(ox + 8, 49, 10, 4);
+      ctx.fillStyle = '#63e4dc'; ctx.fillRect(ox + 26, 62, 5, 5);
+    }
+    ctx.restore();
+
+    // Small corner shine pixels and bolts complete the era-appropriate finish.
+    for (const [x, y] of [[18, 25], [235, 25], [18, 105], [235, 105]] as Array<[number, number]>) {
+      ctx.fillStyle = '#ffffff'; ctx.fillRect(x, y, 4, 4);
+      ctx.fillStyle = '#7fa4b8'; ctx.fillRect(x + 4, y + 4, 3, 3);
+    }
   });
 }
 
@@ -1072,7 +1104,7 @@ const ART_URLS: Record<string, string> = {
   'prop-deadtree': assetUrl('art/prop-deadtree.png'),
   'prop-lavarock': assetUrl('art/prop-lavarock.png'),
   'prop-gate': assetUrl('art/prop-gate.png'),
-  'prop-finish': assetUrl('art/prop-finish.png'),
+  'prop-finish': assetUrl('art/prop-finish-decorated.png'),
   'finish-line-girls': assetUrl('art/finish-line-girls.png'),
   'prop-sign': assetUrl('art/prop-sign.png'),
   // Raw sticker art for the rose-meme billboard; composited onto the hoarding

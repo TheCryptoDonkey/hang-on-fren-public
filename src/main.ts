@@ -18,6 +18,7 @@ import { appendChar, backspace, cleanName, layout as nameLayout, keyAt as nameKe
 import { connectNostr, fetchGlobalBoard, getIdentity, renameGuest, restoreIdentity, submitScore, useGuestMode, type GlobalScore } from './nostr.js';
 import { MODES, loadModeIndex, saveModeIndex } from './difficulty.js';
 import { clamp } from './util.js';
+import { isSteeringCode, KeyboardDriveState } from './keyboard-drive.js';
 import { assetUrl } from './asset-url.js';
 import { fetchBtcSnapshot, type BtcSnapshot } from './bitcoin.js';
 
@@ -357,7 +358,7 @@ function drawSparks(ctx2: CanvasRenderingContext2D): void {
 }
 
 const input: DriveInput = { left: false, right: false, throttle: true, brake: false };
-const keys = new Set<string>();
+const keyboard = new KeyboardDriveState();
 let touchSteer = 0; // -1,0,1
 let touchBrake = false;
 
@@ -508,7 +509,11 @@ window.addEventListener('pointercancel', e => releaseActiveTouchControl(e.pointe
 // end events — drop EVERY held input so steering can never latch on, and hold
 // the run so nobody rides blind into the clock while they're away.
 function clearAllInput(): void {
-  keys.clear();
+  keyboard.clear();
+  input.left = false;
+  input.right = false;
+  input.brake = false;
+  input.throttle = true;
   clearTouchInput();
 }
 function onFocusLost(): void {
@@ -516,6 +521,7 @@ function onFocusLost(): void {
   if (state.phase === 'playing') state.paused = true;
 }
 window.addEventListener('blur', onFocusLost);
+window.addEventListener('pagehide', onFocusLost);
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) onFocusLost();
 });
@@ -540,12 +546,13 @@ function vibrate(pattern: number | number[]): void {
 function onKeyDown(e: KeyboardEvent): void {
   const k = e.key.toLowerCase();
   if (['arrowleft', 'arrowright', 'arrowup', 'arrowdown', ' '].includes(k)) e.preventDefault();
-  keys.add(k);
+  keyboard.press(e.code);
 
   // Escape pauses/resumes a run; Q from the pause screen abandons it.
   if (state.phase === 'playing') {
     if (k === 'escape') {
       state.paused = !state.paused;
+      clearAllInput();
       playSfx('combo', 0.6, state.paused ? 0.8 : 1.15);
       return;
     }
@@ -572,8 +579,15 @@ function onKeyUp(e: KeyboardEvent): void {
   // macOS swallows the keyup of any key released while ⌘ is held, so that key
   // would stay "down" forever and the bike would grind into the verge. When
   // the Cmd key itself comes up, drop everything held.
-  if (k === 'meta') keys.clear();
-  else keys.delete(k);
+  if (k === 'meta') keyboard.clear();
+  else {
+    const steeringReleased = isSteeringCode(e.code);
+    keyboard.release(e.code);
+    // Keyboard steering should stop when the physical key comes up. Retain a
+    // hint of bike weight, but kill the long lateral coast that read as a stuck
+    // key. Other control sources still use the normal analogue physics path.
+    if (steeringReleased && keyboard.direction() === 0 && state.phase === 'playing') player.vx *= 0.12;
+  }
 }
 window.addEventListener('keydown', onKeyDown);
 window.addEventListener('keyup', onKeyUp);
@@ -736,15 +750,19 @@ function readInput(): void {
   const buttonSteer = controlButtonSteer();
   const pad = readGamepad();
   const steer = clamp(touchSteer + buttonSteer + pad.steer, -1, 1);
-  input.left = keys.has('arrowleft') || keys.has('a') || steer < 0;
-  input.right = keys.has('arrowright') || keys.has('d') || steer > 0;
-  input.brake = keys.has('arrowdown') || keys.has('s') || keys.has(' ') || touchBrake || isControlSlowActive() || pad.brake;
+  keyboard.applyTo(input);
+  input.left = input.left || steer < 0;
+  input.right = input.right || steer > 0;
+  input.brake = input.brake || touchBrake || isControlSlowActive() || pad.brake;
   input.throttle = !input.brake; // auto-accelerate; brake overrides
 }
 
 // ---- run lifecycle ---------------------------------------------------------
 
 function startRun(): void {
+  // Menu navigation and the previous run's lateral momentum must never leak
+  // into a fresh race. Both used to make the bike veer with no key held.
+  clearAllInput();
   unlockAudio();
   startMusic();
   for (const url of Object.values(VOICE)) if (url) preloadVoiceClip(url);
@@ -752,6 +770,7 @@ function startRun(): void {
   playSfx('rev', 1);
   player.z = 0;
   player.x = 0;
+  player.vx = 0;
   player.speed = player.maxSpeed * 0.35;
   player.lean = 0;
   const mode = MODES[modeIndex];
@@ -1033,6 +1052,7 @@ function update(dt: number): void {
   if (devPaused) return; // dev-only: freeze physics so art can be inspected
   if (state.phase !== 'playing') {
     pollPadMenu();
+    keyboard.clear();
     clearTouchInput();
     updateEngine({ playing: false, speed: 0, throttle: 0 });
     updateRumble({ active: false, intensity: 0, speed: 0 });
@@ -1406,9 +1426,10 @@ function update(dt: number): void {
 
   // Tyre screech: how hard the bike is loaded up laterally (steering hard or
   // running wide in a bend). |vx| near its cap = a corner being pushed hard; the
-  // scrub only bites past ~45% of that, and never mid-wipeout.
+  // scrub starts building past ~30% of that, with the audio engine itself
+  // gating out slow turns, and never speaks mid-wipeout.
   const speedPct = player.speed / player.maxSpeed;
-  const corner = clamp((Math.abs(player.vx) / DEFAULT_TUNING.maxSteerVel - 0.45) / 0.55, 0, 1);
+  const corner = clamp((Math.abs(player.vx) / DEFAULT_TUNING.maxSteerVel - 0.3) / 0.7, 0, 1);
   updateScreech({
     active: state.wipeout === 0 && corner > 0,
     load: corner,

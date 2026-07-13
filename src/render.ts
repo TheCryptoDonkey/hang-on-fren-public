@@ -973,7 +973,9 @@ function drawEntity(ctx: CanvasRenderingContext2D, width: number, store: SpriteS
   ctx.beginPath();
   ctx.rect(0, 0, width, Math.max(0, e.clip));
   ctx.clip();
-  ctx.imageSmoothingEnabled = true;
+  // Purpose-built chevrons use hard pixel clusters; bilinear filtering turns
+  // them back into the flat blurry boards they replaced.
+  ctx.imageSmoothingEnabled = !e.sprite.startsWith('prop-chevron-');
   // Soft contact shadow under cars and pickups grounds them on the tarmac —
   // without it billboards read as floating cardboard. Scenery skips it (props
   // sit on painted verge and bake their own grounding).
