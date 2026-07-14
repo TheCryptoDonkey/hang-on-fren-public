@@ -348,6 +348,28 @@ export interface PublishOutcome {
   status: 'published' | 'accepted';
 }
 
+/** Pure: clock offset (server − local) in ms from an HTTP Date header, 0 when
+ *  the header is missing or unparseable. */
+export function clockOffsetMs(dateHeader: string | null, localNowMs: number): number {
+  if (!dateHeader) return 0;
+  const serverMs = Date.parse(dateHeader);
+  return Number.isFinite(serverMs) ? serverMs - localNowMs : 0;
+}
+
+/** Measure how far this device's clock is from the claim service's. Phone
+ *  clocks are routinely minutes adrift, and the service enforces NIP-98
+ *  freshness (±60 s) and run staleness against ITS clock — so claims are
+ *  submitted in server time. Best-effort: 0 when the service is unreachable
+ *  (the claim POST would fail anyway). */
+async function fetchServerClockOffset(): Promise<number> {
+  try {
+    const res = await fetch(`${CLAIM_API}/health`, { cache: 'no-store' });
+    return clockOffsetMs(res.headers.get('date'), Date.now());
+  } catch {
+    return 0;
+  }
+}
+
 /**
  * Claim the finished run: NIP-98-sign the payload with the PLAYER's key and
  * POST it to the claim service, which validates, signs the score event with
@@ -357,13 +379,17 @@ export interface PublishOutcome {
 export async function submitScore(summary: RunSummary, opts: SubmitScoreOptions): Promise<PublishOutcome | null> {
   if (summary.score <= 0) return null; // boards ignore zero scores
   const identity = getIdentity();
+  // Shift the run's wall-clock bounds and the auth timestamp into server time;
+  // both bounds move together, so the duration/wall-clock relation the service
+  // checks is preserved.
+  const clockOffset = await fetchServerClockOffset();
   const claim = {
     game: GAME_ID,
     score: summary.score,
     distance_m: summary.distanceM,
     duration_s: summary.durationS,
-    started_at: opts.startedAt,
-    finished_at: opts.finishedAt,
+    started_at: opts.startedAt + clockOffset,
+    finished_at: opts.finishedAt + clockOffset,
     run_id: opts.runId,
     roses: summary.roses,
     overtakes: summary.overtakes,
@@ -380,7 +406,7 @@ export async function submitScore(summary: RunSummary, opts: SubmitScoreOptions)
   const url = `${location.origin}${CLAIM_API}`;
   const auth = await signWithIdentity({
     kind: NIP98_KIND,
-    created_at: Math.floor(Date.now() / 1000),
+    created_at: Math.floor((Date.now() + clockOffset) / 1000),
     content: '',
     tags: [
       ['u', url],
