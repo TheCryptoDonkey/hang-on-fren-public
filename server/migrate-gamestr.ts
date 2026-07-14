@@ -32,9 +32,11 @@ const RELAYS = WRITE_RELAYS.length ? WRITE_RELAYS : DEFAULT_WRITE_RELAYS;
 const CLAIM_LOG = process.env.HANGONFREN_CLAIM_LOG ?? '/var/lib/hangonfren/claims.jsonl';
 const SITE_URL = process.env.HANGONFREN_SITE_URL ?? 'https://hang-on-fren.playechoseven.com/';
 const DRY_RUN = process.env.MIGRATE_DRY_RUN === '1';
-const RELAY_TIMEOUT_MS = 6000;
-// The Gamestr test relay currently accepts a maximum burst of roughly three
-// events per minute from one publisher. Keep reconciliation below that rate.
+const RELAY_TIMEOUT_MS = 20_000;
+const RELAY_QUERY_ATTEMPTS = 3;
+const RELAY_PUBLISH_ATTEMPTS = 3;
+// Keep reconciliation comfortably below the test relay's observed burst
+// threshold. This only affects the one-off historic replay, not live claims.
 const TEST_RELAY_WRITE_INTERVAL_MS = 21_000;
 const VERIFY_RETRY_MS = 15_000;
 const VERIFY_ATTEMPTS = 5;
@@ -214,16 +216,35 @@ async function fetchRelaySnapshots(): Promise<RelaySnapshot[]> {
   }));
 }
 
-function fetchRelayEvents(relay: string): Promise<RelayEvent[]> {
+async function fetchRelayEvents(relay: string): Promise<RelayEvent[]> {
+  for (let attempt = 1; attempt <= RELAY_QUERY_ATTEMPTS; attempt += 1) {
+    const result = await fetchRelayEventsOnce(relay);
+    if (result.complete) return result.events;
+    if (attempt < RELAY_QUERY_ATTEMPTS) {
+      console.warn(`[migrate] ${relay} read incomplete (${result.reason}); retry ${attempt}/${RELAY_QUERY_ATTEMPTS}`);
+      await new Promise(resolve => setTimeout(resolve, 3000 * attempt));
+    }
+  }
+  throw new Error(`${relay} did not complete a relay read after ${RELAY_QUERY_ATTEMPTS} attempts`);
+}
+
+function fetchRelayEventsOnce(relay: string): Promise<{ events: RelayEvent[]; complete: boolean; reason: string }> {
   return new Promise(resolve => {
     const events: RelayEvent[] = [];
     let ws: WebSocket;
-    const timer = setTimeout(() => { try { ws.close(); } catch { /* ignore */ } resolve(events); }, RELAY_TIMEOUT_MS);
+    let settled = false;
+    const settle = (complete: boolean, reason: string): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      try { ws.close(); } catch { /* ignore */ }
+      resolve({ events, complete, reason });
+    };
+    const timer = setTimeout(() => settle(false, 'timeout'), RELAY_TIMEOUT_MS);
     try {
       ws = new WebSocket(relay);
     } catch {
-      clearTimeout(timer);
-      resolve(events);
+      settle(false, 'connection failed');
       return;
     }
     ws.onopen = () => ws.send(JSON.stringify(['REQ', 'mig', { kinds: [SCORE_KIND], authors: [gamePubkey], limit: 500 }]));
@@ -232,29 +253,56 @@ function fetchRelayEvents(relay: string): Promise<RelayEvent[]> {
       try { msg = JSON.parse(typeof ev.data === 'string' ? ev.data : ''); } catch { return; }
       if (!Array.isArray(msg)) return;
       if (msg[0] === 'EVENT' && msg[2]) events.push(msg[2] as RelayEvent);
-      if (msg[0] === 'EOSE') { clearTimeout(timer); try { ws.close(); } catch { /* ignore */ } resolve(events); }
+      if (msg[0] === 'EOSE') settle(true, 'eose');
+      if (msg[0] === 'NOTICE') settle(false, String(msg[1] ?? 'notice'));
+      if (msg[0] === 'CLOSED') settle(false, String(msg[2] ?? 'closed'));
     };
-    ws.onerror = () => { clearTimeout(timer); resolve(events); };
+    ws.onerror = () => settle(false, 'websocket error');
+    ws.onclose = () => settle(false, 'closed before EOSE');
   });
 }
 
 async function publish(event: VerifiedEvent, relays: readonly string[]): Promise<number> {
-  if (relays.includes(GAMESTR_TEST_RELAY)) {
-    const waitMs = Math.max(0, lastTestRelayWriteAt + TEST_RELAY_WRITE_INTERVAL_MS - Date.now());
-    if (waitMs > 0) {
-      console.log(`[migrate] pacing test relay write for ${Math.ceil(waitMs / 1000)}s`);
-      await new Promise(resolve => setTimeout(resolve, waitMs));
-    }
-    lastTestRelayWriteAt = Date.now();
+  const results = await Promise.all(relays.map(relay => publishToRelay(relay, event)));
+  return results.filter(Boolean).length;
+}
+
+async function publishToRelay(relay: string, event: VerifiedEvent): Promise<boolean> {
+  for (let attempt = 1; attempt <= RELAY_PUBLISH_ATTEMPTS; attempt += 1) {
+    if (relay === GAMESTR_TEST_RELAY) await paceTestRelayWrite();
+    const result = await publishToRelayOnce(relay, event);
+    if (result.ok) return true;
+    console.warn(`[migrate] ${relay} rejected ${event.id} (${result.reason}); attempt ${attempt}/${RELAY_PUBLISH_ATTEMPTS}`);
+    if (attempt < RELAY_PUBLISH_ATTEMPTS) await new Promise(resolve => setTimeout(resolve, 3000 * attempt));
   }
-  return Promise.all(relays.map(relay => new Promise<boolean>(resolve => {
+  return false;
+}
+
+async function paceTestRelayWrite(): Promise<void> {
+  const waitMs = Math.max(0, lastTestRelayWriteAt + TEST_RELAY_WRITE_INTERVAL_MS - Date.now());
+  if (waitMs > 0) {
+    console.log(`[migrate] pacing test relay write for ${Math.ceil(waitMs / 1000)}s`);
+    await new Promise(resolve => setTimeout(resolve, waitMs));
+  }
+  lastTestRelayWriteAt = Date.now();
+}
+
+function publishToRelayOnce(relay: string, event: VerifiedEvent): Promise<{ ok: boolean; reason: string }> {
+  return new Promise(resolve => {
     let ws: WebSocket;
-    const timer = setTimeout(() => { try { ws.close(); } catch { /* ignore */ } resolve(false); }, RELAY_TIMEOUT_MS);
+    let settled = false;
+    const settle = (ok: boolean, reason: string): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      try { ws.close(); } catch { /* ignore */ }
+      resolve({ ok, reason });
+    };
+    const timer = setTimeout(() => settle(false, 'timeout'), RELAY_TIMEOUT_MS);
     try {
       ws = new WebSocket(relay);
     } catch {
-      clearTimeout(timer);
-      resolve(false);
+      settle(false, 'connection failed');
       return;
     }
     ws.onopen = () => ws.send(JSON.stringify(['EVENT', event]));
@@ -262,12 +310,11 @@ async function publish(event: VerifiedEvent, relays: readonly string[]): Promise
       let msg: unknown;
       try { msg = JSON.parse(typeof ev.data === 'string' ? ev.data : ''); } catch { return; }
       if (!Array.isArray(msg) || msg[0] !== 'OK' || msg[1] !== event.id) return;
-      clearTimeout(timer);
-      try { ws.close(); } catch { /* ignore */ }
-      resolve(msg[2] === true);
+      settle(msg[2] === true, String(msg[3] ?? (msg[2] === true ? 'accepted' : 'rejected')));
     };
-    ws.onerror = () => { clearTimeout(timer); resolve(false); };
-  }))).then(results => results.filter(Boolean).length);
+    ws.onerror = () => settle(false, 'websocket error');
+    ws.onclose = () => settle(false, 'closed before acknowledgement');
+  });
 }
 
 async function verifyHistoricBests(historic: Map<string, LoggedClaim>): Promise<string[]> {
