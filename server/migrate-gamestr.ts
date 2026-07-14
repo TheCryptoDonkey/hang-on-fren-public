@@ -23,7 +23,7 @@ import type { VerifiedEvent } from 'nostr-tools/core';
 import { nip19 } from 'nostr-tools';
 import { hexToBytes } from 'nostr-tools/utils';
 import { buildScoreEvent, GAME_ID, SCORE_KIND, type RunSummary } from '../src/scoring.js';
-import { DEFAULT_WRITE_RELAYS } from '../src/relays.js';
+import { DEFAULT_WRITE_RELAYS, GAMESTR_TEST_RELAY } from '../src/relays.js';
 import { cleanPlayerName, type ClaimInput } from './claim-rules.js';
 
 const WRITE_RELAYS = (process.env.HANGONFREN_WRITE_RELAYS ?? '')
@@ -33,7 +33,13 @@ const CLAIM_LOG = process.env.HANGONFREN_CLAIM_LOG ?? '/var/lib/hangonfren/claim
 const SITE_URL = process.env.HANGONFREN_SITE_URL ?? 'https://hang-on-fren.playechoseven.com/';
 const DRY_RUN = process.env.MIGRATE_DRY_RUN === '1';
 const RELAY_TIMEOUT_MS = 6000;
+// The Gamestr test relay currently accepts a maximum burst of roughly three
+// events per minute from one publisher. Keep reconciliation below that rate.
+const TEST_RELAY_WRITE_INTERVAL_MS = 21_000;
+const VERIFY_RETRY_MS = 15_000;
+const VERIFY_ATTEMPTS = 5;
 const NEW_D_FORMAT = new RegExp(`^${GAME_ID}:[0-9a-f]{64}:(10|[1-9])$`);
+let lastTestRelayWriteAt = 0;
 
 const gameSecret = loadGameSecret();
 const gamePubkey = getPublicKey(gameSecret);
@@ -232,7 +238,15 @@ function fetchRelayEvents(relay: string): Promise<RelayEvent[]> {
   });
 }
 
-function publish(event: VerifiedEvent, relays: readonly string[]): Promise<number> {
+async function publish(event: VerifiedEvent, relays: readonly string[]): Promise<number> {
+  if (relays.includes(GAMESTR_TEST_RELAY)) {
+    const waitMs = Math.max(0, lastTestRelayWriteAt + TEST_RELAY_WRITE_INTERVAL_MS - Date.now());
+    if (waitMs > 0) {
+      console.log(`[migrate] pacing test relay write for ${Math.ceil(waitMs / 1000)}s`);
+      await new Promise(resolve => setTimeout(resolve, waitMs));
+    }
+    lastTestRelayWriteAt = Date.now();
+  }
   return Promise.all(relays.map(relay => new Promise<boolean>(resolve => {
     let ws: WebSocket;
     const timer = setTimeout(() => { try { ws.close(); } catch { /* ignore */ } resolve(false); }, RELAY_TIMEOUT_MS);
@@ -258,7 +272,7 @@ function publish(event: VerifiedEvent, relays: readonly string[]): Promise<numbe
 
 async function verifyHistoricBests(historic: Map<string, LoggedClaim>): Promise<string[]> {
   let missing: string[] = [];
-  for (let attempt = 1; attempt <= 3; attempt += 1) {
+  for (let attempt = 1; attempt <= VERIFY_ATTEMPTS; attempt += 1) {
     const snapshots = await fetchRelaySnapshots();
     missing = [];
     for (const snapshot of snapshots) {
@@ -271,7 +285,10 @@ async function verifyHistoricBests(historic: Map<string, LoggedClaim>): Promise<
       }
     }
     if (missing.length === 0) return [];
-    if (attempt < 3) await new Promise(resolve => setTimeout(resolve, 1000));
+    if (attempt < VERIFY_ATTEMPTS) {
+      console.log(`[migrate] read-back attempt ${attempt}/${VERIFY_ATTEMPTS} still waiting for ${missing.length} scores; retrying in ${VERIFY_RETRY_MS / 1000}s`);
+      await new Promise(resolve => setTimeout(resolve, VERIFY_RETRY_MS));
+    }
   }
   return missing;
 }

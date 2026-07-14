@@ -2,10 +2,10 @@
 // Keep Gamestr's production and test relays together so endpoint changes
 // cannot drift between live publishing and historic-score reconciliation.
 
-export const GAMESTR_RELAYS = [
-  'wss://main.relay.gamestr.io',
-  'wss://test.relay.gamestr.io',
-] as const;
+export const GAMESTR_MAIN_RELAY = 'wss://main.relay.gamestr.io';
+export const GAMESTR_TEST_RELAY = 'wss://test.relay.gamestr.io';
+
+export const GAMESTR_RELAYS = [GAMESTR_MAIN_RELAY, GAMESTR_TEST_RELAY] as const;
 
 export const DEFAULT_WRITE_RELAYS = [
   ...GAMESTR_RELAYS,

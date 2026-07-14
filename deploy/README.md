@@ -71,4 +71,6 @@ When Gamestr relay endpoints change, run the `Deploy` workflow manually with
 `migrate_scores` enabled. The job first shows the dry-run plan, then replays the
 best score for every player and level from the append-only claim log onto both
 current Gamestr relays. It fails unless every replayed score can be read back
-from both relays; the game signing key remains in the VPS environment file.
+from both relays. The migration paces test-relay writes and retries read-back to
+allow for its write limit and indexing delay; the game signing key remains in
+the VPS environment file.
