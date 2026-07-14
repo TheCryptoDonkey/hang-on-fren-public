@@ -74,3 +74,8 @@ missing. It fails unless every score can be read back from both relays. The
 migration reuses one connection, paces test-relay writes, and retries read-back
 to allow for relay connection limits and indexing delay; the game signing key
 remains in the VPS environment file.
+
+The reconciler also includes the curated best entries recovered from the
+pre-claim-service browser board (`server/historic-scores.ts`). Those events are
+marked as historic local imports, use zero for run fields that were never stored,
+and remain reproducible on future relay moves without inventing run telemetry.

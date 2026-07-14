@@ -25,6 +25,7 @@ import { hexToBytes } from 'nostr-tools/utils';
 import { buildScoreEvent, GAME_ID, SCORE_KIND, type RunSummary } from '../src/scoring.js';
 import { DEFAULT_WRITE_RELAYS, GAMESTR_TEST_RELAY } from '../src/relays.js';
 import { cleanPlayerName, type ClaimInput } from './claim-rules.js';
+import { HISTORIC_SCORE_ROWS } from './historic-scores.js';
 
 const WRITE_RELAYS = (process.env.HANGONFREN_WRITE_RELAYS ?? '')
   .split(',').map(r => r.trim()).filter(Boolean);
@@ -53,14 +54,15 @@ console.log(`[migrate] game pubkey ${gamePubkey}${DRY_RUN ? ' · DRY RUN' : ''}`
 
 interface LoggedClaim { pubkey: string; claim: ClaimInput }
 
-const rows = await loadClaimRows();
+const claimRows = await loadClaimRows();
+const rows: LoggedClaim[] = [...claimRows, ...HISTORIC_SCORE_ROWS];
 const best = new Map<string, LoggedClaim>();
 for (const row of rows) {
   const key = `${row.pubkey}:${row.claim.level}`;
   const current = best.get(key);
   if (!current || row.claim.score > current.claim.score) best.set(key, row);
 }
-console.log(`[migrate] claim log: ${rows.length} claims → ${best.size} best (player, level) entries`);
+console.log(`[migrate] sources: ${claimRows.length} claim-log rows + ${HISTORIC_SCORE_ROWS.length} pre-service local bests → ${best.size} best (player, level) entries`);
 
 // ---- 2. current relay state --------------------------------------------------
 
@@ -106,6 +108,9 @@ for (const { pubkey, claim } of best.values()) {
     btcBlock: claim.btc_block,
     btcUsdCents: claim.btc_usd_cents,
   });
+  if (claim.run_id.startsWith('historic-local-')) {
+    template.tags.push(['historic', 'true'], ['historicSource', 'local-highscores-v2']);
+  }
   if (DRY_RUN) {
     console.log(`[migrate] would publish ${d} score=${claim.score} run=${claim.run_id} → ${targets.join(', ')}`);
     republished += 1;
