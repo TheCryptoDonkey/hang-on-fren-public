@@ -44,6 +44,116 @@ const VERIFY_RETRY_MS = 15_000;
 const VERIFY_ATTEMPTS = 5;
 const NEW_D_FORMAT = new RegExp(`^${GAME_ID}:[0-9a-f]{64}:(10|[1-9])$`);
 let lastTestRelayWriteAt = 0;
+
+interface PendingPublish {
+  eventId: string;
+  resolve: (result: { ok: boolean; reason: string }) => void;
+  timer: ReturnType<typeof setTimeout>;
+}
+
+/** Reuse one socket for the whole relay batch. Gamestr currently leaks some
+ *  rapidly closed connections into its per-IP connection counter, so opening
+ *  one socket per historic event can exhaust the relay even at a low rate. */
+class RelayPublisher {
+  private ws: WebSocket | null = null;
+  private connecting: Promise<{ ok: boolean; reason: string }> | null = null;
+  private pending: PendingPublish | null = null;
+  private closeWaiters: Array<() => void> = [];
+
+  constructor(private readonly relay: string) {}
+
+  async publish(event: VerifiedEvent): Promise<{ ok: boolean; reason: string }> {
+    const connected = await this.ensureConnected();
+    if (!connected.ok || !this.ws) return connected;
+    if (this.pending) return { ok: false, reason: 'publisher busy' };
+    return new Promise(resolve => {
+      const timer = setTimeout(() => {
+        if (this.pending?.eventId !== event.id) return;
+        this.pending = null;
+        resolve({ ok: false, reason: 'acknowledgement timeout' });
+      }, RELAY_TIMEOUT_MS);
+      this.pending = { eventId: event.id, resolve, timer };
+      try {
+        this.ws?.send(JSON.stringify(['EVENT', event]));
+      } catch {
+        clearTimeout(timer);
+        this.pending = null;
+        resolve({ ok: false, reason: 'send failed' });
+      }
+    });
+  }
+
+  async close(): Promise<void> {
+    const ws = this.ws;
+    if (!ws || ws.readyState >= 2) return;
+    await new Promise<void>(resolve => {
+      const fallback = setTimeout(resolve, 3000);
+      this.closeWaiters.push(() => {
+        clearTimeout(fallback);
+        resolve();
+      });
+      try { ws.close(); } catch { clearTimeout(fallback); resolve(); }
+    });
+  }
+
+  private async ensureConnected(): Promise<{ ok: boolean; reason: string }> {
+    if (this.ws?.readyState === 1) return { ok: true, reason: 'connected' };
+    if (this.connecting) return this.connecting;
+    this.connecting = new Promise(resolve => {
+      let ws: WebSocket;
+      let settled = false;
+      const settle = (result: { ok: boolean; reason: string }): void => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve(result);
+      };
+      const timer = setTimeout(() => settle({ ok: false, reason: 'connection timeout' }), RELAY_TIMEOUT_MS);
+      try {
+        ws = new WebSocket(this.relay);
+        this.ws = ws;
+      } catch {
+        settle({ ok: false, reason: 'connection failed' });
+        return;
+      }
+      ws.onopen = () => settle({ ok: true, reason: 'connected' });
+      ws.onmessage = ev => this.handleMessage(ev);
+      ws.onerror = () => settle({ ok: false, reason: 'websocket error' });
+      ws.onclose = () => {
+        settle({ ok: false, reason: 'closed before connection ready' });
+        if (this.ws === ws) this.ws = null;
+        this.failPending('closed before acknowledgement');
+        const waiters = this.closeWaiters.splice(0);
+        for (const waiter of waiters) waiter();
+      };
+    });
+    const result = await this.connecting;
+    this.connecting = null;
+    return result;
+  }
+
+  private handleMessage(ev: MessageEvent): void {
+    let msg: unknown;
+    try { msg = JSON.parse(typeof ev.data === 'string' ? ev.data : ''); } catch { return; }
+    if (!Array.isArray(msg) || msg[0] !== 'OK' || !this.pending || msg[1] !== this.pending.eventId) return;
+    const pending = this.pending;
+    this.pending = null;
+    clearTimeout(pending.timer);
+    pending.resolve({
+      ok: msg[2] === true,
+      reason: String(msg[3] ?? (msg[2] === true ? 'accepted' : 'rejected')),
+    });
+  }
+
+  private failPending(reason: string): void {
+    if (!this.pending) return;
+    const pending = this.pending;
+    this.pending = null;
+    clearTimeout(pending.timer);
+    pending.resolve({ ok: false, reason });
+  }
+}
+
 const relayPublishers = new Map<string, RelayPublisher>();
 
 const gameSecret = loadGameSecret();
@@ -310,115 +420,6 @@ function publishToRelayOnce(relay: string, event: VerifiedEvent): Promise<{ ok: 
 async function closeRelayPublishers(): Promise<void> {
   await Promise.all(Array.from(relayPublishers.values(), publisher => publisher.close()));
   relayPublishers.clear();
-}
-
-interface PendingPublish {
-  eventId: string;
-  resolve: (result: { ok: boolean; reason: string }) => void;
-  timer: ReturnType<typeof setTimeout>;
-}
-
-/** Reuse one socket for the whole relay batch. Gamestr currently leaks some
- *  rapidly closed connections into its per-IP connection counter, so opening
- *  one socket per historic event can exhaust the relay even at a low rate. */
-class RelayPublisher {
-  private ws: WebSocket | null = null;
-  private connecting: Promise<{ ok: boolean; reason: string }> | null = null;
-  private pending: PendingPublish | null = null;
-  private closeWaiters: Array<() => void> = [];
-
-  constructor(private readonly relay: string) {}
-
-  async publish(event: VerifiedEvent): Promise<{ ok: boolean; reason: string }> {
-    const connected = await this.ensureConnected();
-    if (!connected.ok || !this.ws) return connected;
-    if (this.pending) return { ok: false, reason: 'publisher busy' };
-    return new Promise(resolve => {
-      const timer = setTimeout(() => {
-        if (this.pending?.eventId !== event.id) return;
-        this.pending = null;
-        resolve({ ok: false, reason: 'acknowledgement timeout' });
-      }, RELAY_TIMEOUT_MS);
-      this.pending = { eventId: event.id, resolve, timer };
-      try {
-        this.ws?.send(JSON.stringify(['EVENT', event]));
-      } catch {
-        clearTimeout(timer);
-        this.pending = null;
-        resolve({ ok: false, reason: 'send failed' });
-      }
-    });
-  }
-
-  async close(): Promise<void> {
-    const ws = this.ws;
-    if (!ws || ws.readyState >= 2) return;
-    await new Promise<void>(resolve => {
-      const fallback = setTimeout(resolve, 3000);
-      this.closeWaiters.push(() => {
-        clearTimeout(fallback);
-        resolve();
-      });
-      try { ws.close(); } catch { clearTimeout(fallback); resolve(); }
-    });
-  }
-
-  private async ensureConnected(): Promise<{ ok: boolean; reason: string }> {
-    if (this.ws?.readyState === 1) return { ok: true, reason: 'connected' };
-    if (this.connecting) return this.connecting;
-    this.connecting = new Promise(resolve => {
-      let ws: WebSocket;
-      let settled = false;
-      const settle = (result: { ok: boolean; reason: string }): void => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        resolve(result);
-      };
-      const timer = setTimeout(() => settle({ ok: false, reason: 'connection timeout' }), RELAY_TIMEOUT_MS);
-      try {
-        ws = new WebSocket(this.relay);
-        this.ws = ws;
-      } catch {
-        settle({ ok: false, reason: 'connection failed' });
-        return;
-      }
-      ws.onopen = () => settle({ ok: true, reason: 'connected' });
-      ws.onmessage = ev => this.handleMessage(ev);
-      ws.onerror = () => settle({ ok: false, reason: 'websocket error' });
-      ws.onclose = () => {
-        settle({ ok: false, reason: 'closed before connection ready' });
-        if (this.ws === ws) this.ws = null;
-        this.failPending('closed before acknowledgement');
-        const waiters = this.closeWaiters.splice(0);
-        for (const waiter of waiters) waiter();
-      };
-    });
-    const result = await this.connecting;
-    this.connecting = null;
-    return result;
-  }
-
-  private handleMessage(ev: MessageEvent): void {
-    let msg: unknown;
-    try { msg = JSON.parse(typeof ev.data === 'string' ? ev.data : ''); } catch { return; }
-    if (!Array.isArray(msg) || msg[0] !== 'OK' || !this.pending || msg[1] !== this.pending.eventId) return;
-    const pending = this.pending;
-    this.pending = null;
-    clearTimeout(pending.timer);
-    pending.resolve({
-      ok: msg[2] === true,
-      reason: String(msg[3] ?? (msg[2] === true ? 'accepted' : 'rejected')),
-    });
-  }
-
-  private failPending(reason: string): void {
-    if (!this.pending) return;
-    const pending = this.pending;
-    this.pending = null;
-    clearTimeout(pending.timer);
-    pending.resolve({ ok: false, reason });
-  }
 }
 
 async function verifyHistoricBests(historic: Map<string, LoggedClaim>): Promise<string[]> {
