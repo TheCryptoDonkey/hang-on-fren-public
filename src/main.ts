@@ -2,24 +2,27 @@
 // road (road.ts), dynamic world (world.ts), clock economy (timer.ts), scoring
 // (scoring.ts), audio (audio.ts), rendering (render.ts) and HUD (hud.ts).
 
-import { buildTrack, decorateTrack, createPlayer, updatePlayer, speedKph, DEFAULT_TUNING, ROAD, RIDER_FWD, type DriveInput } from './road.js';
-import { createWorld, resetWorld, updateWorld, addPickup, addMarker, signedForward, draftAt, getRival, getRivalGapM, retireRival } from './world.js';
+import { buildTrack, decorateTrack, createPlayer, updatePlayer, resetDrift, speedKph, riderScreenX, enclosureAt, alignFinishToStraight, DEFAULT_TUNING, ROAD, RIDER_FWD, RIDER_SCREEN_FRAC, type DriveInput } from './road.js';
+import { createWorld, resetWorld, updateWorld, addPickup, addMarker, signedForward, draftAt, audibleTraffic, getRival, getRivalGapM, retireRival } from './world.js';
 import { createTimer, tickTimer, addRoseTime, addCanTime, timerUrgency, DEFAULT_TIMER } from './timer.js';
-import { createScore, addDistance, addRose, addFuel, addBonus, addStuntBonus, penalise, addOvertake, addNearMiss, registerCrash, summarise, type RunSummary } from './scoring.js';
+import { createScore, addDistance, addRose, addFuel, addBonus, addStuntBonus, addDrift, driftPayout, penalise, addOvertake, addNearMiss, registerCrash, summarise, type RunSummary } from './scoring.js';
 import type { PickupKind } from './world.js';
 import { SpriteStore, loadSpriteInto, loadSpritesInto, buildSignVariants, buildBillboardVariants, brandPetrol } from './sprites.js';
 import { renderScene, drawTitleArt } from './render.js';
+import { spawnSmoke, updateSmoke, type Smoke } from './smoke.js';
+import { riderSize } from './rider.js';
 import { drawHud, addPopup, updatePopups, type HudState, type Popup } from './hud.js';
 import { loadBoard, saveBoard, insertScore, qualifies, topScore, type HighScore } from './highscore.js';
-import { unlockAudio, updateEngine, updateRumble, updateScreech, updateTurbo, playSfx, playVoiceClip, preloadVoiceClip, toggleMuted, isMuted } from './audio.js';
+import { unlockAudio, updateEngine, updateRumble, updateScreech, updateTurbo, updateTraffic, silenceTraffic, updateEcho, playSfx, playPassBy, playVoiceClip, preloadVoiceClip, resetGearbox, currentGear, toggleMuted, isMuted } from './audio.js';
 import { initMusic, preloadMusic, startMusic, currentMusicUrl } from './music.js';
-import { paletteAt, stageAt, stageIndexAt, sceneryKitAt, timeOfDayAt, marketPhaseAt, setActiveTour, getActiveTour, levelCount, finishDistanceM, roseRichAt, CHECKPOINT_BONUS, STAGE_M, TOUR_TITLES, type TourId } from './stages.js';
+import { paletteAt, stageAt, stageIndexAt, sceneryKitAt, terrainAt, timeOfDayAt, marketPhaseAt, setActiveTour, getActiveTour, levelCount, finishDistanceM, roseRichAt, CHECKPOINT_BONUS, STAGE_M, TOUR_TITLES, type TourId } from './stages.js';
 import { loadSelectedTour, saveSelectedTour } from './progress.js';
 import { appendChar, backspace, cleanName, layout as nameLayout, keyAt as nameKeyAt, drawNameEntry } from './nameentry.js';
 import { connectNostr, fetchGlobalBoard, getIdentity, renameGuest, restoreIdentity, submitScore, useGuestMode, type GlobalScore } from './nostr.js';
 import { MODES, loadModeIndex, saveModeIndex } from './difficulty.js';
-import { clamp } from './util.js';
+import { approach, clamp } from './util.js';
 import { isSteeringCode, KeyboardDriveState } from './keyboard-drive.js';
+import { createFlick, updateFlick, resetFlick } from './flick.js';
 import { assetUrl } from './asset-url.js';
 import { fetchBtcSnapshot, type BtcSnapshot } from './bitcoin.js';
 import { breakFlow, createFlow, flowLabel, flowMultiplier, gainFlow, tickFlow, FLOW_GAINS } from './flow.js';
@@ -98,6 +101,10 @@ const SLING_COOLDOWN = 2.5; // seconds before the next slingshot can fire
 // boundary, so it scrolls in and the rider drives through it as the region
 // turns over (or the run is won).
 const MARKER_LOOKAHEAD_M = 340;
+// The finish arch is dropped further out than the checkpoint gates: it stands on
+// a straight (alignFinishToStraight), so a long lead makes the tape visible down
+// the whole run-in. Capped by how far the road is actually drawn ahead.
+const FINISH_LOOKAHEAD_M = 620;
 // End-of-race time bonus: every whole second still on the clock at the finish
 // line is worth this many points (classic OutRun goal bonus).
 const TIME_BONUS_PER_SEC = 100;
@@ -109,6 +116,48 @@ const VICTORY_SHOW_TIME = 5.5;
 // Level-skip cheat: two + presses inside this window jump to the next stage.
 // Cheating is honest about itself — a cheated run NEVER submits to gamestr.
 const CHEAT_PLUS_WINDOW = 0.6;
+
+/**
+ * The camera. A pseudo-3D road is a flat scrolling texture until the EYE moves,
+ * so these three are doing most of the work of making the game feel three-
+ * dimensional — more than any amount of extra scenery would.
+ *
+ *  YAW   — the eye turns INTO the corner (and part-way along a slide), so you
+ *          see round the bend you are taking rather than staring at a wall.
+ *  ROLL  — the whole world banks with the bike. Cheap; enormous.
+ *  LAG   — the eye TRAILS the bike laterally, so a hard steer or a powerslide
+ *          swings the bike across the frame instead of pinning it dead-centre.
+ *
+ * All three are smoothed: they should swing, never snap. The lag is capped hard,
+ * because the bike is drawn where its true road position projects to, and the
+ * road under it is wider than the screen — a lag of 0.1 road-offset units would
+ * throw the bike clean out of frame.
+ */
+const CAM = {
+  yawFromCurve: 0.05, // rad at full speed through the sharpest bend
+  yawFromSlip: 0.5, // fraction of the bike's slip angle the eye follows
+  maxYaw: 0.2,
+  rollFromLean: 0.034, // rad at full lean
+  rollFromCurve: 0.018,
+  maxRoll: 0.052,
+  lagRate: 25, // how hard the eye chases the bike (per second)
+  maxLag: 0.06, // road-offset units — see above, this cap matters
+  yawRate: 5, // smoothing (per second)
+  rollRate: 6,
+} as const;
+
+/** Curve magnitude treated as "the sharpest bend" when normalising camera swing. */
+const CURVE_REF = 6.5;
+
+// Tyre smoke pours off the back once the slide is deep enough to be worth
+// looking at, and off both wheels whenever a wheel is in the dirt. The ramp
+// SATURATES early (a slide only a third of the way to full lock is already
+// smoking hard) — scaling the rate linearly all the way to the spin limit meant
+// an ordinary, well-held drift trickled out a handful of puffs a second and
+// barely appeared to smoke at all.
+const SMOKE_SLIP = 0.22; // slip fraction below which a slide doesn't smoke
+const SMOKE_FULL = 0.5; // …and the slip at which it is already pouring
+const SMOKE_RATE = 120; // puffs/sec once it is
 
 type Phase = 'loading' | 'title' | 'playing' | 'victory' | 'gameover';
 
@@ -167,6 +216,7 @@ const state = {
   lastStageIndex: 0,
   lastGateSpawned: 0, // highest checkpoint boundary index a gate has been dropped for
   finishSpawned: false, // finish arch dropped yet?
+  finishDistance: 0, // the finish distance, nudged to land the tape on a straight
   confettiAccum: 0, // drip-feeds confetti on the victory screen
   fireworkAccum: 0,
   victoryTime: 0,
@@ -197,6 +247,19 @@ const state = {
   draftCharge: 0, // banked draft 0..1 — converts to a slingshot on wake exit
   slingshot: 0, // seconds of slingshot speed remaining
   slingCooldown: 0,
+  /** 0..1 how deep under a tunnel or bridge the BIKE is. Drives light and echo. */
+  enclosure: 0,
+  // ---- camera (see CAM) ----
+  camYaw: 0,
+  camRoll: 0,
+  camX: 0, // the eye's lateral position; trails player.x
+  // ---- powerslide ----
+  smoke: [] as Smoke[],
+  smokeAccum: 0,
+  /** ∫ |slip| × speed-fraction dt over the slide in progress — what it pays out. */
+  driftArea: 0,
+  driftHeld: 0, // seconds the current slide has been held
+  wasDrifting: false,
   flow: createFlow(),
   stageStartedAt: 0,
   stageStartCrashes: 0,
@@ -403,8 +466,11 @@ function drawSparks(ctx2: CanvasRenderingContext2D): void {
   ctx2.globalAlpha = 1;
 }
 
-const input: DriveInput = { left: false, right: false, throttle: true, brake: false };
+const input: DriveInput = { left: false, right: false, throttle: true, brake: false, flick: 0 };
 const keyboard = new KeyboardDriveState();
+// The counter-steer flick that breaks the tyres loose (flick.ts). Fed the net
+// steer direction each step; its output arms `input.flick` for the drift entry.
+const flick = createFlick();
 let touchSteer = 0; // -1,0,1
 let touchBrake = false;
 
@@ -860,6 +926,9 @@ function startRun(): void {
   state.lastStageIndex = 0;
   state.lastGateSpawned = 0;
   state.finishSpawned = false;
+  // Land the finish tape at the end of a straight so the arch reads from far out
+  // (the nominal distance falls mid-corner — see alignFinishToStraight).
+  state.finishDistance = alignFinishToStraight(track, finishDistanceM());
   state.outcome = 'time';
   state.finishBonus = 0;
   state.finishTimeLeft = 0;
@@ -895,6 +964,18 @@ function startRun(): void {
   state.rivalIntro = selectedTour === 'grand' ? 3.4 : 0;
   state.rivalResult = null;
   state.rivalResultTime = 0;
+  resetGearbox();
+  resetDrift(player);
+  resetFlick(flick);
+  state.enclosure = 0;
+  state.camYaw = 0;
+  state.camRoll = 0;
+  state.camX = 0;
+  state.smoke = [];
+  state.smokeAccum = 0;
+  state.driftArea = 0;
+  state.driftHeld = 0;
+  state.wasDrifting = false;
   player.maxSpeed = BASE_MAX_SPEED;
   state.runId = typeof crypto.randomUUID === 'function'
     ? crypto.randomUUID()
@@ -1113,19 +1194,60 @@ function resolveOpeningRivalTour(): void {
 // pickup streak, which costs you time on the clock — but it NO LONGER ends the
 // run. The clock is the only thing that can finish you (out of time), so runs
 // end when the timer expires, never on a tally of crashes.
-function startWipeout(): void {
+function startWipeout(reason: 'crash' | 'spin' = 'crash'): void {
   if (state.wipeout > 0) return;
   state.wipeout = 0.0001;
   state.spinTimer = SPIN_TIME;
   state.drafting = 0;
   state.draftCharge = 0;
   state.slingshot = 0;
+  // Any slide in progress is FORFEIT. A drift only pays when it is caught, so
+  // binning it has to cost you the whole thing — otherwise the cheapest way to
+  // farm drift points would be to wind one up and throw it at the scenery.
+  forfeitDrift();
   breakFlow(state.flow);
   registerCrash(score);
   playSfx('crash', 1.1);
   playSfx('wipeout', 0.9);
   vibrate([60, 40, 90]);
-  addPopup(state.popups, 'WIPEOUT!', W / 2, H * 0.5, '#ff5d78', 1.3);
+  addPopup(state.popups, reason === 'spin' ? 'SPUN IT!' : 'WIPEOUT!', W / 2, H * 0.5, '#ff5d78', 1.3);
+}
+
+/** Throw away the slide in progress — nothing banked, angle wiped. */
+function forfeitDrift(): void {
+  resetDrift(player);
+  resetFlick(flick);
+  state.driftArea = 0;
+  state.driftHeld = 0;
+  state.wasDrifting = false;
+}
+
+/** How far the eye is currently trailing the bike, capped so it stays in frame. */
+function camLag(): number {
+  return clamp(player.x - state.camX, -CAM.maxLag, CAM.maxLag);
+}
+
+/**
+ * Take a hit — from clipping something, or from spinning a slide you got greedy
+ * with. Both resolve identically, including the HODL shield: it absorbs your own
+ * mistakes as readily as the road's, which is the only reading of "absorbs one
+ * wipeout" that doesn't need a footnote.
+ */
+function takeHit(reason: 'crash' | 'spin'): void {
+  if (!state.shield) {
+    startWipeout(reason);
+    return;
+  }
+  // The shield eats it: no spin-out, no streak loss — just a moment of grace to
+  // get clear of whatever you clipped.
+  state.shield = false;
+  state.invuln = Math.max(state.invuln, 1.2);
+  state.flash = 0.6;
+  forfeitDrift();
+  playSfx('milestone', 0.9);
+  playSfx('nearMiss', 0.8);
+  vibrate([25, 30, 25]);
+  addPopup(state.popups, 'SHIELD SAVED YOU!', W / 2, H * 0.5, '#8fd0ff', 1.5);
 }
 
 // The chain snapshot fetch kicked off when a run ends — submitRunScore awaits
@@ -1235,6 +1357,8 @@ function update(dt: number): void {
     keyboard.clear();
     clearTouchInput();
     updateEngine({ playing: false, speed: 0, throttle: 0 });
+    silenceTraffic();
+    updateEcho({ amount: 0 });
     updateRumble({ active: false, intensity: 0, speed: 0 });
     updateScreech({ active: false, load: 0, speed: 0 });
     updateTurbo({ active: false, intensity: 0 });
@@ -1263,6 +1387,7 @@ function update(dt: number): void {
   // keep the audio chains silent until Escape (or a tap) resumes.
   if (state.paused) {
     updateEngine({ playing: false, speed: 0, throttle: 0 });
+    silenceTraffic();
     updateRumble({ active: false, intensity: 0, speed: 0 });
     updateScreech({ active: false, load: 0, speed: 0 });
     updateTurbo({ active: false, intensity: 0 });
@@ -1287,6 +1412,12 @@ function update(dt: number): void {
     * (state.slingshot > 0 ? SLING_SPEED_MUL : 1)
     * (state.beerSpeed > 0 ? BEER_SPEED_MUL : 1);
 
+  // Watch the steer direction for a flick (hold one way, stab the other, pin it
+  // back) and arm the drift entry for this step. Read BEFORE the wipeout override
+  // zeroes the input, and suppressed during a spin so a tumble can't trip it.
+  const steerDir = (input.right ? 1 : 0) - (input.left ? 1 : 0);
+  input.flick = state.wipeout > 0 ? 0 : updateFlick(flick, steerDir, dt);
+
   if (state.wipeout > 0) {
     // Spin-out: kill throttle, bleed speed, run the tumble animation.
     input.left = input.right = false;
@@ -1307,12 +1438,73 @@ function update(dt: number): void {
   if (state.invuln > 0) state.invuln = Math.max(0, state.invuln - dt);
 
   const prevZ = player.z;
-  updatePlayer(player, track, input, dt);
+  const seg = updatePlayer(player, track, input, dt);
   const moved = ((player.z - prevZ + track.length) % track.length);
   addDistance(score, moved / 100, speedKph(player));
 
+  // Wound the slide past full lock: the bike is gone. Same consequence as any
+  // other wipeout — and the shield will still save you from your own greed.
+  if (player.spinOut) takeHit('spin');
+
+  // --- powerslide: accrue while sideways, pay out only on a clean catch -------
+  const speedFrac = player.speed / BASE_MAX_SPEED;
+  if (player.drifting) {
+    state.driftHeld += dt;
+    state.driftArea += player.slip * clamp(speedFrac, 0, 1.3) * dt;
+  } else if (state.wasDrifting) {
+    const points = addDrift(score, state.driftHeld, state.driftArea, flowMultiplier(state.flow));
+    if (points > 0) {
+      rewardFlow(FLOW_GAINS.nearMiss);
+      playSfx('combo', 1, 1.25);
+      playSfx('overtake', 0.6, 1.2);
+      vibrate(18);
+      const label = state.driftHeld >= 2 ? 'BIG DRIFT' : 'DRIFT';
+      addPopup(state.popups, `${label}  +${points.toLocaleString('en-GB')}`, W / 2, H * 0.56, '#8fd0ff', 1.3);
+    }
+    state.driftArea = 0;
+    state.driftHeld = 0;
+  }
+  state.wasDrifting = player.drifting;
+
+  // --- camera: yaw into the corner, bank with the bike, trail it laterally ----
+  const curveT = clamp(seg.curve / CURVE_REF, -1, 1);
+  const camSpeed = clamp(speedFrac, 0, 1);
+  const yawTarget = clamp(
+    curveT * camSpeed * CAM.yawFromCurve + player.yaw * CAM.yawFromSlip,
+    -CAM.maxYaw,
+    CAM.maxYaw,
+  );
+  const rollTarget = clamp(
+    player.lean * CAM.rollFromLean + curveT * camSpeed * CAM.rollFromCurve,
+    -CAM.maxRoll,
+    CAM.maxRoll,
+  );
+  state.camYaw = approach(state.camYaw, yawTarget, CAM.yawRate, dt);
+  state.camRoll = approach(state.camRoll, rollTarget, CAM.rollRate, dt);
+  state.camX = approach(state.camX, player.x, CAM.lagRate, dt);
+
+  // --- tyre smoke: off the back in a slide, off both wheels in the dirt -------
+  const slideSmoke = player.drifting && player.slip > SMOKE_SLIP
+    ? clamp((player.slip - SMOKE_SLIP) / (SMOKE_FULL - SMOKE_SLIP), 0, 1)
+    : 0;
+  const dirtSmoke = player.offRoad ? clamp((Math.abs(player.x) - 1) / 0.5, 0, 1) * camSpeed : 0;
+  const puff = Math.max(slideSmoke, dirtSmoke);
+  if (puff > 0.02 && state.wipeout === 0) {
+    const rx = riderScreenX(W, state.camYaw, camLag());
+    const ry = H * RIDER_SCREEN_FRAC;
+    const dir = player.drifting ? player.driftDir : Math.sign(player.x) || 1;
+    state.smokeAccum += puff * SMOKE_RATE * dt;
+    while (state.smokeAccum >= 1) {
+      state.smokeAccum -= 1;
+      spawnSmoke(state.smoke, rx, ry, dir, puff, riderSize(W, H), dirtSmoke > slideSmoke);
+    }
+  } else {
+    state.smokeAccum = 0;
+  }
+  updateSmoke(state.smoke, dt);
+
   // Reaching the active tour's finish line completes the run — victory flow.
-  if (score.distance >= finishDistanceM()) {
+  if (score.distance >= state.finishDistance) {
     winRun();
     return;
   }
@@ -1446,23 +1638,13 @@ function update(dt: number): void {
           break;
       }
     } else if (ev.type === 'crash') {
-      if (state.shield) {
-        // The HODL shield eats the hit: no spin-out, no streak loss — just a
-        // moment of grace to get clear of whatever you clipped.
-        state.shield = false;
-        state.invuln = Math.max(state.invuln, 1.2);
-        state.flash = 0.6;
-        playSfx('milestone', 0.9);
-        playSfx('nearMiss', 0.8);
-        vibrate([25, 30, 25]);
-        addPopup(state.popups, 'SHIELD SAVED YOU!', W / 2, H * 0.5, '#8fd0ff', 1.5);
-      } else {
-        startWipeout();
-      }
+      takeHit('crash');
     } else if (ev.type === 'overtake') {
       rewardFlow(FLOW_GAINS.overtake);
       addOvertake(score, flowMultiplier(state.flow));
       playSfx('overtake', 0.8);
+      // Hear it go past: Doppler-swept, panned to the side it actually went by.
+      playPassBy(ev.side, 0.45 + ev.closing * 1.1);
       // A "wuh!" shout when you're carving through the pack (streak of 2+).
       if (score.overtakes >= 2) playSting(STING.overtake, 0.9);
     } else if (ev.type === 'nearMiss') {
@@ -1607,8 +1789,11 @@ function update(dt: number): void {
     }
   }
   if (!state.finishSpawned) {
-    const ahead = finishDistanceM() - score.distance;
-    if (ahead > 0 && ahead <= MARKER_LOOKAHEAD_M) {
+    const ahead = state.finishDistance - score.distance;
+    // A bigger lead than the checkpoint gates: the finish now stands at the end
+    // of a straight, so dropping it early lets the rider see the tape coming all
+    // the way down the run-in instead of having it appear at the last second.
+    if (ahead > 0 && ahead <= FINISH_LOOKAHEAD_M) {
       addMarker(world, player, track, 'prop-finish', ahead, 'finish');
       state.finishSpawned = true;
     }
@@ -1622,11 +1807,29 @@ function update(dt: number): void {
     addPopup(state.popups, `${km} KM!`, W / 2, H * 0.4, '#ffd76b', 1.2);
   }
 
+  // Revs are measured against the BASE top speed, never the current one: a turbo
+  // RAISES maxSpeed, so normalising against it would make the bike's biggest
+  // lunge read as a drop in revs and kick the box down a gear. Against the base
+  // ceiling a boost instead pushes past 1.0 and the engine screams into its
+  // limiter — which is what a boost should sound like.
   updateEngine({
     playing: true,
-    speed: player.speed / player.maxSpeed,
+    speed: speedFrac,
     throttle: input.throttle ? 1 : 0,
   });
+
+  // The road around you. Cars you are hunting down are audible while you hunt
+  // them, panned to the side they are actually on and pitched by how hard you are
+  // closing — so the pass-by whoosh is now the END of a sound you have been
+  // hearing build, rather than a noise that appears from nowhere as it goes by.
+  updateTraffic(audibleTraffic(world, player, track));
+
+  // Under a tunnel or a bridge: the light goes and your own engine comes back at
+  // you off the walls. Measured at the BIKE (RIDER_FWD ahead of the eye), not at
+  // the camera — the rider is what is under the roof, and the half-second of lag
+  // between the two would have the world going dark before the mouth arrives.
+  state.enclosure = enclosureAt(track, player.z + RIDER_FWD);
+  updateEcho({ amount: state.enclosure });
 
   // Off-road rumble: the tarmac spans |x| <= 1, so the rumble strip bites right
   // at the painted edge (~0.9) and the roar maxes out once you're properly into
@@ -1644,11 +1847,15 @@ function update(dt: number): void {
   // running wide in a bend). |vx| near its cap = a corner being pushed hard; the
   // scrub starts building past ~30% of that, with the audio engine itself
   // gating out slow turns, and never speaks mid-wipeout.
+  // A SLIDE, by definition, means the tyres have already let go — so a powerslide
+  // always squeals, in proportion to how far out it is hung. Whichever of the two
+  // is screaming louder wins.
   const speedPct = player.speed / player.maxSpeed;
   const corner = clamp((Math.abs(player.vx) / DEFAULT_TUNING.maxSteerVel - 0.3) / 0.7, 0, 1);
+  const scrub = Math.max(corner, player.slip);
   updateScreech({
-    active: state.wipeout === 0 && corner > 0,
-    load: corner,
+    active: state.wipeout === 0 && scrub > 0,
+    load: scrub,
     speed: speedPct,
   });
 
@@ -1681,13 +1888,17 @@ function render(): void {
   // effect ever snaps on or off mid-frame.
   const wobble = clamp(Math.min(state.beerWobble / 1.5, (BEER_WOBBLE_TIME - state.beerWobble) / 0.6), 0, 1);
   const trip = clamp(Math.min(state.shroom / 1.2, (SHROOM_TIME - state.shroom) / 0.4), 0, 1);
-  renderScene({ ctx, width: W, height: H, track, player, world, store, time: state.time, wipeout: state.wipeout, boost: state.boost > 0 ? state.boost / ROSE_BOOST_TIME : 0, sling: state.slingshot > 0 ? state.slingshot / SLING_TIME_MAX : 0, draft: state.draftCharge, wobble, trip, palette: paletteAt(score.distance), scenery: sceneryKitAt(score.distance), timeOfDay: timeOfDayAt(score.distance) });
+  renderScene({ ctx, width: W, height: H, track, player, world, store, time: state.time, wipeout: state.wipeout, boost: state.boost > 0 ? state.boost / ROSE_BOOST_TIME : 0, sling: state.slingshot > 0 ? state.slingshot / SLING_TIME_MAX : 0, draft: state.draftCharge, wobble, trip, palette: paletteAt(score.distance), scenery: sceneryKitAt(score.distance), terrain: terrainAt(score.distance), timeOfDay: timeOfDayAt(score.distance), camYaw: state.camYaw, camRoll: state.camRoll, camLag: camLag(), smoke: state.smoke, enclosure: state.enclosure });
   if (state.phase === 'playing') drawSparks(ctx);
 
   // The game-over card carries the score/stats itself — drawing the live HUD
   // under it just bled the speed/distance pills through the name-entry keys.
   if (state.phase === 'playing') {
     const hud: HudState = {
+      gear: currentGear(),
+      drifting: player.drifting,
+      driftSlip: player.slip,
+      driftPoints: driftPayout(score, state.driftHeld, state.driftArea, flowMultiplier(state.flow)),
       score: score.score,
       hiScore: topScore(board),
       timeLeft: timer.timeLeft,
@@ -1799,8 +2010,12 @@ function renderTitle(store: SpriteStore): void {
     ctx.font = `800 ${30 * u}px 'Trebuchet MS', sans-serif`;
     outlinedText('PRESS ENTER / TAP TO RIDE', W / 2, H * 0.67, '#ffffff', u, 6);
   }
-  ctx.font = `600 ${18 * u}px 'Trebuchet MS', sans-serif`;
-  outlinedText('◄ ► steer   ·   grab fuel for time   ·   roses = turbo   ·   don’t wipe out', W / 2, H * 0.73, '#bdeddb', u, 4);
+  // The powerslide is the whole game and nobody will ever find it by accident —
+  // so it gets the headline line, and the housekeeping gets the small print.
+  ctx.font = `800 ${20 * u}px 'Trebuchet MS', sans-serif`;
+  outlinedText('DRIFT: FLICK THE BARS (HOLD ► TAP ◄ HOLD ►) OR BRAKE INTO A BEND   ·   HOLD IT   ·   STEER OUT TO CATCH IT', W / 2, H * 0.725, '#8fd0ff', u, 5);
+  ctx.font = `600 ${16 * u}px 'Trebuchet MS', sans-serif`;
+  outlinedText('◄ ► steer   ·   grab fuel for time   ·   roses = turbo   ·   don’t wipe out', W / 2, H * 0.762, '#bdeddb', u, 4);
 
   // identity row: who signs your gamestr scores (tap / N to switch)
   ctx.font = `700 ${14 * u}px 'Trebuchet MS', sans-serif`;
@@ -1981,6 +2196,15 @@ function renderGameOver(_store: SpriteStore): void {
     W / 2,
     statsY,
   );
+  if (s.drifts > 0) {
+    ctx.font = `700 ${Math.min(17 * u, W * 0.019)}px 'Trebuchet MS', sans-serif`;
+    ctx.fillStyle = '#8fd0ff';
+    ctx.fillText(
+      `${s.drifts} drift${s.drifts === 1 ? '' : 's'} landed   ·   longest ${s.bestDriftS.toFixed(1)}s sideways`,
+      W / 2,
+      statsY + 24 * u,
+    );
+  }
 
   // gamestr publish status (non-qualifying runs publish immediately; a board
   // run publishes on DONE and the title notice carries the outcome instead).
@@ -2056,6 +2280,28 @@ if ((import.meta as { env?: { DEV?: boolean } }).env?.DEV) {
       if (!target) return;
       player.z = Math.max(0, target.index - 24) * ROAD.segmentLength;
       player.speed = player.maxSpeed * 0.72;
+    },
+    /** Park the bike just before the Nth tunnel / overpass, so it can be reviewed. */
+    seekOverhead: (kind: 'tunnel' | 'overpass' = 'tunnel', nth = 0, before = 14) => {
+      const found = track.overheads.filter(o => o.kind === kind)[nth];
+      if (!found) return false;
+      player.z = Math.max(0, found.start - before) * ROAD.segmentLength;
+      player.x = 0;
+      player.vx = 0;
+      return true;
+    },
+    /** Park the bike out wide at the start of a sustained bend, on the racing line. */
+    seekBend: (dir: 1 | -1 = 1, minCurve = 6) => {
+      const segs = track.segments;
+      for (let i = 0; i < segs.length; i += 1) {
+        if (segs[i].curve * dir < minCurve) continue;
+        if ((segs[i + 60]?.curve ?? 0) * dir < minCurve) continue;
+        player.z = i * ROAD.segmentLength;
+        player.x = -0.85 * dir;
+        player.vx = 0;
+        return true;
+      }
+      return false;
     },
     showVictory: () => {
       if (state.phase !== 'playing') startRun();

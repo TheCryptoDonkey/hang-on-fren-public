@@ -15,6 +15,7 @@ export interface RiderVisual {
   y: number; // screen y of the wheel contact
   size: number; // target rider HEIGHT in px (frames normalise to this)
   lean: number; // -1..1 (negative = leaning left)
+  yaw: number; // slip angle in radians (+ = nose swung right) — the powerslide
   bob: number; // small vertical bob in px
   wipeout: number; // 0..1 crash animation progress (0 = riding)
   spin: number; // accumulated wheel rotation in radians
@@ -22,9 +23,20 @@ export interface RiderVisual {
   time: number; // seconds, drives the hair flutter
 }
 
+/** On-screen height of the bike. Shared with the smoke, which scales off it. */
+export function riderSize(width: number, height: number): number {
+  return Math.min(height * 0.3, width * 0.32);
+}
+
 const LEAN_DEADZONE = 0.12;
 const HAIR_FRAC = 0.42; // top fraction of the sprite the wind flutters (hair)
 const WIND_SLICES = 22;
+// A yawed bike seen from BEHIND does not rotate in-plane — it swings its tail
+// out. With one rear-view sprite the honest cheap read is a shear: pin the
+// contact patch and lay the machine over against the slide, so the bike is
+// visibly crossed up under a rider who is still hanging off the inside.
+const YAW_SHEAR = 0.42;
+const YAW_TILT = 0.2;
 
 export function drawRider(ctx: CanvasRenderingContext2D, store: SpriteStore, v: RiderVisual): void {
   const cx = v.x;
@@ -71,7 +83,10 @@ export function drawRider(ctx: CanvasRenderingContext2D, store: SpriteStore, v: 
     // Continuous bank on top of the discrete lean frames — the rotation is
     // applied OUTSIDE the mirror flip, so it stays screen-oriented and pivots
     // at the wheel contact. Analogue lean makes the frames read as weight-shift.
-    ctx.rotate(clamp(v.lean, -1, 1) * 0.11);
+    ctx.rotate(clamp(v.lean, -1, 1) * 0.11 + v.yaw * YAW_TILT);
+    // Crossed up: shear the machine over against the slide. The contact patch is
+    // the origin here, so the wheels stay planted and only the body lays over.
+    if (v.yaw !== 0) ctx.transform(1, 0, v.yaw * YAW_SHEAR, 1, 0, 0);
     if (mirror) ctx.scale(-1, 1);
     drawWindSprite(ctx, sprite, w, h, v.time, 2 + v.speed * 11);
   }

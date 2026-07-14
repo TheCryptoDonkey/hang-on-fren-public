@@ -19,12 +19,16 @@ export interface HudState {
   timeLeft: number;
   urgency: number; // 0..1
   speedKph: number;
+  gear: number; // 1-based
   distanceM: number;
   roseStreak: number;
   level: number; // 1-based current level
   levels: number; // total levels in the journey
   region: string; // current region name
   shield: boolean; // HODL shield held (absorbs one wipeout)
+  drifting: boolean;
+  driftSlip: number; // 0..1 how far the slide is hung out — how close to spinning
+  driftPoints: number; // what the slide would pay if caught RIGHT NOW
   flowValue: number;
   flowLabel: string;
   flowMultiplier: number;
@@ -121,7 +125,7 @@ export function drawHud(ctx: CanvasRenderingContext2D, w: number, h: number, s: 
     ctx.fillText('SHOWDOWN  12.6 KM', flowX, flowY + 70 * u);
   }
 
-  // --- speed (bottom-right) ---
+  // --- speed + gear (bottom-right) ---
   const spW = 150 * u;
   const spH = 40 * u;
   const spX = w - spW - 20 * u;
@@ -134,6 +138,34 @@ export function drawHud(ctx: CanvasRenderingContext2D, w: number, h: number, s: 
   ctx.font = `700 ${13 * u}px 'Trebuchet MS', sans-serif`;
   ctx.fillStyle = MINT;
   ctx.fillText('KM/H', spX + 66 * u, spY + 28 * u);
+  // The gear the box is actually in — the visual half of the engine's ladder.
+  ctx.textAlign = 'right';
+  ctx.font = `900 ${28 * u}px 'Trebuchet MS', sans-serif`;
+  ctx.fillStyle = GOLD;
+  ctx.fillText(`${s.gear}`, spX + spW - 16 * u, spY + 30 * u);
+
+  // --- drift meter: the points you are gambling with RIGHT NOW ---------------
+  // Only up while sideways. The bar is how far the slide is hung out, so it fills
+  // toward red as you approach the angle that spins it — the rider can see the
+  // bet growing and the risk growing in the same glance, which is the entire
+  // decision the powerslide asks them to make.
+  if (s.drifting && s.driftPoints > 0) {
+    const dW = 220 * u;
+    const dH = 30 * u;
+    const dX = (w - dW) / 2;
+    const dY = h - bottomInset - dH - 26 * u;
+    pill(ctx, dX, dY, dW, dH, PANEL);
+    const fill = Math.min(1, s.driftSlip);
+    const hot = fill > 0.8; // about to let go
+    const barColour = hot && Math.floor(performance.now() / 90) % 2 === 0
+      ? '#ff5252'
+      : (fill > 0.6 ? GOLD : '#8fd0ff');
+    pill(ctx, dX + 4 * u, dY + dH - 8 * u, (dW - 8 * u) * fill, 4 * u, barColour);
+    ctx.textAlign = 'center';
+    ctx.font = `800 ${17 * u}px 'Trebuchet MS', sans-serif`;
+    ctx.fillStyle = hot ? '#ff9d9d' : '#8fd0ff';
+    ctx.fillText(`DRIFT  +${s.driftPoints.toLocaleString('en-GB')}`, w / 2, dY + 19 * u);
+  }
 
   // --- level / region marker (bottom-left, above the distance pill) ---
   const markerY = h - bottomInset - spH - 34 * u;

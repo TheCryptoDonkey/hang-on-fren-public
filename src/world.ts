@@ -94,6 +94,13 @@ export interface Pickup {
 }
 
 export interface Car {
+  /**
+   * Stable identity for the lifetime of this car on the road. The audio engine
+   * keeps a small pool of engine voices and keys them on this: without it a voice
+   * would hop between cars whenever the sort order changed, and every reshuffle
+   * would be an audible pitch jump from a machine that is supposedly one car.
+   */
+  id: number;
   z: number;
   offset: number;
   driftPhase: number;
@@ -137,12 +144,20 @@ export interface World {
   rng: () => number;
   odometerM: number;
   mods: WorldMods;
+  /** Hands out Car.id. Monotonic, so a recycled car is a NEW car to the audio. */
+  nextCarId: number;
 }
 
 export type WorldEvent =
   | { type: 'pickup'; kind: PickupKind; offset: number }
-  | { type: 'overtake' }
-  | { type: 'nearMiss' }
+  /**
+   * `side` is where the car went by relative to the bike (negative = down your
+   * left), and `closing` is how much faster you took it, 0..1. Both exist so the
+   * pass-by can be HEARD going past on the correct side at the right speed
+   * (audio.ts `playPassBy`) rather than as a placeless blip.
+   */
+  | { type: 'overtake'; side: number; closing: number }
+  | { type: 'nearMiss'; side: number }
   | { type: 'rivalPass' }
   | { type: 'crash'; sprite: string };
 
@@ -242,6 +257,9 @@ function spawnCarAhead(world: World, player: Player, track: Track): Car {
   const z = wrap(player.z + ahead + jitter, track.length);
   const lane = pick(world.rng, LANE_OFFSETS);
   return {
+    // A recycled car is a NEW car — fresh id, so its engine voice starts over
+    // rather than sliding continuously from the machine it replaced.
+    id: world.nextCarId++,
     z,
     offset: lane,
     driftPhase: world.rng() * Math.PI * 2,
@@ -256,11 +274,12 @@ function spawnCarAhead(world: World, player: Player, track: Track): Car {
   };
 }
 
-function spawnRival(player: Player, track: Track): Car {
+function spawnRival(world: World, player: Player, track: Track): Car {
   const maxSpeedMps = player.maxSpeed / 100;
   const progress = createRivalProgress(maxSpeedMps);
   const z = wrap(player.z + progress.distanceM * 100, track.length);
   return {
+    id: world.nextCarId++,
     z,
     offset: 0.34,
     driftPhase: 0,
@@ -353,7 +372,69 @@ export function draftAt(world: World, player: Player, track: Track): number {
 }
 
 export function createWorld(seed = 0x1a2b3c, mods: WorldMods = { density: 1, speed: 1 }): World {
-  return { pickups: [], traffic: [], markers: [], rng: makeRng(seed), odometerM: 0, mods: { ...mods } };
+  return { pickups: [], traffic: [], markers: [], rng: makeRng(seed), odometerM: 0, mods: { ...mods }, nextCarId: 1 };
+}
+
+// ---- what you can HEAR of the traffic ---------------------------------------
+
+/** How far up the road a car's engine carries. */
+const HEAR_AHEAD = ROAD.segmentLength * 24;
+/** …and how far behind it stays audible once it has dropped back. */
+const HEAR_BEHIND = ROAD.segmentLength * 5;
+/**
+ * Distance at which a car's stereo position is half what it would be alongside
+ * you. Stereo placement is ANGULAR — how far off your centre-line the car sits is
+ * its lateral offset over its distance — so this is just the depth at which that
+ * angle has halved.
+ */
+const PAN_REF = ROAD.segmentLength * 4;
+
+/** One car, as the audio engine needs to hear it. */
+export interface TrafficSound {
+  id: number;
+  /** 0 at the edge of earshot … 1 right on top of you. Drives level. */
+  proximity: number;
+  /** -1..1 stereo position. Deliberately WIDENS as the car closes (see below). */
+  pan: number;
+  /** The car's own revs, 0..1 — a van lugging along should not sound like a Ferrari. */
+  rpm: number;
+  /** How hard you are closing on it, 0..1. Drives the Doppler pitch-up. */
+  closing: number;
+}
+
+/**
+ * The `limit` nearest cars within earshot, loudest first.
+ *
+ * Note the pan. It is ANGULAR — lateral offset over DISTANCE — not just lateral
+ * offset. A car three hundred metres up the road sits near the middle of your
+ * view whichever lane it is in, and only swings out to the side as it comes back
+ * to you. Panning on lane offset alone would slam that distant car hard left in
+ * your headphones: the sort of thing that sounds convincingly three-dimensional
+ * held still, and is completely wrong the moment anything moves.
+ */
+export function audibleTraffic(world: World, player: Player, track: Track, limit = 4): TrafficSound[] {
+  const heard: TrafficSound[] = [];
+  for (const car of world.traffic) {
+    const d = signedForward(car.z, player.z, track.length);
+    if (d > HEAR_AHEAD || d < -HEAR_BEHIND) continue;
+    // Falls away with distance rather than linearly — a car at half the range is
+    // much quieter than half as loud, which is how engines actually behave.
+    const t = clamp((d + HEAR_BEHIND) / (HEAR_AHEAD + HEAR_BEHIND), 0, 1);
+    const proximity = Math.pow(1 - t, 1.8);
+    const drift = Math.sin(car.driftPhase + world.odometerM * 0.02) * car.driftAmp;
+    const laneOffset = clamp(car.offset + drift, -0.85, 0.85);
+    const lateral = laneOffset - player.x;
+    const angular = lateral / (1 + Math.max(0, d) / PAN_REF);
+    heard.push({
+      id: car.id,
+      proximity,
+      pan: clamp(angular * 0.85, -1, 1),
+      rpm: clamp(car.speed / Math.max(1, player.maxSpeed), 0, 1),
+      closing: clamp((player.speed - car.speed) / Math.max(1, player.maxSpeed), 0, 1),
+    });
+  }
+  heard.sort((a, b) => b.proximity - a.proximity);
+  return heard.slice(0, limit);
 }
 
 /** (Re)populate the world ahead of the player for a fresh run. The opening
@@ -366,7 +447,7 @@ export function resetWorld(world: World, player: Player, track: Track, opts: { r
   world.markers = []; // gates/finish are added by main.ts as boundaries approach
   const target = targetCars(world);
   for (let i = 0; i < target; i += 1) world.traffic.push(spawnCarAhead(world, player, track));
-  if (opts.rival !== false) world.traffic.push(spawnRival(player, track));
+  if (opts.rival !== false) world.traffic.push(spawnRival(world, player, track));
 }
 
 /**
@@ -469,10 +550,13 @@ export function updateWorld(
 
     // Cleared it: the car's base drops past the bike's visible tail this frame →
     // an overtake (a near-miss if the closest approach only just cleared the
-    // hitbox).
+    // hitbox). `side` is the car's position relative to the BIKE, so a car you
+    // went by on the left reports negative — the sign the stereo pass-by needs.
     if (genuineStep && car.prevFwd > HIT_REAR && d <= HIT_REAR) {
-      if (passGap < hitGap + NEAR_BAND && passGap >= effGap) events.push({ type: 'nearMiss' });
-      events.push({ type: 'overtake' });
+      const side = clamp(laneOffset - player.x, -1, 1);
+      if (passGap < hitGap + NEAR_BAND && passGap >= effGap) events.push({ type: 'nearMiss', side });
+      const closing = clamp((player.speed - car.speed) / Math.max(1, player.maxSpeed), 0, 1);
+      events.push({ type: 'overtake', side, closing });
       if (car.role === 'rival') events.push({ type: 'rivalPass' });
     }
     car.prevFwd = d;

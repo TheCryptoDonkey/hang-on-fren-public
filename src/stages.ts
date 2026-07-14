@@ -289,39 +289,44 @@ const TAJ: Palette = {
 
 const WORLD_KEYFRAMES: readonly Palette[] = [MANCHESTER, PRAGUE, MALLORCA, TAJ];
 
+// Each region drives its OWN traffic: the vehicles you meet belong to the place
+// you're riding through — coaches and ploughs on the mountain, pickups and
+// buggies in the canyon, taxis and squad cars in the city, tractors in the
+// valley. Supercars are reserved for the roads that earn them (the flats, the
+// lava run, the golden finale), so the roster itself tells you where you are.
 const STAGES: readonly { name: string; roster: readonly string[] }[] = [
-  // 1 Amalfi — old-money Italian traffic pottering along the coast road.
-  { name: 'AMALFI COAST', roster: ['car-classic', 'car-van', 'car-banger'] },
-  // 2 Tropico Bay — holiday convertibles; the red-helmet scooter is now the
-  // unique persistent Fren rival, never anonymous traffic.
-  { name: 'TROPICO BAY', roster: ['car-porsche', 'car-ferrari', 'car-bentley'] },
-  // 3 Alpine Pass — grand tourers hauling up the mountain.
-  { name: 'ALPINE PASS', roster: ['car-bentley', 'car-lambo', 'car-classic'] },
-  // 4 Desert Mesa — dusty beaters and vans crossing the canyon.
-  { name: 'DESERT MESA', roster: ['car-banger', 'car-van', 'car-classic'] },
-  // 5 Neon City — supercars tearing through the night.
-  { name: 'NEON CITY', roster: ['car-ferrari', 'car-lambo', 'car-porsche'] },
-  // 6 Cherry Valley — gentle country traffic through the blossom.
-  { name: 'CHERRY VALLEY', roster: ['car-banger', 'car-classic', 'car-van'] },
-  // 7 Autumn Forest — stately tourers on the woodland road.
-  { name: 'AUTUMN FOREST', roster: ['car-bentley', 'car-banger', 'car-classic'] },
-  // 8 Salt Lake — fast machines skating the flats.
-  { name: 'SALT LAKE', roster: ['car-porsche', 'car-lambo', 'car-ferrari'] },
-  // 9 Volcano Road — dramatic exotics on the lava road.
-  { name: 'VOLCANO ROAD', roster: ['car-lambo', 'car-ferrari', 'car-bentley'] },
-  // 10 Golden Coast — a grand finale field for the run home.
-  { name: 'GOLDEN COAST', roster: ['car-ferrari', 'car-lambo', 'car-bentley'] },
+  // 1 Amalfi — old-money Italian traffic and a holiday camper on the coast road.
+  { name: 'AMALFI COAST', roster: ['car-classic', 'car-van', 'car-camper'] },
+  // 2 Tropico Bay — beach campers and open-top cruisers; the red-helmet scooter
+  // is the unique persistent Fren rival now, never anonymous traffic.
+  { name: 'TROPICO BAY', roster: ['car-camper', 'car-porsche', 'car-classic'] },
+  // 3 Alpine Pass — coaches and the snow plough that keeps the pass open.
+  { name: 'ALPINE PASS', roster: ['car-bus', 'car-plough', 'car-bentley'] },
+  // 4 Desert Mesa — pickups, dune buggies and dusty beaters crossing the canyon.
+  { name: 'DESERT MESA', roster: ['car-pickup', 'car-buggy', 'car-banger'] },
+  // 5 Neon City — cabs, squad cars and a supercar tearing through the night.
+  { name: 'NEON CITY', roster: ['car-taxi', 'car-police', 'car-ferrari'] },
+  // 6 Cherry Valley — tractors and country traffic through the blossom.
+  { name: 'CHERRY VALLEY', roster: ['car-tractor', 'car-classic', 'car-van'] },
+  // 7 Autumn Forest — campers and farm traffic on the woodland road.
+  { name: 'AUTUMN FOREST', roster: ['car-camper', 'car-tractor', 'car-bentley'] },
+  // 8 Salt Lake — record machines and buggies skating the flats.
+  { name: 'SALT LAKE', roster: ['car-buggy', 'car-porsche', 'car-lambo'] },
+  // 9 Volcano Road — service jeeps and the fire truck standing by on the lava.
+  { name: 'VOLCANO ROAD', roster: ['car-jeep', 'car-firetruck', 'car-banger'] },
+  // 10 Golden Coast — a grand supercar field for the run home.
+  { name: 'GOLDEN COAST', roster: ['car-ferrari', 'car-lambo', 'car-porsche'] },
 ];
 
 const WORLD_STAGES: readonly { name: string; roster: readonly string[] }[] = [
-  // W1 Old Manchester — working traffic between the mills.
-  { name: 'OLD MANCHESTER', roster: ['car-classic', 'car-van', 'car-banger'] },
-  // W2 Old Prague — stately machines on the cobbles.
-  { name: 'OLD PRAGUE', roster: ['car-classic', 'car-banger', 'car-bentley'] },
-  // W3 Old Mallorca — island holiday-makers on the terrace roads.
-  { name: 'OLD MALLORCA', roster: ['car-porsche', 'car-classic', 'car-van'] },
-  // W4 Taj Mahal — a grand closing procession.
-  { name: 'TAJ MAHAL', roster: ['car-bentley', 'car-ferrari', 'car-lambo'] },
+  // W1 Old Manchester — city working traffic: buses, cabs, vans.
+  { name: 'OLD MANCHESTER', roster: ['car-bus', 'car-taxi', 'car-van'] },
+  // W2 Old Prague — trams give way to coaches and stately machines on the cobbles.
+  { name: 'OLD PRAGUE', roster: ['car-bus', 'car-classic', 'car-bentley'] },
+  // W3 Old Mallorca — island holiday-makers: campers and cruisers on the terraces.
+  { name: 'OLD MALLORCA', roster: ['car-camper', 'car-porsche', 'car-classic'] },
+  // W4 Taj Mahal — a grand closing procession of coaches and tourers.
+  { name: 'TAJ MAHAL', roster: ['car-bus', 'car-bentley', 'car-ferrari'] },
 ];
 
 /**
@@ -391,6 +396,83 @@ const WORLD_SCENERY_KITS: readonly SceneryKit[] = [
 export function sceneryKitAt(distanceM: number): SceneryKit {
   return activeKits()[stageIndexAt(distanceM)];
 }
+
+// --- roadside terrain -------------------------------------------------------
+
+/**
+ * What the ground does beyond the verge on each side — the thing that makes the
+ * road read as a PLACE rather than a ribbon on a lawn: a rock wall climbing away
+ * on one shoulder, the ground falling off a cliff to the sea on the other.
+ *
+ * - `cliff` — a rock wall rising from the verge (drawn upward, occludes the sky)
+ * - `sea`   — the ground stops and the water starts (a drop to the coast)
+ * - `drop`  — the ground falls away into haze (a canyon / valley / lava field)
+ * - `flat`  — open ground running to the horizon (the default, no extra geometry)
+ */
+export type SideKind = 'cliff' | 'sea' | 'drop' | 'flat';
+
+export interface Terrain {
+  left: SideKind;
+  right: SideKind;
+  /** Rock-face colours for a `cliff` side (banded light/dark like the road). */
+  cliffLight: string;
+  cliffDark: string;
+  /** What a `drop` side falls into (canyon floor / lava / valley haze). */
+  dropColor: string;
+  /** How tall a `cliff` wall stands, in world units (camera height is ~1150). */
+  cliffHeight: number;
+}
+
+const FLAT_TERRAIN: Terrain = {
+  left: 'flat', right: 'flat',
+  cliffLight: '#9aa6b4', cliffDark: '#7f8b99', dropColor: '#b9cbdc', cliffHeight: 2000,
+};
+
+// One per grand-tour region, in journey order (aligned with STAGES/KEYFRAMES).
+const TERRAIN: readonly Terrain[] = [
+  // 1 AMALFI — the postcard: limestone wall inland, sheer drop to the bay.
+  { left: 'cliff', right: 'sea', cliffLight: '#b9a98c', cliffDark: '#9c8c72', dropColor: '#1f6fae', cliffHeight: 3400 },
+  // 2 TROPICO BAY — low dunes inland, turquoise lagoon seaward.
+  { left: 'flat', right: 'sea', cliffLight: '#d8c08e', cliffDark: '#c2a878', dropColor: '#12b3c4', cliffHeight: 1400 },
+  // 3 ALPINE PASS — rock face on the mountain side, valley falling away.
+  { left: 'cliff', right: 'drop', cliffLight: '#9aa6b4', cliffDark: '#7f8b99', dropColor: '#b9cbdc', cliffHeight: 5200 },
+  // 4 DESERT MESA — red-rock mesa one side, canyon the other.
+  { left: 'cliff', right: 'drop', cliffLight: '#c07a48', cliffDark: '#a35f34', dropColor: '#d8a860', cliffHeight: 4200 },
+  // 5 NEON CITY — concrete retaining walls hemming the expressway in.
+  { left: 'cliff', right: 'cliff', cliffLight: '#3a3f52', cliffDark: '#2c3040', dropColor: '#141a3a', cliffHeight: 2200 },
+  // 6 CHERRY VALLEY — open blossom country either side.
+  { left: 'flat', right: 'flat', cliffLight: '#8fbf7a', cliffDark: '#79a866', dropColor: '#9fd0e0', cliffHeight: 1600 },
+  // 7 AUTUMN FOREST — a wooded bank rising on the inland shoulder.
+  { left: 'cliff', right: 'flat', cliffLight: '#8a6a3e', cliffDark: '#6f5430', dropColor: '#c99a5a', cliffHeight: 2400 },
+  // 8 SALT LAKE — flats inland, the pink mirror lake to seaward.
+  { left: 'flat', right: 'sea', cliffLight: '#cfc6d2', cliffDark: '#b8aebd', dropColor: '#bfe0e6', cliffHeight: 1200 },
+  // 9 VOLCANO ROAD — black basalt wall, a glowing lava field falling away.
+  { left: 'cliff', right: 'drop', cliffLight: '#4a3a38', cliffDark: '#332726', dropColor: '#c8401a', cliffHeight: 4600 },
+  // 10 GOLDEN COAST — the Amalfi profile again, lit gold for the run home.
+  { left: 'cliff', right: 'sea', cliffLight: '#c2ab84', cliffDark: '#a38e6b', dropColor: '#1f7fbe', cliffHeight: 3400 },
+];
+
+// One per world-tour region (Manchester → Prague → Mallorca → Taj Mahal).
+const WORLD_TERRAIN: readonly Terrain[] = [
+  // W1 OLD MANCHESTER — brick mill walls hemming the road.
+  { left: 'cliff', right: 'cliff', cliffLight: '#7a5348', cliffDark: '#5e3f36', dropColor: '#6a6a70', cliffHeight: 2600 },
+  // W2 OLD PRAGUE — stone embankments above the river.
+  { left: 'cliff', right: 'flat', cliffLight: '#b0a48c', cliffDark: '#938872', dropColor: '#8fa6b8', cliffHeight: 2400 },
+  // W3 OLD MALLORCA — cliff road above the Mediterranean.
+  { left: 'cliff', right: 'sea', cliffLight: '#c2ab84', cliffDark: '#a38e6b', dropColor: '#1f8fbe', cliffHeight: 3200 },
+  // W4 TAJ MAHAL — open gardens either side of the approach.
+  { left: 'flat', right: 'flat', cliffLight: '#c8b48c', cliffDark: '#b09a72', dropColor: '#cfe0d0', cliffHeight: 1600 },
+];
+
+function activeTerrain(): readonly Terrain[] {
+  return activeTour === 'world' ? WORLD_TERRAIN : TERRAIN;
+}
+
+export function terrainAt(distanceM: number): Terrain {
+  return activeTerrain()[stageIndexAt(distanceM)];
+}
+
+export const DEFAULT_TERRAIN = FLAT_TERRAIN;
 
 /** The level index (0..levelCount()-1) at a distance in the ACTIVE tour
  *  (clamped — the finale never advances past itself, so no phantom extra
