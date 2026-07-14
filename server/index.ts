@@ -142,7 +142,11 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     sendJson(res, 404, { ok: false, error: 'not_found' }, req);
     return;
   }
-  if (!claimRateLimiter(clientIp(req))) {
+  // Every claim decision is journalled: a rejected claim is otherwise
+  // invisible (no access log on the vhost, nothing in the claim log).
+  const ip = clientIp(req);
+  if (!claimRateLimiter(ip)) {
+    console.warn(`[api] claim rejected 429 rate_limited ip=${ip}`);
     sendJson(res, 429, { ok: false, error: 'rate_limited' }, req);
     return;
   }
@@ -151,6 +155,8 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
   try {
     raw = await readBody(req);
   } catch (err) {
+    const error = err instanceof Error ? err.message : 'invalid_body';
+    console.warn(`[api] claim rejected ${error === 'body_too_large' ? 413 : 400} ${error} ip=${ip}`);
     sendJson(res, err instanceof Error && err.message === 'body_too_large' ? 413 : 400, { ok: false, error: err instanceof Error ? err.message : 'invalid_body' }, req);
     return;
   }
@@ -158,23 +164,30 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
   try {
     body = raw.length > 0 ? JSON.parse(raw) : null;
   } catch {
+    console.warn(`[api] claim rejected 400 invalid_json_body ip=${ip}`);
     sendJson(res, 400, { ok: false, error: 'invalid_json_body' }, req);
     return;
   }
 
   const auth = await verifyNip98(req, body);
   if (!auth.ok) {
+    console.warn(`[api] claim rejected ${auth.status} ${auth.error}${auth.detail ? ` (${auth.detail})` : ''} ip=${ip}`);
     sendJson(res, auth.status, { ok: false, error: auth.error }, req);
     return;
   }
 
   const parsed = parseClaim(body);
   if (!parsed.ok) {
+    const clock = parsed.error === 'stale_run' || parsed.error === 'invalid_run_clock'
+      ? ` finished_at=${(body as { finished_at?: unknown }).finished_at} server_now=${Date.now()}`
+      : '';
+    console.warn(`[api] claim rejected ${parsed.status} ${parsed.error}${parsed.detail ? ` (${parsed.detail})` : ''}${clock} pubkey=${auth.pubkey.slice(0, 8)} ip=${ip}`);
     sendJson(res, parsed.status, { ok: false, error: parsed.error, detail: parsed.detail }, req);
     return;
   }
 
   if (!gameSecret || !gamePubkey) {
+    console.error('[api] claim rejected 503 signer_unavailable');
     sendJson(res, 503, {
       ok: false,
       error: 'signer_unavailable',
@@ -187,6 +200,7 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
   const key = `${auth.pubkey}:${claim.run_id}:${claim.started_at}:${claim.finished_at}`;
   const replay = claims.get(key);
   if (replay) {
+    console.log(`[api] claim replay pubkey=${auth.pubkey.slice(0, 8)} run=${claim.run_id}`);
     sendJson(res, 200, {
       ok: true,
       score_event_id: replay.score_event_id,
@@ -220,6 +234,7 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
   pruneStaleClaims();
   await appendClaim(stored, claim);
 
+  console.log(`[api] claim accepted pubkey=${auth.pubkey.slice(0, 8)} run=${claim.run_id} level=${claim.level} score=${claim.score} improves=${improves} published=${published.ok}/${published.total} ip=${ip}`);
   sendJson(res, 200, {
     ok: true,
     score_event_id: signed.id,
@@ -258,7 +273,7 @@ function buildGameSignedScore(claim: ClaimInput, playerPubkey: string): ReturnTy
 
 async function verifyNip98(req: IncomingMessage, body: unknown): Promise<
   | { ok: true; pubkey: string }
-  | { ok: false; status: 400 | 401; error: string }
+  | { ok: false; status: 400 | 401; error: string; detail?: string }
 > {
   const header = req.headers.authorization;
   if (!header) return { ok: false, status: 401, error: 'missing_authorization' };
@@ -270,8 +285,24 @@ async function verifyNip98(req: IncomingMessage, body: unknown): Promise<
   }
   const url = reconstructUrl(req);
   if (!validateEventKind(event)) return { ok: false, status: 401, error: 'wrong_kind' };
-  if (!validateEventTimestamp(event)) return { ok: false, status: 401, error: 'stale_timestamp' };
-  if (!validateEventUrlTag(event, url)) return { ok: false, status: 401, error: 'url_mismatch' };
+  if (!validateEventTimestamp(event)) {
+    // The token is stamped with the CLIENT's clock — a phone more than 60 s
+    // adrift fails here before any claim rule runs.
+    return {
+      ok: false,
+      status: 401,
+      error: 'stale_timestamp',
+      detail: `token_created_at=${event.created_at} server_now=${Math.floor(Date.now() / 1000)}`,
+    };
+  }
+  if (!validateEventUrlTag(event, url)) {
+    return {
+      ok: false,
+      status: 401,
+      error: 'url_mismatch',
+      detail: `token_u=${event.tags.find(t => t[0] === 'u')?.[1]} reconstructed=${url}`,
+    };
+  }
   if (!validateEventMethodTag(event, req.method ?? 'POST')) return { ok: false, status: 401, error: 'method_mismatch' };
   if (body && typeof body === 'object' && !validateEventPayloadTag(event, body)) {
     return { ok: false, status: 401, error: 'payload_mismatch' };
