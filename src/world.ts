@@ -11,6 +11,7 @@ import type { Player, Track } from './road.js';
 import { resolveScenerySprite, rosterAt, sceneryKitAt } from './stages.js';
 import { sceneryHitHalfWidth, spriteWorldWidth } from './geometry.js';
 import { clamp, makeRng, randRange, pick, wrap } from './util.js';
+import { createRivalProgress, rivalGapM, updateRival, type RivalProgress } from './rival.js';
 
 // Pickups are no longer a random spatial pool — main.ts schedules them on the
 // CLOCK (a can every 21s, a rose every 42s, an emergency can just before time
@@ -102,6 +103,12 @@ export interface Car {
   prevFwd: number;
   /** Signed lateral separation last frame, used to test only the visible z-overlap window. */
   prevLateral: number;
+  role: 'traffic' | 'rival';
+  /** Present only on the persistent opening-tour rival. */
+  rival?: RivalProgress;
+  /** Stable top speed and track origin — never inherit the player's turbo. */
+  rivalMaxSpeedMps?: number;
+  rivalOriginZ?: number;
 }
 
 /**
@@ -136,6 +143,7 @@ export type WorldEvent =
   | { type: 'pickup'; kind: PickupKind; offset: number }
   | { type: 'overtake' }
   | { type: 'nearMiss' }
+  | { type: 'rivalPass' }
   | { type: 'crash'; sprite: string };
 
 /** Signed forward distance from player to `z` in (-len/2, len/2]. */
@@ -168,6 +176,10 @@ function difficulty(odometerM: number): Ramp {
 /** The traffic pool size the world should hold right now. */
 function targetCars(world: World): number {
   return Math.max(2, Math.round(difficulty(world.odometerM).carCount * world.mods.density));
+}
+
+function regularCarCount(world: World): number {
+  return world.traffic.reduce((count, car) => count + (car.role === 'traffic' ? 1 : 0), 0);
 }
 
 function carNear(world: World, z: number, offset: number, track: Track): boolean {
@@ -240,7 +252,42 @@ function spawnCarAhead(world: World, player: Player, track: Track): Car {
     sprite: pick(world.rng, rosterAt(world.odometerM)),
     prevFwd: signedForward(z, player.z, track.length),
     prevLateral: Infinity,
+    role: 'traffic',
   };
+}
+
+function spawnRival(player: Player, track: Track): Car {
+  const maxSpeedMps = player.maxSpeed / 100;
+  const progress = createRivalProgress(maxSpeedMps);
+  const z = wrap(player.z + progress.distanceM * 100, track.length);
+  return {
+    z,
+    offset: 0.34,
+    driftPhase: 0,
+    driftAmp: 0,
+    speed: progress.speedMps * 100,
+    sprite: 'scooter-rival',
+    prevFwd: signedForward(z, player.z, track.length),
+    prevLateral: Infinity,
+    role: 'rival',
+    rival: progress,
+    rivalMaxSpeedMps: maxSpeedMps,
+    rivalOriginZ: player.z,
+  };
+}
+
+export function getRival(world: World): Car | null {
+  return world.traffic.find(car => car.role === 'rival' && car.rival) ?? null;
+}
+
+export function getRivalGapM(world: World, playerDistanceM = world.odometerM): number | null {
+  const car = getRival(world);
+  return car?.rival ? rivalGapM(car.rival, playerDistanceM) : null;
+}
+
+/** Remove the physical opponent once the 12.6 km showdown has resolved. */
+export function retireRival(world: World): void {
+  world.traffic = world.traffic.filter(car => car.role !== 'rival');
 }
 
 function hitWindowT(prevFwd: number, fwd: number): [number, number] | null {
@@ -309,14 +356,17 @@ export function createWorld(seed = 0x1a2b3c, mods: WorldMods = { density: 1, spe
   return { pickups: [], traffic: [], markers: [], rng: makeRng(seed), odometerM: 0, mods: { ...mods } };
 }
 
-/** (Re)populate the world ahead of the player for a fresh run. */
-export function resetWorld(world: World, player: Player, track: Track): void {
+/** (Re)populate the world ahead of the player for a fresh run. The opening
+ *  Fren rival only rides the grand tour — the 600B world tour is a victory
+ *  lap, so `rival: false` skips spawning them. */
+export function resetWorld(world: World, player: Player, track: Track, opts: { rival?: boolean } = {}): void {
   world.odometerM = 0;
   world.traffic = [];
   world.pickups = []; // pickups are added on the clock by main.ts, not pre-populated
   world.markers = []; // gates/finish are added by main.ts as boundaries approach
   const target = targetCars(world);
   for (let i = 0; i < target; i += 1) world.traffic.push(spawnCarAhead(world, player, track));
+  if (opts.rival !== false) world.traffic.push(spawnRival(player, track));
 }
 
 /**
@@ -351,10 +401,26 @@ export function updateWorld(
   // per step when under target, and shrinks at the recycle point (never mid-
   // screen) when over — so the road thickens over the journey without pops.
   const carTarget = targetCars(world);
-  if (world.traffic.length < carTarget) world.traffic.push(spawnCarAhead(world, player, track));
+  if (regularCarCount(world) < carTarget) world.traffic.push(spawnCarAhead(world, player, track));
   for (let ci = world.traffic.length - 1; ci >= 0; ci -= 1) {
     const car = world.traffic[ci];
-    car.z = wrap(car.z + car.speed * dt, track.length);
+    if (car.role === 'rival' && car.rival && car.rivalMaxSpeedMps && car.rivalOriginZ !== undefined) {
+      updateRival(car.rival, {
+        dt,
+        playerDistanceM: world.odometerM,
+        maxSpeedMps: car.rivalMaxSpeedMps,
+        difficultySpeedMul: world.mods.speed,
+      });
+      car.speed = car.rival.speedMps * 100;
+      car.z = wrap(car.rivalOriginZ + car.rival.distanceM * 100, track.length);
+      // A readable, deterministic lane rhythm. At the finish the Fren pulls to
+      // the outside instead of parking squarely on the racing line.
+      car.offset = car.rival.finishTimeS === null
+        ? Math.sin(car.rival.distanceM * 0.0017 + 0.7) * 0.5
+        : 0.72;
+    } else {
+      car.z = wrap(car.z + car.speed * dt, track.length);
+    }
     const drift = Math.sin(car.driftPhase + world.odometerM * 0.02) * car.driftAmp;
     const laneOffset = clamp(car.offset + drift, -0.85, 0.85);
     const d = signedForward(car.z, player.z, track.length);
@@ -393,7 +459,11 @@ export function updateWorld(
 
     if (!invuln && closing && hitWindow && passGap < effGap) {
       events.push({ type: 'crash', sprite: car.sprite });
-      Object.assign(car, spawnCarAhead(world, player, track));
+      if (car.role === 'traffic') Object.assign(car, spawnCarAhead(world, player, track));
+      else {
+        car.prevFwd = d;
+        car.prevLateral = lateral;
+      }
       continue;
     }
 
@@ -403,12 +473,13 @@ export function updateWorld(
     if (genuineStep && car.prevFwd > HIT_REAR && d <= HIT_REAR) {
       if (passGap < hitGap + NEAR_BAND && passGap >= effGap) events.push({ type: 'nearMiss' });
       events.push({ type: 'overtake' });
+      if (car.role === 'rival') events.push({ type: 'rivalPass' });
     }
     car.prevFwd = d;
     car.prevLateral = lateral;
 
-    if (d < -RECYCLE_BEHIND) {
-      if (world.traffic.length > carTarget) world.traffic.splice(ci, 1);
+    if (car.role === 'traffic' && d < -RECYCLE_BEHIND) {
+      if (regularCarCount(world) > carTarget) world.traffic.splice(ci, 1);
       else Object.assign(car, spawnCarAhead(world, player, track));
     }
   }

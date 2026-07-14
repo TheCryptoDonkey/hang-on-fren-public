@@ -25,6 +25,14 @@ export interface HudState {
   levels: number; // total levels in the journey
   region: string; // current region name
   shield: boolean; // HODL shield held (absorbs one wipeout)
+  flowValue: number;
+  flowLabel: string;
+  flowMultiplier: number;
+  /** Positive means the Fren is ahead; null after the opening showdown. */
+  rivalGapM: number | null;
+  rivalIntro: number;
+  rivalResult: { won: boolean; deltaS: number } | null;
+  rivalResultTime: number;
   popups: Popup[];
 }
 
@@ -83,6 +91,36 @@ export function drawHud(ctx: CanvasRenderingContext2D, w: number, h: number, s: 
   ctx.fillStyle = MINT;
   ctx.fillText(`HI  ${Math.floor(s.hiScore).toLocaleString('en-GB')}`, w - 24 * u, 88 * u);
 
+  // --- FREN FLOW (top-left) ---
+  const flowX = 20 * u;
+  const flowY = 18 * u;
+  const flowW = Math.min(190 * u, w * 0.38);
+  const flowH = 13 * u;
+  ctx.textAlign = 'left';
+  ctx.font = `800 ${14 * u}px 'Trebuchet MS', sans-serif`;
+  ctx.fillStyle = GOLD;
+  ctx.fillText(`FREN FLOW  ${s.flowLabel}`, flowX, flowY + 12 * u);
+  ctx.textAlign = 'right';
+  ctx.fillStyle = '#ffffff';
+  ctx.fillText(`x${s.flowMultiplier.toFixed(2)}`, flowX + flowW, flowY + 12 * u);
+  pill(ctx, flowX, flowY + 19 * u, flowW, flowH, PANEL);
+  const fillW = Math.max(0, (flowW - 4 * u) * Math.min(100, Math.max(0, s.flowValue)) / 100);
+  if (fillW > 0) {
+    ctx.fillStyle = s.flowValue >= 90 ? GOLD : MINT;
+    ctx.fillRect(flowX + 2 * u, flowY + 21 * u, fillW, flowH - 4 * u);
+  }
+
+  if (s.rivalGapM !== null) {
+    ctx.textAlign = 'left';
+    ctx.font = `800 ${14 * u}px 'Trebuchet MS', sans-serif`;
+    ctx.fillStyle = s.rivalGapM >= 0 ? '#ff9b9b' : MINT;
+    const gap = Math.round(Math.abs(s.rivalGapM));
+    ctx.fillText(s.rivalGapM >= 0 ? `FREN  ▲ ${gap}m` : `YOU  ▲ ${gap}m`, flowX, flowY + 54 * u);
+    ctx.fillStyle = 'rgba(255,255,255,0.72)';
+    ctx.font = `700 ${11 * u}px 'Trebuchet MS', sans-serif`;
+    ctx.fillText('SHOWDOWN  12.6 KM', flowX, flowY + 70 * u);
+  }
+
   // --- speed (bottom-right) ---
   const spW = 150 * u;
   const spH = 40 * u;
@@ -124,10 +162,11 @@ export function drawHud(ctx: CanvasRenderingContext2D, w: number, h: number, s: 
   if (s.shield) {
     const shW = 118 * u;
     const shH = 34 * u;
-    pill(ctx, 20 * u, 18 * u, shW, shH, PANEL);
+    const shY = (s.rivalGapM !== null ? 103 : 62) * u;
+    pill(ctx, 20 * u, shY, shW, shH, PANEL);
     // mini shield glyph
     const gx = 38 * u;
-    const gy = 35 * u;
+    const gy = shY + shH / 2;
     const gs = 11 * u;
     ctx.beginPath();
     ctx.moveTo(gx, gy - gs);
@@ -141,7 +180,33 @@ export function drawHud(ctx: CanvasRenderingContext2D, w: number, h: number, s: 
     ctx.textAlign = 'left';
     ctx.font = `800 ${16 * u}px 'Trebuchet MS', sans-serif`;
     ctx.fillStyle = GOLD;
-    ctx.fillText('HODL', 56 * u, 41 * u);
+    ctx.fillText('HODL', 56 * u, shY + 23 * u);
+  }
+
+  // Rival introduction/result cards are authored beats, not ordinary popups.
+  if (s.rivalIntro > 0 || (s.rivalResult && s.rivalResultTime > 0)) {
+    const result = s.rivalResult && s.rivalResultTime > 0 ? s.rivalResult : null;
+    const cardW = Math.min(w * 0.82, 620 * u);
+    const cardH = 84 * u;
+    const cardX = (w - cardW) / 2;
+    const cardY = h * 0.17;
+    pill(ctx, cardX, cardY, cardW, cardH, 'rgba(5,16,26,0.86)');
+    ctx.textAlign = 'center';
+    ctx.font = `900 ${25 * u}px 'Trebuchet MS', sans-serif`;
+    ctx.fillStyle = result ? (result.won ? GOLD : '#ff8a8a') : GOLD;
+    ctx.fillText(
+      result ? (result.won ? 'FREN RIVAL BEATEN!' : 'THE FREN TAKES IT!') : 'FREN RIVAL TOUR',
+      w / 2,
+      cardY + 34 * u,
+    );
+    ctx.font = `800 ${15 * u}px 'Trebuchet MS', sans-serif`;
+    ctx.fillStyle = '#ffffff';
+    const detail = result
+      ? result.won
+        ? `YOU WIN BY ${result.deltaS.toFixed(1)}s  ·  +3,000`
+        : `FREN WINS BY ${result.deltaS.toFixed(1)}s  ·  GRAND TOUR CONTINUES`
+      : 'BEAT THE RED-HELMET RIDER TO 12.6 KM';
+    ctx.fillText(detail, w / 2, cardY + 61 * u);
   }
 
   // rose streak flag

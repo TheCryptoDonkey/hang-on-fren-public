@@ -504,6 +504,162 @@ function fallbackLavaRock(): SpriteImage {
   });
 }
 
+// --- 600B WORLD TOUR landmarks (all code-drawn — no art files needed) --------
+
+// Victorian cotton mill — Cottonopolis red brick, sawtooth roof, tall chimney.
+function fallbackMill(): SpriteImage {
+  return bake(240, 230, ctx => {
+    ctx.fillStyle = '#8f3b2a';
+    ctx.fillRect(24, 96, 170, 134); // mill block
+    // sawtooth roofline
+    ctx.fillStyle = '#6e2c20';
+    for (let i = 0; i < 4; i += 1) {
+      const x = 24 + i * 43;
+      ctx.beginPath();
+      ctx.moveTo(x, 96);
+      ctx.lineTo(x + 26, 70);
+      ctx.lineTo(x + 43, 96);
+      ctx.closePath();
+      ctx.fill();
+    }
+    // brick courses
+    ctx.strokeStyle = 'rgba(0,0,0,0.16)';
+    ctx.lineWidth = 2;
+    for (let y = 110; y < 228; y += 14) { ctx.beginPath(); ctx.moveTo(24, y); ctx.lineTo(194, y); ctx.stroke(); }
+    // ranks of warm mill windows
+    ctx.fillStyle = '#ffdf9a';
+    for (let r = 0; r < 3; r += 1) {
+      for (let c = 0; c < 5; c += 1) ctx.fillRect(38 + c * 32, 112 + r * 36, 18, 24);
+    }
+    // the chimney stack with a drift of smoke
+    ctx.fillStyle = '#7a3226';
+    ctx.fillRect(200, 26, 26, 204);
+    ctx.fillStyle = '#5f261c';
+    ctx.fillRect(196, 20, 34, 12);
+    ctx.fillStyle = 'rgba(210,210,205,0.6)';
+    ctx.beginPath(); ctx.arc(216, 10, 12, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(230, 2, 8, 0, Math.PI * 2); ctx.fill();
+  });
+}
+
+// Prague astronomical clock tower — gothic stone, the ornate dial, a needle spire.
+function fallbackClockTower(): SpriteImage {
+  return bake(150, 260, ctx => {
+    ctx.fillStyle = '#b7a98e';
+    ctx.fillRect(45, 70, 60, 190); // stone shaft
+    ctx.strokeStyle = 'rgba(0,0,0,0.14)';
+    ctx.lineWidth = 2;
+    for (let y = 88; y < 256; y += 20) { ctx.beginPath(); ctx.moveTo(45, y); ctx.lineTo(105, y); ctx.stroke(); }
+    // the astronomical dial: gold ring, deep-blue face, inner ring
+    ctx.fillStyle = '#e8b23a';
+    ctx.beginPath(); ctx.arc(75, 150, 27, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#1e3a6e';
+    ctx.beginPath(); ctx.arc(75, 150, 21, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = '#e8b23a'; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.arc(75, 150, 12, 0, Math.PI * 2); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(75, 150); ctx.lineTo(75, 134); ctx.moveTo(75, 150); ctx.lineTo(87, 154); ctx.stroke();
+    // parapet + steep verdigris spire with corner pinnacles
+    ctx.fillStyle = '#8f8272';
+    ctx.fillRect(39, 62, 72, 12);
+    ctx.fillStyle = '#3e7d6a';
+    ctx.beginPath(); ctx.moveTo(45, 62); ctx.lineTo(75, 4); ctx.lineTo(105, 62); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#356a5a';
+    for (const x of [45, 105]) {
+      ctx.beginPath(); ctx.moveTo(x - 6, 62); ctx.lineTo(x, 34); ctx.lineTo(x + 6, 62); ctx.closePath(); ctx.fill();
+    }
+    ctx.fillStyle = '#e8b23a';
+    ctx.fillRect(72, 0, 6, 10); // gilt finial
+  });
+}
+
+// Mallorcan stone windmill — the Tramuntana molí: rubble tower, cap, four sails.
+function fallbackWindmill(): SpriteImage {
+  return bake(190, 230, ctx => {
+    ctx.fillStyle = '#c9b490';
+    ctx.beginPath(); // gently tapered rubble-stone tower
+    ctx.moveTo(64, 230); ctx.lineTo(74, 96); ctx.lineTo(116, 96); ctx.lineTo(126, 230);
+    ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = 'rgba(0,0,0,0.12)';
+    ctx.lineWidth = 2;
+    for (let y = 112; y < 226; y += 18) { ctx.beginPath(); ctx.moveTo(68, y); ctx.lineTo(122, y); ctx.stroke(); }
+    ctx.fillStyle = '#3a2418';
+    ctx.fillRect(86, 176, 20, 54); // doorway
+    // conical cap
+    ctx.fillStyle = '#8f5a3a';
+    ctx.beginPath(); ctx.moveTo(66, 98); ctx.lineTo(95, 74); ctx.lineTo(124, 98); ctx.closePath(); ctx.fill();
+    // four lattice sails on the hub
+    ctx.strokeStyle = '#f4ead0';
+    ctx.lineWidth = 7;
+    ctx.lineCap = 'round';
+    for (let i = 0; i < 4; i += 1) {
+      const a = Math.PI / 4 + (i * Math.PI) / 2;
+      ctx.beginPath();
+      ctx.moveTo(95, 92);
+      ctx.lineTo(95 + Math.cos(a) * 62, 92 + Math.sin(a) * 62);
+      ctx.stroke();
+    }
+    ctx.fillStyle = '#6e4a2e';
+    ctx.beginPath(); ctx.arc(95, 92, 7, 0, Math.PI * 2); ctx.fill();
+  });
+}
+
+// The Taj Mahal — white-marble mausoleum: plinth, iwan arch, onion dome, four
+// minarets, and rose beds along the plinth (the world tour finale is a rose
+// garden first and a monument second).
+function fallbackTajMahal(): SpriteImage {
+  return bake(300, 220, ctx => {
+    const marble = '#f6f0ea';
+    const shade = '#ded2c8';
+    ctx.fillStyle = marble;
+    ctx.fillRect(30, 190, 240, 20); // plinth
+    ctx.fillRect(70, 100, 160, 92); // main block
+    ctx.fillStyle = shade;
+    ctx.fillRect(70, 100, 14, 92); // block edge shade
+    // central iwan arch
+    ctx.fillStyle = '#4a3a44';
+    ctx.beginPath();
+    ctx.moveTo(132, 192); ctx.lineTo(132, 140);
+    ctx.quadraticCurveTo(150, 112, 168, 140);
+    ctx.lineTo(168, 192);
+    ctx.closePath(); ctx.fill();
+    // flanking niches
+    ctx.fillStyle = shade;
+    for (const x of [92, 190]) { ctx.fillRect(x, 130, 18, 30); ctx.fillRect(x, 166, 18, 26); }
+    // great onion dome on its drum
+    ctx.fillStyle = marble;
+    ctx.fillRect(126, 92, 48, 12);
+    ctx.beginPath();
+    ctx.moveTo(150, 22);
+    ctx.quadraticCurveTo(196, 44, 178, 84);
+    ctx.quadraticCurveTo(172, 94, 150, 96);
+    ctx.quadraticCurveTo(128, 94, 122, 84);
+    ctx.quadraticCurveTo(104, 44, 150, 22);
+    ctx.fill();
+    // small chhatri domes
+    for (const x of [96, 204]) {
+      ctx.beginPath(); ctx.arc(x, 92, 14, Math.PI, 0); ctx.fill();
+      ctx.fillRect(x - 14, 92, 28, 10);
+    }
+    ctx.fillStyle = '#e8b23a';
+    ctx.fillRect(148, 8, 4, 16); // gilt finial
+    // four minarets
+    ctx.fillStyle = marble;
+    for (const x of [38, 62, 238, 262]) {
+      ctx.fillRect(x - 5, 96, 10, 96);
+      ctx.beginPath(); ctx.arc(x, 94, 8, Math.PI, 0); ctx.fill();
+    }
+    // rose beds along the plinth
+    for (let i = 0; i < 18; i += 1) {
+      ctx.fillStyle = i % 3 === 0 ? '#ff6b81' : '#e5344e';
+      ctx.beginPath(); ctx.arc(40 + i * 13, 206 + (i % 2) * 5, 5, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.fillStyle = '#2f7d4a';
+    for (let i = 0; i < 9; i += 1) {
+      ctx.beginPath(); ctx.ellipse(46 + i * 26, 215, 11, 4, 0, 0, Math.PI * 2); ctx.fill();
+    }
+  });
+}
+
 // Checkpoint gate — two striped posts + a banner, OPEN in the middle to drive through.
 function fallbackGate(): SpriteImage {
   return bake(360, 200, ctx => {
@@ -1038,6 +1194,10 @@ const FALLBACKS: Record<string, () => SpriteImage> = {
   'prop-lighthouse': fallbackLighthouse,
   'prop-deadtree': fallbackDeadTree,
   'prop-lavarock': fallbackLavaRock,
+  'prop-mill': fallbackMill,
+  'prop-clocktower': fallbackClockTower,
+  'prop-windmill': fallbackWindmill,
+  'prop-tajmahal': fallbackTajMahal,
   'prop-gate': fallbackGate,
   'prop-finish': fallbackFinish,
   'prop-chevron-left': () => fallbackChevron('left'),
@@ -1103,6 +1263,10 @@ const ART_URLS: Record<string, string> = {
   'prop-lighthouse': assetUrl('art/prop-lighthouse.png'),
   'prop-deadtree': assetUrl('art/prop-deadtree.png'),
   'prop-lavarock': assetUrl('art/prop-lavarock.png'),
+  'prop-mill': assetUrl('art/prop-mill.png'),
+  'prop-clocktower': assetUrl('art/prop-clocktower.png'),
+  'prop-windmill': assetUrl('art/prop-windmill.png'),
+  'prop-tajmahal': assetUrl('art/prop-tajmahal.png'),
   'prop-gate': assetUrl('art/prop-gate.png'),
   'prop-finish': assetUrl('art/prop-finish-decorated.png'),
   'finish-line-girls': assetUrl('art/finish-line-girls.png'),
@@ -1132,6 +1296,13 @@ const ART_URLS: Record<string, string> = {
   'horizon-lake': assetUrl('art/horizon-lake.jpg'),
   'horizon-volcano': assetUrl('art/horizon-volcano.jpg'),
   'horizon-finale': assetUrl('art/horizon-finale.jpg'),
+  // 600B world-tour horizons — gpt-image-2 panoramas of the REAL locations:
+  // Cottonopolis mills, Old Prague's spires, Palma's La Seu, and the Taj Mahal
+  // across its reflecting pool.
+  'horizon-manchester': assetUrl('art/horizon-manchester.jpg'),
+  'horizon-prague': assetUrl('art/horizon-prague.jpg'),
+  'horizon-mallorca': assetUrl('art/horizon-mallorca.jpg'),
+  'horizon-tajmahal': assetUrl('art/horizon-tajmahal.jpg'),
 };
 
 export class SpriteStore {

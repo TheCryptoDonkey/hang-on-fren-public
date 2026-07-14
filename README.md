@@ -7,6 +7,22 @@ The main run is a 42 km grand tour through ten 4.2 km regions. Its 10.4 km road
 loop includes two blind-summit traps and the two-kilometre Billion Bend: a long
 tightening left that snaps through a hard transition into a long right.
 
+The opening three regions form a 12.6 km Fren Rival Tour against a persistent
+red-helmet rider, with live gaps and checkpoint ranks. Clean overtakes, near
+misses, pickups, and slipstream slingshots build FREN FLOW for up to a 2× action
+score multiplier; wipeouts break the chain, but the full grand tour continues.
+
+A second journey, the 600B WORLD TOUR, rides the conference circuit: 16.8 km
+through historical Manchester (Cottonopolis mills), Old Prague (the
+astronomical clock), Old Mallorca (Tramuntana windmills), and a Taj Mahal
+finale drenched in roses. Pick the tour from the title screen (▲▼ / T or tap);
+the choice persists locally. Some regions carry bespoke music beds — the
+Amalfi opener and all four world-tour cities — switching on the checkpoint.
+
+Double-tapping `+` mid-run skips to the next level. It's a cheat and the game
+treats it as one: a cheated run keeps its local score but is never submitted
+to gamestr.
+
 ## Development
 
 ```sh

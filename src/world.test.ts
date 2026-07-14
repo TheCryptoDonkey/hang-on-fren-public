@@ -1,6 +1,18 @@
 import { describe, it, expect } from 'vitest';
 import { buildTrack, createPlayer, ROAD, RIDER_FWD } from './road.js';
-import { createWorld, resetWorld, updateWorld, addPickup, signedForward, draftAt, HIT_NOSE, HIT_REAR } from './world.js';
+import {
+  createWorld,
+  resetWorld,
+  updateWorld,
+  addPickup,
+  signedForward,
+  draftAt,
+  getRival,
+  getRivalGapM,
+  retireRival,
+  HIT_NOSE,
+  HIT_REAR,
+} from './world.js';
 
 const ROAD_DRAW = ROAD.drawDistance * ROAD.segmentLength;
 
@@ -18,10 +30,41 @@ describe('world', () => {
     const world = createWorld(1);
     resetWorld(world, player, track);
     expect(world.pickups.length).toBe(0);
-    expect(world.traffic.length).toBe(7);
+    expect(world.traffic.filter(car => car.role === 'traffic').length).toBe(7);
+    expect(world.traffic.filter(car => car.role === 'rival').length).toBe(1);
     addPickup(world, player, track, 'petrol');
     expect(world.pickups.length).toBe(1);
     expect(signedForward(world.pickups[0].z, player.z, track.length)).toBeGreaterThan(0);
+  });
+
+  it('spawns no rival when the run opts out (the 600B world tour rides alone)', () => {
+    const track = buildTrack();
+    const player = createPlayer();
+    const world = createWorld(1);
+    resetWorld(world, player, track, { rival: false });
+    expect(world.traffic.filter(car => car.role === 'traffic').length).toBe(7);
+    expect(getRival(world)).toBeNull();
+    expect(getRivalGapM(world)).toBeNull();
+  });
+
+  it('keeps one physical rival in the world until the opening tour is retired', () => {
+    const track = buildTrack();
+    const player = createPlayer();
+    const world = createWorld(17);
+    resetWorld(world, player, track);
+    const rival = getRival(world);
+    expect(rival?.role).toBe('rival');
+    expect(getRivalGapM(world)).toBeGreaterThan(0);
+
+    for (let i = 0; i < 120; i += 1) {
+      updateWorld(world, player, track, 1 / 60, true);
+    }
+    expect(getRival(world)).toBe(rival);
+    expect(rival?.rival?.distanceM).toBeGreaterThan(72);
+
+    retireRival(world);
+    expect(getRival(world)).toBeNull();
+    expect(getRivalGapM(world)).toBeNull();
   });
 
   it('collects a pickup placed directly ahead, then removes it (no respawn)', () => {

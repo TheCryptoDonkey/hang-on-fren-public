@@ -40,6 +40,13 @@ describe('scoring', () => {
     expect(s.crashes).toBe(1);
   });
 
+  it('applies FREN FLOW only to authored action score', () => {
+    const s = createScore();
+    addDistance(s, 100, 120);
+    addOvertake(s, 1.5);
+    expect(s.score).toBe(100 + 375);
+  });
+
   it('summarises a run and shapes the (future) Nostr event', () => {
     const s = createScore();
     addDistance(s, 1234, 200);

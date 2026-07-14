@@ -59,23 +59,23 @@ function bumpStreak(state: ScoreState): number {
 }
 
 /** A petrol can (the common pickup) grants points + tops up the clock. */
-export function addFuel(state: ScoreState): void {
+export function addFuel(state: ScoreState, actionMul = 1): void {
   state.fuel += 1;
   const streakBonus = bumpStreak(state);
-  state.score += Math.round(POINTS_PER_FUEL * streakBonus * state.mult);
+  state.score += Math.round(POINTS_PER_FUEL * streakBonus * state.mult * actionMul);
 }
 
 /** A rare rose grants big points (and a nitro boost, handled in main). */
-export function addRose(state: ScoreState): void {
+export function addRose(state: ScoreState, actionMul = 1): void {
   state.roses += 1;
   const streakBonus = bumpStreak(state);
-  state.score += Math.round(POINTS_PER_ROSE * streakBonus * state.mult);
+  state.score += Math.round(POINTS_PER_ROSE * streakBonus * state.mult * actionMul);
 }
 
 /** A special treat pickup (cake, meme, ATH…): points, streak-multiplied. */
-export function addBonus(state: ScoreState, points: number): void {
+export function addBonus(state: ScoreState, points: number, actionMul = 1): void {
   const streakBonus = bumpStreak(state);
-  state.score += Math.round(points * streakBonus * state.mult);
+  state.score += Math.round(points * streakBonus * state.mult * actionMul);
 }
 
 /** A troll pickup (fiat): shaves score and breaks the streak. */
@@ -85,18 +85,18 @@ export function penalise(state: ScoreState, points: number): void {
 }
 
 /** A skill stunt (slipstream slingshot): mode-multiplied points, streak-neutral. */
-export function addStuntBonus(state: ScoreState, points: number): void {
-  state.score += Math.round(points * state.mult);
+export function addStuntBonus(state: ScoreState, points: number, actionMul = 1): void {
+  state.score += Math.round(points * state.mult * actionMul);
 }
 
-export function addOvertake(state: ScoreState): void {
+export function addOvertake(state: ScoreState, actionMul = 1): void {
   state.overtakes += 1;
-  state.score += POINTS_PER_OVERTAKE * state.mult;
+  state.score += POINTS_PER_OVERTAKE * state.mult * actionMul;
 }
 
-export function addNearMiss(state: ScoreState): void {
+export function addNearMiss(state: ScoreState, actionMul = 1): void {
   state.nearMisses += 1;
-  state.score += POINTS_PER_NEAR_MISS * state.mult;
+  state.score += POINTS_PER_NEAR_MISS * state.mult * actionMul;
 }
 
 export function registerCrash(state: ScoreState): void {

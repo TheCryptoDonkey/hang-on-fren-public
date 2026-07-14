@@ -3,7 +3,7 @@
 // (scoring.ts), audio (audio.ts), rendering (render.ts) and HUD (hud.ts).
 
 import { buildTrack, decorateTrack, createPlayer, updatePlayer, speedKph, DEFAULT_TUNING, ROAD, RIDER_FWD, type DriveInput } from './road.js';
-import { createWorld, resetWorld, updateWorld, addPickup, addMarker, signedForward, draftAt } from './world.js';
+import { createWorld, resetWorld, updateWorld, addPickup, addMarker, signedForward, draftAt, getRival, getRivalGapM, retireRival } from './world.js';
 import { createTimer, tickTimer, addRoseTime, addCanTime, timerUrgency, DEFAULT_TIMER } from './timer.js';
 import { createScore, addDistance, addRose, addFuel, addBonus, addStuntBonus, penalise, addOvertake, addNearMiss, registerCrash, summarise, type RunSummary } from './scoring.js';
 import type { PickupKind } from './world.js';
@@ -12,8 +12,9 @@ import { renderScene, drawTitleArt } from './render.js';
 import { drawHud, addPopup, updatePopups, type HudState, type Popup } from './hud.js';
 import { loadBoard, saveBoard, insertScore, qualifies, topScore, type HighScore } from './highscore.js';
 import { unlockAudio, updateEngine, updateRumble, updateScreech, updateTurbo, playSfx, playVoiceClip, preloadVoiceClip, toggleMuted, isMuted } from './audio.js';
-import { initMusic, startMusic } from './music.js';
-import { paletteAt, stageAt, stageIndexAt, sceneryKitAt, timeOfDayAt, marketPhaseAt, CHECKPOINT_BONUS, LEVELS, STAGE_M, FINISH_M } from './stages.js';
+import { initMusic, preloadMusic, startMusic, currentMusicUrl } from './music.js';
+import { paletteAt, stageAt, stageIndexAt, sceneryKitAt, timeOfDayAt, marketPhaseAt, setActiveTour, getActiveTour, levelCount, finishDistanceM, roseRichAt, CHECKPOINT_BONUS, STAGE_M, TOUR_TITLES, type TourId } from './stages.js';
+import { loadSelectedTour, saveSelectedTour } from './progress.js';
 import { appendChar, backspace, cleanName, layout as nameLayout, keyAt as nameKeyAt, drawNameEntry } from './nameentry.js';
 import { connectNostr, fetchGlobalBoard, getIdentity, renameGuest, restoreIdentity, submitScore, useGuestMode, type GlobalScore } from './nostr.js';
 import { MODES, loadModeIndex, saveModeIndex } from './difficulty.js';
@@ -21,6 +22,9 @@ import { clamp } from './util.js';
 import { isSteeringCode, KeyboardDriveState } from './keyboard-drive.js';
 import { assetUrl } from './asset-url.js';
 import { fetchBtcSnapshot, type BtcSnapshot } from './bitcoin.js';
+import { breakFlow, createFlow, flowLabel, flowMultiplier, gainFlow, tickFlow, FLOW_GAINS } from './flow.js';
+import { RIVAL_TOUR_FINISH_M, resolveRivalResult, type RivalResult } from './rival.js';
+import { gradeStage, overallGrade, type StageResult } from './grade.js';
 
 // Voice one-liners lifted from Neon Sentinel for the special treat pickups.
 const VOICE: Partial<Record<PickupKind, string>> = {
@@ -34,6 +38,25 @@ const VOICE: Partial<Record<PickupKind, string>> = {
   fourtwenty: assetUrl('sfx/four-twenty.m4a'),
 };
 const MUSIC_URL = assetUrl('music/the-descent.m4a');
+// Bespoke per-region music beds, keyed by tour and stage index; regions
+// without an entry ride the main theme. Adding a bed = drop the compressed
+// m4a in public/music/ and add a line here (originals live in art-originals/).
+const STAGE_MUSIC: Readonly<Record<TourId, Readonly<Record<number, string>>>> = {
+  grand: {
+    0: assetUrl('music/amalfi-coast-coastal-velocity.m4a'),
+  },
+  world: {
+    0: assetUrl('music/old-manchester-loose-gears.m4a'),
+    1: assetUrl('music/old-prague-allegretto.m4a'),
+    2: assetUrl('music/old-mallorca-tramuntana-motion.m4a'),
+    3: assetUrl('music/taj-mahal-roses-at-dawn.m4a'),
+  },
+};
+
+/** The music bed for wherever the rider currently is. */
+function stageMusicUrl(): string {
+  return STAGE_MUSIC[getActiveTour()][stageIndexAt(score.distance)] ?? MUSIC_URL;
+}
 // Arcade vocal stings (The Crypto Donkey / Dubstep Cult). Short DJ-style shouts
 // layered over the action — fired rate-limited so they punctuate rather than
 // nag. Missing files simply no-op (playVoiceClip tolerates a 404/decode fail).
@@ -78,10 +101,14 @@ const MARKER_LOOKAHEAD_M = 340;
 // End-of-race time bonus: every whole second still on the clock at the finish
 // line is worth this many points (classic OutRun goal bonus).
 const TIME_BONUS_PER_SEC = 100;
+const RIVAL_WIN_BONUS = 3000;
 // Hold on the bespoke goal celebration before the score/name card appears.
 // Long enough to enjoy the finish cast and several firework volleys, short
 // enough that repeat runs still flow like an arcade game.
 const VICTORY_SHOW_TIME = 5.5;
+// Level-skip cheat: two + presses inside this window jump to the next stage.
+// Cheating is honest about itself — a cheated run NEVER submits to gamestr.
+const CHEAT_PLUS_WINDOW = 0.6;
 
 type Phase = 'loading' | 'title' | 'playing' | 'victory' | 'gameover';
 
@@ -96,11 +123,20 @@ let timer = createTimer();
 let score = createScore();
 let board: HighScore[] = loadBoard();
 let modeIndex = loadModeIndex();
+// Both tours ride from the title screen; the last pick persists.
+let selectedTour: TourId = loadSelectedTour();
 
 function cycleMode(step: number): void {
   modeIndex = (modeIndex + step + MODES.length) % MODES.length;
   saveModeIndex(modeIndex);
   playSfx('combo', 0.8, 1 + modeIndex * 0.12);
+}
+
+function selectTour(tour: TourId): void {
+  if (tour === selectedTour) return;
+  selectedTour = tour;
+  saveSelectedTour(tour);
+  playSfx('combo', 0.8, tour === 'world' ? 1.35 : 1);
 }
 
 const state = {
@@ -141,6 +177,8 @@ const state = {
   runFinishedAt: 0,
   submitted: false, // this run's score has been handed to the claim service
   submitStatus: '', // shown on the game-over card
+  cheated: false, // ++ level-skip used — the run stays local, never claims on gamestr
+  lastPlusAt: -1, // state.time of the last + press (cheat chord detection)
   btc: {} as BtcSnapshot, // block height + price stamped onto saved scores
   titleNotice: { text: '', until: 0 }, // transient identity/publish notice on the title
   globalBoard: [] as GlobalScore[],
@@ -159,6 +197,14 @@ const state = {
   draftCharge: 0, // banked draft 0..1 — converts to a slingshot on wake exit
   slingshot: 0, // seconds of slingshot speed remaining
   slingCooldown: 0,
+  flow: createFlow(),
+  stageStartedAt: 0,
+  stageStartCrashes: 0,
+  stageFlowPeak: 0,
+  stageResults: [] as StageResult[],
+  rivalIntro: 0,
+  rivalResult: null as RivalResult | null,
+  rivalResultTime: 0,
 };
 
 interface Spark {
@@ -560,13 +606,27 @@ function onKeyDown(e: KeyboardEvent): void {
       quitRun();
       return;
     }
+    // ++ cheat: two quick + presses skip to the next level (and flag the run
+    // so it never claims on gamestr).
+    if (!state.paused && k === '+') {
+      if (state.time - state.lastPlusAt <= CHEAT_PLUS_WINDOW) {
+        state.lastPlusAt = -1;
+        skipLevelCheat();
+      } else {
+        state.lastPlusAt = state.time;
+      }
+      return;
+    }
   }
 
   if (state.phase === 'title') {
     if (k === 'enter' || k === ' ') startRun();
     else if (k === 'arrowleft' || k === 'a') { unlockAudio(); cycleMode(-1); }
     else if (k === 'arrowright' || k === 'd') { unlockAudio(); cycleMode(1); }
-    else if (k === 'n') { unlockAudio(); toggleIdentity(); }
+    else if (k === 'arrowup' || k === 'arrowdown' || k === 't') {
+      unlockAudio();
+      selectTour(selectedTour === 'grand' ? 'world' : 'grand');
+    } else if (k === 'n') { unlockAudio(); toggleIdentity(); }
   } else if (state.phase === 'gameover') handleGameOverKey(e.key);
   // While typing a name, M is a letter — don't hijack it for mute.
   const typingName = state.phase === 'gameover' && state.qualifies;
@@ -600,18 +660,24 @@ function canvasPoint(clientX: number, clientY: number): { x: number; y: number }
   return { x: (clientX - rect.left) * sx, y: (clientY - rect.top) * sy };
 }
 
-// Vertical bands of the title-screen difficulty selector and the identity
-// (guest/nostr) row (fractions of H).
+// Vertical bands of the title-screen tour selector, difficulty selector and
+// the identity (guest/nostr) row (fractions of H).
+const TOUR_ROW_Y = 0.465;
 const MODE_ROW_Y = 0.57;
 const IDENTITY_ROW_Y = 0.775;
 
 function pointerAction(clientX: number, clientY: number): void {
   // Tap advances title; during play it is handled by steering zones.
   if (state.phase === 'title') {
-    // Tapping the difficulty row picks that mode; the identity row toggles
-    // guest/nostr; anywhere else starts the run.
+    // Tapping the tour row picks that tour; the difficulty row picks that
+    // mode; the identity row toggles guest/nostr; anywhere else starts the run.
     const { x, y } = canvasPoint(clientX, clientY);
     const u = uiScale();
+    const tourMid = H * TOUR_ROW_Y;
+    if (y > tourMid - 26 * u && y < tourMid + 16 * u) {
+      selectTour(x < W / 2 ? 'grand' : 'world');
+      return;
+    }
     const rowMid = H * MODE_ROW_Y;
     if (y > rowMid - 36 * u && y < rowMid + 20 * u) {
       const picked = clamp(Math.floor((x / W) * MODES.length), 0, MODES.length - 1);
@@ -764,7 +830,9 @@ function startRun(): void {
   // into a fresh race. Both used to make the bike veer with no key held.
   clearAllInput();
   unlockAudio();
-  startMusic();
+  // A run always opens on its tour's first region — start that region's bed
+  // (score.distance still holds the LAST run here, so don't use stageMusicUrl).
+  startMusic(STAGE_MUSIC[selectedTour][0] ?? MUSIC_URL);
   for (const url of Object.values(VOICE)) if (url) preloadVoiceClip(url);
   for (const url of Object.values(STING)) preloadVoiceClip(url);
   playSfx('rev', 1);
@@ -774,11 +842,16 @@ function startRun(): void {
   player.speed = player.maxSpeed * 0.35;
   player.lean = 0;
   const mode = MODES[modeIndex];
+  // The tour must be active BEFORE the world resets: traffic rosters and
+  // scenery kits are resolved through the active tour's stage data.
+  setActiveTour(selectedTour);
   timer = createTimer(DEFAULT_TIMER);
   score = createScore(mode.scoreMul);
   world.mods.density = mode.density;
   world.mods.speed = mode.speed;
-  resetWorld(world, player, track);
+  // The Fren rival showdown belongs to the grand tour's opening three regions;
+  // the world tour is the victory lap, ridden without them.
+  resetWorld(world, player, track, { rival: selectedTour === 'grand' });
   state.invuln = INVULN_TIME;
   state.wipeout = 0;
   state.spinTimer = 0;
@@ -814,6 +887,14 @@ function startRun(): void {
   state.draftCharge = 0;
   state.slingshot = 0;
   state.slingCooldown = 0;
+  state.flow = createFlow();
+  state.stageStartedAt = 0;
+  state.stageStartCrashes = 0;
+  state.stageFlowPeak = 0;
+  state.stageResults = [];
+  state.rivalIntro = selectedTour === 'grand' ? 3.4 : 0;
+  state.rivalResult = null;
+  state.rivalResultTime = 0;
   player.maxSpeed = BASE_MAX_SPEED;
   state.runId = typeof crypto.randomUUID === 'function'
     ? crypto.randomUUID()
@@ -822,6 +903,8 @@ function startRun(): void {
   state.runFinishedAt = 0;
   state.submitted = false;
   state.submitStatus = '';
+  state.cheated = false;
+  state.lastPlusAt = -1;
   state.paused = false;
   state.phase = 'playing';
 }
@@ -840,6 +923,13 @@ function setTitleNotice(text: string, seconds = 4): void {
  */
 function submitRunScore(playerName?: string): void {
   if (state.submitted || !state.summary) return;
+  // A cheated run (++ level skip) never leaves the machine: local board only.
+  if (state.cheated) {
+    state.submitted = true;
+    state.submitStatus = 'CHEAT USED — SCORE NOT SENT TO GAMESTR';
+    setTitleNotice(state.submitStatus);
+    return;
+  }
   state.submitted = true;
   const identity = getIdentity();
   const name = playerName ?? identity.name;
@@ -894,10 +984,38 @@ function toggleIdentity(): void {
   playSfx('combo', 0.7, 1.2);
 }
 
+/**
+ * The ++ cheat: teleport to the next stage boundary (or the finish line on the
+ * last leg). The normal checkpoint/finish logic fires off the new distance next
+ * frame, so region, music, clock bonus and popups all turn over as usual. No
+ * distance points are awarded for the skipped road, and the run is flagged so
+ * it never claims on gamestr — the local board is as far as a cheat travels.
+ */
+function skipLevelCheat(): void {
+  if (state.phase !== 'playing' || state.paused) return;
+  const target = Math.min((stageIndexAt(score.distance) + 1) * STAGE_M, finishDistanceM());
+  const firstUse = !state.cheated;
+  state.cheated = true;
+  score.distance = target;
+  // Keep the world's odometer in step: traffic rosters and scenery hitboxes
+  // resolve off it, and a lagging odometer would mismatch the drawn region.
+  world.odometerM = target;
+  // Boundaries we jumped clean over can't spawn their gate arches any more —
+  // mark them handled so later gates (and the finish arch) still appear.
+  state.lastGateSpawned = Math.max(state.lastGateSpawned, stageIndexAt(target));
+  state.lastMilestoneKm = Math.floor(target / 1000);
+  playSfx('combo', 0.9, 1.5);
+  addPopup(state.popups, 'LEVEL SKIP!', W / 2, H * 0.42, '#ffd76b', 1.4);
+  if (firstUse) {
+    addPopup(state.popups, 'CHEAT ON — THIS RUN STAYS OFF GAMESTR', W / 2, H * 0.48, '#ff9b9b', 2.2);
+  }
+}
+
 /** Abandon the run from the pause screen — no score entry, straight home. */
 function quitRun(): void {
   state.paused = false;
   state.phase = 'title';
+  startMusic(MUSIC_URL); // the title always rides the main theme
   playSfx('milestone', 0.6, 0.8);
 }
 
@@ -907,6 +1025,14 @@ function quitRun(): void {
  */
 function pickTreatKind(): PickupKind {
   const r = Math.random();
+  // The Taj Mahal finale of the world tour is one long rose garden — its treat
+  // slot is nearly all roses (with cake keeping the ceremony fed).
+  if (roseRichAt(score.distance)) {
+    if (r < 0.78) return 'rose';
+    if (r < 0.87) return 'cake';
+    if (r < 0.95) return 'wholecake';
+    return 'fourtwenty';
+  }
   if (r < 0.33) return 'rose';
   if (r < 0.46) return 'cake';
   if (r < 0.57) return 'meme';
@@ -933,6 +1059,56 @@ function playSting(url: string, gain = 1): void {
   state.stingCooldown = STING_COOLDOWN;
 }
 
+function rewardFlow(amount: number, hold = 1.45): void {
+  const tierUp = gainFlow(state.flow, amount, hold);
+  state.stageFlowPeak = Math.max(state.stageFlowPeak, state.flow.value);
+  if (tierUp) {
+    playSfx('combo', 0.8, flowMultiplier(state.flow));
+    addPopup(
+      state.popups,
+      `FREN FLOW — ${flowLabel(state.flow)}  x${flowMultiplier(state.flow).toFixed(2)}`,
+      W / 2,
+      H * 0.56,
+      '#ffd76b',
+      1.25,
+    );
+  }
+}
+
+function finishStage(stageIndex: number, rivalGap: number | null): StageResult {
+  const existing = state.stageResults[stageIndex];
+  if (existing) return existing;
+  const result = gradeStage({
+    elapsedS: Math.max(0, state.runTime - state.stageStartedAt),
+    crashes: Math.max(0, score.crashes - state.stageStartCrashes),
+    peakFlow: Math.max(state.stageFlowPeak, state.flow.value),
+    rivalGapM: rivalGap,
+  });
+  state.stageResults[stageIndex] = result;
+  state.stageStartedAt = state.runTime;
+  state.stageStartCrashes = score.crashes;
+  state.stageFlowPeak = state.flow.value;
+  return result;
+}
+
+function resolveOpeningRivalTour(): void {
+  const rival = getRival(world);
+  if (!rival?.rival || state.rivalResult) return;
+  const result = resolveRivalResult(rival.rival, state.runTime);
+  state.rivalResult = result;
+  state.rivalResultTime = 4.6;
+  if (result.won) {
+    rewardFlow(25, 2.4);
+    addStuntBonus(score, RIVAL_WIN_BONUS, flowMultiplier(state.flow));
+    playSfx('milestone', 1);
+    playSfx('overtake', 1, 1.3);
+    vibrate([30, 35, 70]);
+  } else {
+    playSfx('nearMiss', 0.8, 0.75);
+  }
+  retireRival(world);
+}
+
 // A wipeout is now purely a momentary spin-out: you lose your momentum and your
 // pickup streak, which costs you time on the clock — but it NO LONGER ends the
 // run. The clock is the only thing that can finish you (out of time), so runs
@@ -944,6 +1120,7 @@ function startWipeout(): void {
   state.drafting = 0;
   state.draftCharge = 0;
   state.slingshot = 0;
+  breakFlow(state.flow);
   registerCrash(score);
   playSfx('crash', 1.1);
   playSfx('wipeout', 0.9);
@@ -969,6 +1146,7 @@ function snapshotBitcoin(): void {
 function endRun(endedBy: 'time' | 'crashes'): void {
   state.endedBy = endedBy;
   state.outcome = 'time';
+  startMusic(MUSIC_URL); // back to the main theme for the card + title
   state.runFinishedAt = Date.now();
   snapshotBitcoin();
   state.summary = summarise(score, state.runTime, endedBy);
@@ -987,6 +1165,8 @@ function endRun(endedBy: 'time' | 'crashes'): void {
 function winRun(): void {
   state.endedBy = 'time';
   state.outcome = 'finish';
+  startMusic(MUSIC_URL); // the celebration rides the main theme
+  finishStage(levelCount() - 1, null);
   snapshotBitcoin();
   state.finishTimeLeft = timer.timeLeft;
   const bonus = Math.ceil(Math.max(0, timer.timeLeft)) * TIME_BONUS_PER_SEC;
@@ -1090,6 +1270,8 @@ function update(dt: number): void {
   }
 
   state.runTime += dt;
+  state.rivalIntro = Math.max(0, state.rivalIntro - dt);
+  state.rivalResultTime = Math.max(0, state.rivalResultTime - dt);
   readInput();
 
   // Rose nitro and slipstream slingshot both raise top speed (they stack for a
@@ -1129,8 +1311,8 @@ function update(dt: number): void {
   const moved = ((player.z - prevZ + track.length) % track.length);
   addDistance(score, moved / 100, speedKph(player));
 
-  // Reaching the finish line completes the game — hand off to the victory flow.
-  if (score.distance >= FINISH_M) {
+  // Reaching the active tour's finish line completes the run — victory flow.
+  if (score.distance >= finishDistanceM()) {
     winRun();
     return;
   }
@@ -1149,12 +1331,14 @@ function update(dt: number): void {
       const bx = W / 2 + clamp(ev.offset, -1, 1) * W * 0.13;
       const by = H * 0.72;
       const topUp = DEFAULT_TIMER.roseBonus;
+      if (ev.kind !== 'fiatnam') rewardFlow(FLOW_GAINS.pickup);
+      const actionMul = flowMultiplier(state.flow);
       switch (ev.kind) {
         case 'rose':
           // Rose = rare NITRO: time + speed boost + big score + voice.
           addRoseTime(timer, DEFAULT_TIMER);
           addRoseTime(timer, DEFAULT_TIMER);
-          addRose(score);
+          addRose(score, actionMul);
           state.boost = ROSE_BOOST_TIME;
           playSfx('milestone', 0.9);
           playSfx('overtake', 0.7);
@@ -1164,7 +1348,7 @@ function update(dt: number): void {
           break;
         case 'cake':
           addRoseTime(timer, DEFAULT_TIMER);
-          addBonus(score, 250);
+          addBonus(score, 250, actionMul);
           playSfx('rose', 1, 1.1);
           playVoice('cake');
           spawnRoseBurst(bx, by, 'rose');
@@ -1173,21 +1357,21 @@ function update(dt: number): void {
         case 'wholecake':
           addRoseTime(timer, DEFAULT_TIMER);
           addRoseTime(timer, DEFAULT_TIMER);
-          addBonus(score, 600);
+          addBonus(score, 600, actionMul);
           playSfx('milestone', 0.85);
           playVoice('wholecake');
           spawnRoseBurst(bx, by, 'rose');
           addPopup(state.popups, 'WHOLE CAKE, SIR!', bx, by - H * 0.06, '#ffd1e0', 1.5);
           break;
         case 'meme':
-          addBonus(score, 300);
+          addBonus(score, 300, actionMul);
           playSfx('overtake', 0.8);
           playVoice('meme');
           spawnRoseBurst(bx, by, 'rose');
           addPopup(state.popups, 'MEME!', bx, by - H * 0.06, '#8fe6c4', 1.2);
           break;
         case 'ath':
-          addBonus(score, 1000);
+          addBonus(score, 1000, actionMul);
           state.flash = 0.7;
           playSfx('milestone', 1);
           playSfx('combo', 0.9);
@@ -1197,7 +1381,7 @@ function update(dt: number): void {
           break;
         case 'timelock':
           state.timeFrozen = Math.max(state.timeFrozen, 10);
-          addBonus(score, 150);
+          addBonus(score, 150, actionMul);
           playSfx('milestone', 0.7);
           playVoice('timelock');
           spawnRoseBurst(bx, by, 'petrol');
@@ -1205,7 +1389,7 @@ function update(dt: number): void {
           break;
         case 'fourtwenty':
           state.timeFrozen = Math.max(state.timeFrozen, 21);
-          addBonus(score, 420);
+          addBonus(score, 420, actionMul);
           playSfx('milestone', 0.8);
           playVoice('fourtwenty');
           spawnRoseBurst(bx, by, 'rose');
@@ -1213,7 +1397,7 @@ function update(dt: number): void {
           break;
         case 'beer':
           // Beer: faster for a bit — but the world goes wobbly for longer.
-          addBonus(score, 150);
+          addBonus(score, 150, actionMul);
           state.beerSpeed = BEER_SPEED_TIME;
           state.beerWobble = BEER_WOBBLE_TIME;
           playSfx('rose', 1, 0.85);
@@ -1224,7 +1408,7 @@ function update(dt: number): void {
           break;
         case 'shroom':
           // Fly agaric: untouchable for a few seconds — inside a full-on trip.
-          addBonus(score, 300);
+          addBonus(score, 300, actionMul);
           state.shroom = SHROOM_TIME;
           state.flash = 0.7;
           playSfx('milestone', 0.9);
@@ -1236,13 +1420,14 @@ function update(dt: number): void {
         case 'shield':
           // HODL shield: hold through the next wipeout unscathed.
           state.shield = true;
-          addBonus(score, 300);
+          addBonus(score, 300, actionMul);
           playSfx('milestone', 0.8);
           playSfx('combo', 0.9, 1.3);
           spawnRoseBurst(bx, by, 'rose');
           addPopup(state.popups, 'HODL SHIELD!', bx, by - H * 0.06, '#8fd0ff', 1.5);
           break;
         case 'fiatnam':
+          breakFlow(state.flow);
           penalise(score, 200);
           timer.timeLeft = Math.max(0, timer.timeLeft - 3);
           playSfx('crash', 0.5);
@@ -1253,7 +1438,7 @@ function update(dt: number): void {
         default:
           // Petrol can = the everyday clock top-up (+21s — the 21 numerology).
           addCanTime(timer, DEFAULT_TIMER);
-          addFuel(score);
+          addFuel(score, actionMul);
           playSfx('rose', 1, 1 + Math.min(score.roseStreak, 6) * 0.05);
           if (score.roseStreak > 1) playSfx('combo', 0.8, 1 + score.roseStreak * 0.06);
           spawnRoseBurst(bx, by, 'petrol');
@@ -1275,14 +1460,18 @@ function update(dt: number): void {
         startWipeout();
       }
     } else if (ev.type === 'overtake') {
-      addOvertake(score);
+      rewardFlow(FLOW_GAINS.overtake);
+      addOvertake(score, flowMultiplier(state.flow));
       playSfx('overtake', 0.8);
       // A "wuh!" shout when you're carving through the pack (streak of 2+).
       if (score.overtakes >= 2) playSting(STING.overtake, 0.9);
     } else if (ev.type === 'nearMiss') {
-      addNearMiss(score);
+      rewardFlow(FLOW_GAINS.nearMiss);
+      addNearMiss(score, flowMultiplier(state.flow));
       playSfx('nearMiss', 0.7);
       addPopup(state.popups, 'NEAR MISS', W * 0.5, H * 0.62, '#ffd76b', 0.9);
+    } else if (ev.type === 'rivalPass') {
+      addPopup(state.popups, 'YOU PASSED THE FREN!', W / 2, H * 0.48, '#8fe6c4', 1.35);
     }
   }
   if (state.voiceCooldown > 0) state.voiceCooldown -= dt;
@@ -1301,7 +1490,8 @@ function update(dt: number): void {
     if (state.drafting > 0 && state.draftCharge >= SLING_MIN_CHARGE && state.slingCooldown <= 0 && state.wipeout === 0) {
       state.slingshot = SLING_TIME_MAX * state.draftCharge;
       state.slingCooldown = SLING_COOLDOWN;
-      addStuntBonus(score, Math.round(200 * state.draftCharge));
+      rewardFlow(FLOW_GAINS.slingshot);
+      addStuntBonus(score, Math.round(200 * state.draftCharge), flowMultiplier(state.flow));
       playSfx('overtake', 1, 1.3);
       playSfx('nearMiss', 0.5, 0.8);
       vibrate(20);
@@ -1311,6 +1501,8 @@ function update(dt: number): void {
     state.draftCharge = Math.max(0, state.draftCharge - dt / DRAFT_DECAY_TIME);
   }
   state.drafting = draftNow;
+  tickFlow(state.flow, dt, draftNow);
+  state.stageFlowPeak = Math.max(state.stageFlowPeak, state.flow.value);
 
   // Clock-scheduled pickups: a can every 21s, a rose every 42s, a beer every
   // 34s, a fly agaric every 63s, and — the safety net — a definitely-reachable
@@ -1322,9 +1514,12 @@ function update(dt: number): void {
     state.canAccum -= CAN_INTERVAL;
     addPickup(world, player, track, 'petrol');
   }
+  // At the rose-rich Taj Mahal finale the treat clock runs twice as fast, so
+  // the promised wall of roses actually materialises on the road.
+  const roseEvery = roseRichAt(score.distance) ? ROSE_INTERVAL / 2 : ROSE_INTERVAL;
   state.roseAccum += dt;
-  if (state.roseAccum >= ROSE_INTERVAL) {
-    state.roseAccum -= ROSE_INTERVAL;
+  if (state.roseAccum >= roseEvery) {
+    state.roseAccum -= roseEvery;
     addPickup(world, player, track, pickTreatKind());
   }
   state.beerAccum += dt;
@@ -1367,23 +1562,44 @@ function update(dt: number): void {
   // the region (biome) + car class. Pure reward + flavour (time isn't fatal).
   const stageIdx = stageIndexAt(score.distance);
   if (stageIdx > state.lastStageIndex) {
+    const completedStageIndex = stageIdx - 1;
+    const rivalGap = completedStageIndex < 3 ? getRivalGapM(world, score.distance) : null;
+    const stageResult = finishStage(completedStageIndex, rivalGap);
     state.lastStageIndex = stageIdx;
     timer.timeLeft = clamp(timer.timeLeft + CHECKPOINT_BONUS, 0, DEFAULT_TIMER.maxTime);
     const stage = stageAt(score.distance);
+    // Regions can carry their own music bed (Old Prague does) — swap on the
+    // checkpoint so the tune turns over with the scenery.
+    startMusic(stageMusicUrl());
     playSfx('milestone', 0.9);
     playSfx('combo', 0.7);
     playSting(STING.checkpoint, 1);
     vibrate([20, 40, 20]);
     addPopup(state.popups, 'CHECKPOINT', W / 2, H * 0.24, '#8fe6c4', 1.3);
-    addPopup(state.popups, `LEVEL ${stage.index + 1} / ${LEVELS}`, W / 2, H * 0.3, '#ffffff', 1.7);
+    addPopup(state.popups, `LEVEL ${stage.index + 1} / ${levelCount()}`, W / 2, H * 0.3, '#ffffff', 1.7);
     addPopup(state.popups, stage.name, W / 2, H * 0.37, '#ffd76b', 1.9);
     addPopup(state.popups, marketPhaseAt(score.distance), W / 2, H * 0.43, '#9fd0ff', 1.7);
+    addPopup(
+      state.popups,
+      `STAGE ${completedStageIndex + 1} — ${stageResult.grade} RANK  ·  ${stageResult.rating}`,
+      W / 2,
+      H * 0.5,
+      stageResult.grade === 'S' ? '#ffd76b' : '#ffffff',
+      2.2,
+    );
+    if (rivalGap !== null && completedStageIndex < 2) {
+      const split = rivalGap >= 0
+        ? `FREN AHEAD  ${Math.round(rivalGap)}m`
+        : `YOU AHEAD  ${Math.round(-rivalGap)}m`;
+      addPopup(state.popups, split, W / 2, H * 0.56, rivalGap >= 0 ? '#ff9b9b' : '#8fe6c4', 2.2);
+    }
+    if (completedStageIndex === 2) resolveOpeningRivalTour();
   }
 
   // Drop the checkpoint gate / finish arch onto the road as each boundary nears,
   // so the rider physically drives through it as the region turns over.
   const nextGate = state.lastGateSpawned + 1;
-  if (nextGate <= LEVELS - 1) {
+  if (nextGate <= levelCount() - 1) {
     const ahead = nextGate * STAGE_M - score.distance;
     if (ahead > 0 && ahead <= MARKER_LOOKAHEAD_M) {
       addMarker(world, player, track, 'prop-gate', ahead, 'gate');
@@ -1391,7 +1607,7 @@ function update(dt: number): void {
     }
   }
   if (!state.finishSpawned) {
-    const ahead = FINISH_M - score.distance;
+    const ahead = finishDistanceM() - score.distance;
     if (ahead > 0 && ahead <= MARKER_LOOKAHEAD_M) {
       addMarker(world, player, track, 'prop-finish', ahead, 'finish');
       state.finishSpawned = true;
@@ -1480,9 +1696,16 @@ function render(): void {
       distanceM: score.distance,
       roseStreak: score.roseStreak,
       level: stageIndexAt(score.distance) + 1,
-      levels: LEVELS,
+      levels: levelCount(),
       region: stageAt(score.distance).name,
       shield: state.shield,
+      flowValue: state.flow.value,
+      flowLabel: flowLabel(state.flow),
+      flowMultiplier: flowMultiplier(state.flow),
+      rivalGapM: getRivalGapM(world, score.distance),
+      rivalIntro: state.rivalIntro,
+      rivalResult: state.rivalResult,
+      rivalResultTime: state.rivalResultTime,
       popups: state.popups,
     };
     drawHud(ctx, W, H, hud, { bottomInset: mobileHudBottomInset() });
@@ -1533,7 +1756,30 @@ function renderTitle(store: SpriteStore): void {
   ctx.font = `900 ${titleSize}px 'Trebuchet MS', sans-serif`;
   outlinedText('HANG ON, FREN', W / 2, H * (portrait ? 0.16 : 0.2), '#ffd76b', u, 8);
   ctx.font = `700 ${24 * u}px 'Trebuchet MS', sans-serif`;
-  outlinedText('Ten regions, one finish line — a Vespa road-tribute', W / 2, H * (portrait ? 0.22 : 0.27), '#ffffff', u, 5);
+  outlinedText(
+    selectedTour === 'world'
+      ? 'Four historic conference stops — the 600B victory lap'
+      : 'Ten regions, one finish line — a Vespa road-tribute',
+    W / 2, H * (portrait ? 0.22 : 0.27), '#ffffff', u, 5,
+  );
+  ctx.font = `800 ${15 * u}px 'Trebuchet MS', sans-serif`;
+  outlinedText(
+    selectedTour === 'world'
+      ? 'MANCHESTER · PRAGUE · MALLORCA · TAJ MAHAL  ·  16.8 KM OF ROSES AHEAD'
+      : `OPENING FREN RIVAL SHOWDOWN  ·  ${(RIVAL_TOUR_FINISH_M / 1000).toFixed(1)} KM`,
+    W / 2, H * (portrait ? 0.265 : 0.315), '#8fe6c4', u, 4,
+  );
+
+  // --- tour selector ---
+  const tourY = H * TOUR_ROW_Y;
+  ctx.font = `700 ${13 * u}px 'Trebuchet MS', sans-serif`;
+  outlinedText('TOUR  ·  ▲▼ / T OR TAP TO CHANGE', W / 2, tourY - 26 * u, '#9fd0ff', u, 4);
+  (['grand', 'world'] as const).forEach((tour, i) => {
+    const x = W * ((i * 2 + 1) / 4);
+    const sel = tour === selectedTour;
+    ctx.font = `${sel ? 900 : 700} ${(sel ? 24 : 17) * u}px 'Trebuchet MS', sans-serif`;
+    outlinedText(TOUR_TITLES[tour], x, tourY, sel ? '#ffd76b' : 'rgba(255,255,255,0.55)', u, sel ? 5 : 4);
+  });
 
   // --- difficulty selector ---
   const rowY = H * MODE_ROW_Y;
@@ -1661,7 +1907,7 @@ function renderVictory(store: SpriteStore): void {
   outlinedText('GOAL!', 0, 0, '#ffd23f', u, 10);
   ctx.restore();
   ctx.font = `900 ${Math.min(31 * u, W * 0.055)}px 'Trebuchet MS', sans-serif`;
-  outlinedText('GRAND TOUR COMPLETE', W / 2, H * 0.24, '#ffffff', u, 6);
+  outlinedText(`${TOUR_TITLES[getActiveTour()]} COMPLETE`, W / 2, H * 0.24, '#ffffff', u, 6);
   ctx.font = `800 ${Math.min(23 * u, W * 0.042)}px 'Trebuchet MS', sans-serif`;
   outlinedText(
     `TIME BONUS  ${Math.ceil(state.finishTimeLeft)}s × ${TIME_BONUS_PER_SEC}  =  +${state.finishBonus.toLocaleString('en-GB')}`,
@@ -1678,6 +1924,22 @@ function renderGameOver(_store: SpriteStore): void {
   if (!s) return;
   const u = uiScale();
   const won = state.outcome === 'finish';
+  const entryLayout = state.qualifies ? nameEntryLayout() : null;
+  // Treat the result copy as one stack. When the on-screen callsign keyboard is
+  // present its real prompt position becomes the lower boundary, so every line
+  // moves together instead of the rank line being squeezed into the bonus.
+  const defaultStatsY = won ? H * 0.46 : H * 0.44;
+  const statsY = entryLayout ? Math.min(defaultStatsY, entryLayout.promptY - 22 * u) : defaultStatsY;
+  const bonusY = won && state.finishBonus > 0
+    ? (entryLayout ? statsY - 34 * u : H * 0.41)
+    : null;
+  const scoreY = entryLayout
+    ? (bonusY ?? statsY) - 42 * u
+    : H * 0.36;
+  const subtitleY = entryLayout ? scoreY - 55 * u : H * 0.28;
+  const titleY = entryLayout
+    ? subtitleY - (won ? 62 : 28) * u
+    : H * (won ? 0.2 : 0.24);
   // A darker scrim for a defeat, a warmer one for the victory card.
   ctx.fillStyle = won ? 'rgba(10,26,20,0.66)' : 'rgba(6,19,28,0.72)';
   ctx.fillRect(0, 0, W, H);
@@ -1686,36 +1948,38 @@ function renderGameOver(_store: SpriteStore): void {
 
   if (won) {
     ctx.font = `900 ${72 * u}px 'Trebuchet MS', sans-serif`;
-    outlinedText('FINISH!', W / 2, H * 0.2, '#ffd76b', u, 8);
+    outlinedText('FINISH!', W / 2, titleY, '#ffd76b', u, 8);
     ctx.font = `800 ${30 * u}px 'Trebuchet MS', sans-serif`;
-    outlinedText('YOU REACHED THE GOAL, FREN!', W / 2, H * 0.28, '#8fe6c4', u, 6);
+    outlinedText('YOU REACHED THE GOAL, FREN!', W / 2, subtitleY, '#8fe6c4', u, 6);
   } else {
     ctx.font = `900 ${64 * u}px 'Trebuchet MS', sans-serif`;
     ctx.fillStyle = '#ff5d78';
     // The clock is the only way a run ends short (wipeouts cost time, never a life).
-    ctx.fillText('OUT OF TIME', W / 2, H * 0.24);
+    ctx.fillText('OUT OF TIME', W / 2, titleY);
   }
 
   ctx.font = `800 ${40 * u}px 'Trebuchet MS', sans-serif`;
   ctx.fillStyle = '#ffffff';
-  ctx.fillText(`SCORE  ${s.score.toLocaleString('en-GB')}`, W / 2, H * 0.36);
+  ctx.fillText(`SCORE  ${s.score.toLocaleString('en-GB')}`, W / 2, scoreY);
 
-  if (won && state.finishBonus > 0) {
+  if (bonusY !== null) {
     ctx.font = `700 ${22 * u}px 'Trebuchet MS', sans-serif`;
     ctx.fillStyle = '#ffd76b';
     ctx.fillText(
       `TIME BONUS  ${Math.ceil(state.finishTimeLeft)}s × ${TIME_BONUS_PER_SEC}  =  +${state.finishBonus.toLocaleString('en-GB')}`,
       W / 2,
-      H * 0.41,
+      bonusY,
     );
   }
 
-  ctx.font = `600 ${20 * u}px 'Trebuchet MS', sans-serif`;
+  ctx.font = `600 ${Math.min(20 * u, W * 0.022)}px 'Trebuchet MS', sans-serif`;
   ctx.fillStyle = '#8fe6c4';
+  const rank = overallGrade(state.stageResults.filter(Boolean));
+  const rivalLabel = state.rivalResult ? `RIVAL ${state.rivalResult.won ? 'WIN' : 'LOSS'}   ·   ` : '';
   ctx.fillText(
-    `${(s.distanceM / 1000).toFixed(2)} km   ·   ${s.roses} roses   ·   ${s.overtakes} overtakes   ·   ${s.topSpeedKph} km/h top`,
+    `${rivalLabel}RANK ${rank}   ·   ${(s.distanceM / 1000).toFixed(2)} km   ·   ${s.roses} roses   ·   ${s.overtakes} overtakes   ·   ${s.topSpeedKph} km/h top`,
     W / 2,
-    won ? H * 0.46 : H * 0.44,
+    statsY,
   );
 
   // gamestr publish status (non-qualifying runs publish immediately; a board
@@ -1726,8 +1990,8 @@ function renderGameOver(_store: SpriteStore): void {
     ctx.fillText(state.submitStatus, W / 2, won ? H * 0.52 : H * 0.5);
   }
 
-  if (state.qualifies) {
-    drawNameEntry(ctx, W, uiScale(), state.nameValue, state.time, nameEntryLayout());
+  if (entryLayout) {
+    drawNameEntry(ctx, W, uiScale(), state.nameValue, state.time, entryLayout);
   } else {
     const blink = Math.floor(state.time * 2) % 2 === 0;
     if (blink) {
@@ -1795,7 +2059,7 @@ if ((import.meta as { env?: { DEV?: boolean } }).env?.DEV) {
     },
     showVictory: () => {
       if (state.phase !== 'playing') startRun();
-      score.distance = FINISH_M;
+      score.distance = finishDistanceM();
       winRun();
     },
     // Nudge the rider off the tarmac so the off-road rumble can be exercised.
@@ -1818,6 +2082,7 @@ if ((import.meta as { env?: { DEV?: boolean } }).env?.DEV) {
     track,
     get timer() { return timer; },
     get score() { return score; },
+    get musicUrl() { return currentMusicUrl(); },
   };
 }
 
@@ -1829,6 +2094,10 @@ async function boot(): Promise<void> {
     navigator.serviceWorker.register(assetUrl('sw.js')).catch(() => undefined);
   }
   initMusic(MUSIC_URL);
+  // Buffer the per-region beds before they're needed.
+  for (const beds of Object.values(STAGE_MUSIC)) {
+    for (const url of Object.values(beds)) preloadMusic(url);
+  }
   // Restore the persisted identity (reconnects a NIP-07 session quietly) and
   // warm the global gamestr board for the title screen. Both best-effort.
   void restoreIdentity().catch(() => undefined);

@@ -52,6 +52,11 @@ export const SPRITE_WORLD_WIDTH: Record<string, number> = {
   'prop-lighthouse': 0.7,
   'prop-deadtree': 0.44,
   'prop-lavarock': 0.9,
+  // 600B world-tour landmarks
+  'prop-mill': 1.2,
+  'prop-clocktower': 0.75,
+  'prop-windmill': 0.95,
+  'prop-tajmahal': 1.5,
   // road-spanning gate / finish arches (wider than the tarmac so posts sit off it)
   'prop-gate': 2.7,
   'prop-finish': 2.7,
@@ -104,6 +109,12 @@ const SCENERY_HIT_HALF_WIDTH: Record<string, number | null> = {
   'prop-barn': 0.36,
   'prop-lighthouse': 0.16,
   'prop-lavarock': 0.28,
+  // 600B world-tour landmarks — solid masonry, but tighter than the drawn
+  // billboard like every other building (forgiving edges).
+  'prop-mill': 0.4,
+  'prop-clocktower': 0.2,
+  'prop-windmill': 0.26,
+  'prop-tajmahal': 0.5,
   // Soft verge dressing: drawn for speed/parallax, not as crash hazards.
   'prop-flowers': null,
   'prop-reed': null,

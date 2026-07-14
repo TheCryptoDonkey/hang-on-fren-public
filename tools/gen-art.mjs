@@ -399,6 +399,71 @@ const ASSETS = [
       'MIDDLE of the image. Joyful, warm, celebratory. Flat, clean, bright saturated Sega OutRun style illustration. ' +
       'NO road, NO cars, NO people, NO foreground objects, NO text, NO watermark, NO frame or border.',
   },
+  // Horizon backdrops for the 600B WORLD TOUR (the conference circuit): REAL
+  // locations, same framing rules as every other panorama. Converted to JPEG
+  // like the rest (see the sips one-liner above).
+  {
+    name: 'horizon-manchester', model: 'gpt-image-2', size: '1536x1024', background: 'opaque',
+    prompt:
+      'Wide panoramic arcade-game background illustration of HISTORICAL VICTORIAN MANCHESTER, England — Cottonopolis. ' +
+      'A skyline of red-brick COTTON MILLS with sawtooth roofs, tall smoking factory chimneys and a Victorian gothic ' +
+      'clock tower, behind a calm dark CANAL, under a soft pale overcast silver-and-amber industrial sky, meeting along ' +
+      'a single straight HORIZON LINE running horizontally across the VERTICAL MIDDLE of the image. Warm gaslight glow ' +
+      'in a few mill windows. Flat, clean, saturated Sega OutRun style illustration. NO road, NO cars, NO people, NO ' +
+      'foreground objects, NO text, NO watermark, NO frame or border.',
+  },
+  {
+    name: 'horizon-prague', model: 'gpt-image-2', size: '1536x1024', background: 'opaque',
+    prompt:
+      'Wide panoramic arcade-game background illustration of OLD PRAGUE, the city of a hundred spires, in warm golden ' +
+      'light. The Vltava river with the arched stone CHARLES BRIDGE and its statues, and behind it a skyline of gothic ' +
+      'needle SPIRES, baroque green domes, terracotta rooftops and Prague Castle on its hill, under a golden late-' +
+      'afternoon sky, meeting along a single straight HORIZON LINE running horizontally across the VERTICAL MIDDLE of ' +
+      'the image. Flat, clean, bright saturated Sega OutRun style illustration. NO road, NO cars, NO people, NO ' +
+      'foreground objects, NO text, NO watermark, NO frame or border.',
+  },
+  {
+    name: 'horizon-mallorca', model: 'gpt-image-2', size: '1536x1024', background: 'opaque',
+    prompt:
+      'Wide panoramic arcade-game background illustration of HISTORIC MALLORCA, Spain. The bright turquoise ' +
+      'Mediterranean bay of Palma with the great sandstone gothic LA SEU CATHEDRAL rising on the shoreline, honey-' +
+      'coloured old town walls, a couple of old stone WINDMILLS on the headland and the hazy Tramuntana mountains ' +
+      'behind, under a brilliant clear blue summer sky, meeting along a single straight HORIZON LINE running ' +
+      'horizontally across the VERTICAL MIDDLE of the image. Flat, clean, bright saturated Sega OutRun style ' +
+      'illustration. NO road, NO cars, NO people, NO foreground objects, NO text, NO watermark, NO frame or border.',
+  },
+  {
+    name: 'horizon-tajmahal', model: 'gpt-image-2', size: '1536x1024', background: 'opaque',
+    prompt:
+      'Wide panoramic arcade-game background illustration of the TAJ MAHAL at rose-pink dawn. The white-marble ' +
+      'mausoleum with its great onion dome and four minarets glowing softly, mirrored in the long still REFLECTING ' +
+      'POOL, flanked by dark cypress trees and lush gardens bursting with RED ROSES, under a soft pink-and-gold dawn ' +
+      'sky, meeting along a single straight HORIZON LINE running horizontally across the VERTICAL MIDDLE of the image. ' +
+      'Serene and romantic. Flat, clean, saturated Sega OutRun style illustration. NO road, NO cars, NO people, NO ' +
+      'foreground objects, NO text, NO watermark, NO frame or border.',
+  },
+  // 600B WORLD TOUR roadside landmarks (one per conference city).
+  {
+    name: 'prop-mill', model: 'gpt-image-1.5', size: '1024x1024',
+    prompt: 'A Victorian red-brick Manchester COTTON MILL building with a sawtooth roof, rows of warm lit windows and ' +
+      'one tall round brick chimney with a wisp of smoke, roadside building. ' + SPRITE_STYLE,
+  },
+  {
+    name: 'prop-clocktower', model: 'gpt-image-1.5', size: '1024x1024',
+    prompt: 'A gothic stone Prague clock tower with an ornate ASTRONOMICAL CLOCK dial in gold and deep blue on its ' +
+      'face and a steep verdigris-green spire with gilt finial, full height, roadside building. ' + SPRITE_STYLE,
+  },
+  {
+    name: 'prop-windmill', model: 'gpt-image-1.5', size: '1024x1024',
+    prompt: 'An old Mallorcan STONE WINDMILL: a round tapered rubble-stone tower with a small conical cap and four ' +
+      'wooden lattice sails, sun-baked and rustic, full height, roadside building. ' + SPRITE_STYLE,
+  },
+  {
+    name: 'prop-tajmahal', model: 'gpt-image-1.5', size: '1024x1024',
+    prompt: 'The TAJ MAHAL in miniature as a roadside landmark: white marble mausoleum on its plinth with a great ' +
+      'onion dome, pointed arch portal and four slender minarets, beds of bright red roses along the base, roadside ' +
+      'building. ' + SPRITE_STYLE,
+  },
   {
     name: 'title-art-orig', model: 'gpt-image-2', size: '1536x1024', background: 'opaque', ref: ['.art-ref/dni.jpeg'],
     prompt:
