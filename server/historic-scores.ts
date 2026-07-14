@@ -61,3 +61,13 @@ export const HISTORIC_SCORE_ROWS: readonly HistoricScoreRow[] = [
     },
   },
 ] as const;
+
+/** Seed the live publish gate without allowing a historic row to lower a
+ * claim-log score. This keeps later claims from replacing a stronger imported
+ * addressable event after the service restarts. */
+export function seedHistoricBestScores(best: Map<string, number>): void {
+  for (const { pubkey, claim } of HISTORIC_SCORE_ROWS) {
+    const key = `${pubkey}:${claim.level}`;
+    if (claim.score > (best.get(key) ?? 0)) best.set(key, claim.score);
+  }
+}

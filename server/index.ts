@@ -34,6 +34,7 @@ import {
 import { buildScoreEvent, GAME_ID, GAME_PUBKEY, SCORE_KIND, type RunSummary } from '../src/scoring.js';
 import { DEFAULT_WRITE_RELAYS } from '../src/relays.js';
 import { parseClaim, cleanPlayerName, MAX_DISTANCE_M, STALE_RUN_MS, type ClaimInput } from './claim-rules.js';
+import { seedHistoricBestScores } from './historic-scores.js';
 
 const WRITE_RELAYS = loadWriteRelays();
 const PORT = Number(process.env.PORT ?? process.env.HANGONFREN_API_PORT ?? 3191);
@@ -340,8 +341,9 @@ async function appendClaim(stored: StoredClaim, claim: ClaimInput): Promise<void
 async function loadClaims(): Promise<{ claims: Map<string, StoredClaim>; bestScores: Map<string, number> }> {
   const map = new Map<string, StoredClaim>();
   // Best accepted score per `${pubkey}:${level}` — the publish gate for the
-  // per-level addressable events. Rebuilt from the full append-only log so a
-  // restart can never let a worse run replace a better one on the relays.
+  // per-level addressable events. Rebuilt from the full append-only log and
+  // curated pre-service board so a restart can never let a worse run replace a
+  // better one on the relays.
   const best = new Map<string, number>();
   try {
     const raw = await readFile(CLAIM_LOG, 'utf8');
@@ -375,6 +377,7 @@ async function loadClaims(): Promise<{ claims: Map<string, StoredClaim>; bestSco
   } catch {
     // First deploy starts with no claim log.
   }
+  seedHistoricBestScores(best);
   return { claims: map, bestScores: best };
 }
 

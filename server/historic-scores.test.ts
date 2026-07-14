@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { HISTORIC_SCORE_ROWS } from './historic-scores.js';
+import { HISTORIC_SCORE_ROWS, seedHistoricBestScores } from './historic-scores.js';
 
 describe('historic local scores', () => {
   it('preserves the recovered EDB and DAZ bests as distinct valid identities', () => {
@@ -18,5 +18,15 @@ describe('historic local scores', () => {
       expect(row.claim.level).toBe(10);
       expect(row.claim.ended_by).toBe('finish');
     }
+  });
+
+  it('seeds the live publish gate without lowering a stronger score', () => {
+    const dazKey = `${HISTORIC_SCORE_ROWS[1].pubkey}:10`;
+    const best = new Map<string, number>([[dazKey, 200_000]]);
+
+    seedHistoricBestScores(best);
+
+    expect(best.get(dazKey)).toBe(200_000);
+    expect(best.get(`${HISTORIC_SCORE_ROWS[0].pubkey}:10`)).toBe(142_143);
   });
 });
