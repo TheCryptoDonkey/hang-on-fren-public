@@ -4,8 +4,8 @@
 // per-run `d` tag (`hangonfren:<player>:<runId>`), so every run lingered on
 // the relays as its own addressable event. This tool replays the append-only
 // claim log, republishes each player's BEST score per level under the
-// spec-format `d` (`hangonfren:<player>:<level>`), then publishes a kind-5
-// deletion for the legacy-format events still on the relays.
+// spec-format `d` (`hangonfren:<player>:<level>`). Legacy deletion is optional
+// because some score-only relays reject kind 5.
 //
 // Runs ON the VPS (the nsec never leaves it):
 //   npm run build:migrate                      # → server-dist/migrate-gamestr.js
@@ -15,7 +15,7 @@
 //
 // Env (same names as the claim service): HANGONFREN_GAME_NSEC (required),
 // HANGONFREN_GAME_NPUB, HANGONFREN_CLAIM_LOG, HANGONFREN_WRITE_RELAYS,
-// HANGONFREN_SITE_URL, MIGRATE_DRY_RUN=1.
+// HANGONFREN_SITE_URL, MIGRATE_DRY_RUN=1, MIGRATE_DELETE_LEGACY=1.
 
 import { readFile } from 'node:fs/promises';
 import { finalizeEvent, getPublicKey } from 'nostr-tools/pure';
@@ -32,6 +32,7 @@ const RELAYS = WRITE_RELAYS.length ? WRITE_RELAYS : DEFAULT_WRITE_RELAYS;
 const CLAIM_LOG = process.env.HANGONFREN_CLAIM_LOG ?? '/var/lib/hangonfren/claims.jsonl';
 const SITE_URL = process.env.HANGONFREN_SITE_URL ?? 'https://hang-on-fren.playechoseven.com/';
 const DRY_RUN = process.env.MIGRATE_DRY_RUN === '1';
+const DELETE_LEGACY = process.env.MIGRATE_DELETE_LEGACY === '1';
 const RELAY_TIMEOUT_MS = 20_000;
 const RELAY_QUERY_ATTEMPTS = 3;
 const RELAY_PUBLISH_ATTEMPTS = 3;
@@ -42,6 +43,7 @@ const VERIFY_RETRY_MS = 15_000;
 const VERIFY_ATTEMPTS = 5;
 const NEW_D_FORMAT = new RegExp(`^${GAME_ID}:[0-9a-f]{64}:(10|[1-9])$`);
 let lastTestRelayWriteAt = 0;
+const relayPublishers = new Map<string, RelayPublisher>();
 
 const gameSecret = loadGameSecret();
 const gamePubkey = getPublicKey(gameSecret);
@@ -119,6 +121,8 @@ for (const { pubkey, claim } of best.values()) {
 
 if (legacy.length === 0) {
   console.log('[migrate] no legacy events to delete');
+} else if (!DELETE_LEGACY) {
+  console.log(`[migrate] leaving ${legacy.length} legacy events in place (set MIGRATE_DELETE_LEGACY=1 to request deletion)`);
 } else if (DRY_RUN) {
   for (const e of legacy) console.log(`[migrate] would delete ${e.id} d=${tagOf(e, 'd')} score=${tagOf(e, 'score')}`);
 } else {
@@ -137,6 +141,8 @@ if (legacy.length === 0) {
   const ok = await publish(deletion, legacyRelays);
   console.log(`[migrate] deletion of ${legacy.length} legacy events → ${ok}/${legacyRelays.length} affected relays (${deletion.id})`);
 }
+
+await closeRelayPublishers();
 
 if (DRY_RUN) {
   console.log(`[migrate] done: ${republished} would be republished, ${legacy.length} legacy deletions (dry run — nothing sent)`);
@@ -288,33 +294,126 @@ async function paceTestRelayWrite(): Promise<void> {
 }
 
 function publishToRelayOnce(relay: string, event: VerifiedEvent): Promise<{ ok: boolean; reason: string }> {
-  return new Promise(resolve => {
-    let ws: WebSocket;
-    let settled = false;
-    const settle = (ok: boolean, reason: string): void => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      try { ws.close(); } catch { /* ignore */ }
-      resolve({ ok, reason });
-    };
-    const timer = setTimeout(() => settle(false, 'timeout'), RELAY_TIMEOUT_MS);
-    try {
-      ws = new WebSocket(relay);
-    } catch {
-      settle(false, 'connection failed');
-      return;
-    }
-    ws.onopen = () => ws.send(JSON.stringify(['EVENT', event]));
-    ws.onmessage = ev => {
-      let msg: unknown;
-      try { msg = JSON.parse(typeof ev.data === 'string' ? ev.data : ''); } catch { return; }
-      if (!Array.isArray(msg) || msg[0] !== 'OK' || msg[1] !== event.id) return;
-      settle(msg[2] === true, String(msg[3] ?? (msg[2] === true ? 'accepted' : 'rejected')));
-    };
-    ws.onerror = () => settle(false, 'websocket error');
-    ws.onclose = () => settle(false, 'closed before acknowledgement');
-  });
+  let publisher = relayPublishers.get(relay);
+  if (!publisher) {
+    publisher = new RelayPublisher(relay);
+    relayPublishers.set(relay, publisher);
+  }
+  return publisher.publish(event);
+}
+
+async function closeRelayPublishers(): Promise<void> {
+  await Promise.all(Array.from(relayPublishers.values(), publisher => publisher.close()));
+  relayPublishers.clear();
+}
+
+interface PendingPublish {
+  eventId: string;
+  resolve: (result: { ok: boolean; reason: string }) => void;
+  timer: ReturnType<typeof setTimeout>;
+}
+
+/** Reuse one socket for the whole relay batch. Gamestr currently leaks some
+ *  rapidly closed connections into its per-IP connection counter, so opening
+ *  one socket per historic event can exhaust the relay even at a low rate. */
+class RelayPublisher {
+  private ws: WebSocket | null = null;
+  private connecting: Promise<{ ok: boolean; reason: string }> | null = null;
+  private pending: PendingPublish | null = null;
+  private closeWaiters: Array<() => void> = [];
+
+  constructor(private readonly relay: string) {}
+
+  async publish(event: VerifiedEvent): Promise<{ ok: boolean; reason: string }> {
+    const connected = await this.ensureConnected();
+    if (!connected.ok || !this.ws) return connected;
+    if (this.pending) return { ok: false, reason: 'publisher busy' };
+    return new Promise(resolve => {
+      const timer = setTimeout(() => {
+        if (this.pending?.eventId !== event.id) return;
+        this.pending = null;
+        resolve({ ok: false, reason: 'acknowledgement timeout' });
+      }, RELAY_TIMEOUT_MS);
+      this.pending = { eventId: event.id, resolve, timer };
+      try {
+        this.ws?.send(JSON.stringify(['EVENT', event]));
+      } catch {
+        clearTimeout(timer);
+        this.pending = null;
+        resolve({ ok: false, reason: 'send failed' });
+      }
+    });
+  }
+
+  async close(): Promise<void> {
+    const ws = this.ws;
+    if (!ws || ws.readyState >= 2) return;
+    await new Promise<void>(resolve => {
+      const fallback = setTimeout(resolve, 3000);
+      this.closeWaiters.push(() => {
+        clearTimeout(fallback);
+        resolve();
+      });
+      try { ws.close(); } catch { clearTimeout(fallback); resolve(); }
+    });
+  }
+
+  private async ensureConnected(): Promise<{ ok: boolean; reason: string }> {
+    if (this.ws?.readyState === 1) return { ok: true, reason: 'connected' };
+    if (this.connecting) return this.connecting;
+    this.connecting = new Promise(resolve => {
+      let ws: WebSocket;
+      let settled = false;
+      const settle = (result: { ok: boolean; reason: string }): void => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve(result);
+      };
+      const timer = setTimeout(() => settle({ ok: false, reason: 'connection timeout' }), RELAY_TIMEOUT_MS);
+      try {
+        ws = new WebSocket(this.relay);
+        this.ws = ws;
+      } catch {
+        settle({ ok: false, reason: 'connection failed' });
+        return;
+      }
+      ws.onopen = () => settle({ ok: true, reason: 'connected' });
+      ws.onmessage = ev => this.handleMessage(ev);
+      ws.onerror = () => settle({ ok: false, reason: 'websocket error' });
+      ws.onclose = () => {
+        settle({ ok: false, reason: 'closed before connection ready' });
+        if (this.ws === ws) this.ws = null;
+        this.failPending('closed before acknowledgement');
+        const waiters = this.closeWaiters.splice(0);
+        for (const waiter of waiters) waiter();
+      };
+    });
+    const result = await this.connecting;
+    this.connecting = null;
+    return result;
+  }
+
+  private handleMessage(ev: MessageEvent): void {
+    let msg: unknown;
+    try { msg = JSON.parse(typeof ev.data === 'string' ? ev.data : ''); } catch { return; }
+    if (!Array.isArray(msg) || msg[0] !== 'OK' || !this.pending || msg[1] !== this.pending.eventId) return;
+    const pending = this.pending;
+    this.pending = null;
+    clearTimeout(pending.timer);
+    pending.resolve({
+      ok: msg[2] === true,
+      reason: String(msg[3] ?? (msg[2] === true ? 'accepted' : 'rejected')),
+    });
+  }
+
+  private failPending(reason: string): void {
+    if (!this.pending) return;
+    const pending = this.pending;
+    this.pending = null;
+    clearTimeout(pending.timer);
+    pending.resolve({ ok: false, reason });
+  }
 }
 
 async function verifyHistoricBests(historic: Map<string, LoggedClaim>): Promise<string[]> {

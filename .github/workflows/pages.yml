@@ -147,6 +147,6 @@ jobs:
           ssh -i ~/.ssh/hang-on-fren-deploy "$DEPLOY_USER@$DEPLOY_HOST" "STAGED='$staged' bash -se" <<'REMOTE'
           set -euo pipefail
           trap 'rm -f "$STAGED"' EXIT
-          sudo bash -c 'set -euo pipefail; set -a; . "$1"; set +a; export HANGONFREN_WRITE_RELAYS="wss://main.relay.gamestr.io,wss://test.relay.gamestr.io"; MIGRATE_DRY_RUN=1 node "$2"; node "$2"' \
+          sudo bash -c 'set -euo pipefail; set -a; . "$1"; set +a; export HANGONFREN_WRITE_RELAYS="wss://main.relay.gamestr.io,wss://test.relay.gamestr.io"; node "$2"' \
             _ /etc/hangonfren-api.env "$STAGED"
           REMOTE
