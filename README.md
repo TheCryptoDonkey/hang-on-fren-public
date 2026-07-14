@@ -60,7 +60,9 @@ Private deployment topology belongs outside this repo.
 
 The shipped game art lives under `public/`. Local source/reference material in
 `.art-ref/` and `art-originals/` is ignored by git and is not required to play
-or build the game.
+or build the game — except `art-originals/music/`, where the original
+uncompressed WAV music masters are tracked in-repo (the game itself loads the
+compressed `.m4a` copies from `public/music/`).
 
 ## License
 
