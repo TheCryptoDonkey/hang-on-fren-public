@@ -68,12 +68,17 @@ alongside `npm run dev` — the vite dev server proxies `/api` to it.
 ## Historic score reconciliation
 
 When Gamestr relay endpoints change, run the `Deploy` workflow manually with
-`migrate_scores` enabled. The job inspects both relays, then replays the best
-score for every player and level from the append-only claim log only where it is
-missing. It fails unless every score can be read back from both relays. The
+`migrate_scores` enabled and the default `both` target. The job inspects both
+relays, then replays the best score for every player and level from the
+append-only claim log only where it is missing. It fails unless every score can
+be read back from both relays. The
 migration reuses one connection, paces test-relay writes, and retries read-back
 to allow for relay connection limits and indexing delay; the game signing key
 remains in the VPS environment file.
+
+The `main` and `test` targets are recovery options for an unhealthy relay. They
+scope both publishing and mandatory read-back to that relay; normal endpoint
+migrations must continue to use `both`.
 
 The reconciler also includes the curated best entries recovered from the
 pre-claim-service browser board (`server/historic-scores.ts`). Those events are

@@ -12,6 +12,15 @@ on:
         required: false
         default: false
         type: boolean
+      migrate_target:
+        description: Relay target for score recovery (normally both)
+        required: false
+        default: both
+        type: choice
+        options:
+          - both
+          - main
+          - test
 
 permissions:
   contents: read
@@ -140,13 +149,20 @@ jobs:
         env:
           DEPLOY_HOST: ${{ secrets.HOF_DEPLOY_HOST }}
           DEPLOY_USER: ${{ secrets.HOF_DEPLOY_USER }}
+          MIGRATE_TARGET: ${{ inputs.migrate_target }}
         run: |
           set -euo pipefail
+          case "$MIGRATE_TARGET" in
+            main) migration_relays="wss://main.relay.gamestr.io" ;;
+            test) migration_relays="wss://test.relay.gamestr.io" ;;
+            both) migration_relays="wss://main.relay.gamestr.io,wss://test.relay.gamestr.io" ;;
+            *) echo "invalid migrate_target: $MIGRATE_TARGET" >&2; exit 2 ;;
+          esac
           staged="/tmp/hangonfren-migrate-${GITHUB_SHA}.js"
           rsync -az -e "ssh -i ~/.ssh/hang-on-fren-deploy" server-dist/migrate-gamestr.js "$DEPLOY_USER@$DEPLOY_HOST:$staged"
-          ssh -i ~/.ssh/hang-on-fren-deploy "$DEPLOY_USER@$DEPLOY_HOST" "STAGED='$staged' bash -se" <<'REMOTE'
+          ssh -i ~/.ssh/hang-on-fren-deploy "$DEPLOY_USER@$DEPLOY_HOST" "STAGED='$staged' MIGRATION_RELAYS='$migration_relays' bash -se" <<'REMOTE'
           set -euo pipefail
           trap 'rm -f "$STAGED"' EXIT
-          sudo bash -c 'set -euo pipefail; set -a; . "$1"; set +a; export HANGONFREN_WRITE_RELAYS="wss://main.relay.gamestr.io,wss://test.relay.gamestr.io"; node "$2"' \
-            _ /etc/hangonfren-api.env "$STAGED"
+          sudo bash -c 'set -euo pipefail; set -a; . "$1"; set +a; export HANGONFREN_WRITE_RELAYS="$3"; node "$2"' \
+            _ /etc/hangonfren-api.env "$STAGED" "$MIGRATION_RELAYS"
           REMOTE
