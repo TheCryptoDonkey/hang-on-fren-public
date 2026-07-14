@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseClaim, cleanPlayerName, type ClaimInput } from './claim-rules.js';
+import { parseClaim, cleanPlayerName, MAX_DRIFT_POINTS_PER_S, MAX_DRIFTS_PER_S, type ClaimInput } from './claim-rules.js';
 
 const NOW = 1_800_000_000_000;
 
@@ -106,5 +106,71 @@ describe('claim-rules', () => {
         expect(result.claim[key]).toBeUndefined();
       }
     }
+  });
+});
+
+describe('claim-rules: powerslides', () => {
+  it('accepts a claim that carries drifts', () => {
+    const result = parseClaim(validClaim({ drifts: 40 }), NOW);
+    expect(result.ok).toBe(true);
+  });
+
+  it('still accepts a claim with NO drifts field at all', () => {
+    // A client built before the powerslide shipped — or a stale cached PWA —
+    // submits a claim that has never heard of `drifts`. Those runs must keep
+    // publishing. Making the field required would 422 every player who had not
+    // yet picked up the new build, which is a silent outage, not a validation.
+    const { drifts: _omitted, ...withoutDrifts } = validClaim({ drifts: 7 });
+    const result = parseClaim(withoutDrifts, NOW);
+    expect(result.ok).toBe(true);
+  });
+
+  it('refuses a nonsense drift count', () => {
+    const tooMany = validClaim({ drifts: 180 * MAX_DRIFTS_PER_S + 1, duration_s: 180 });
+    expect(parseClaim(tooMany, NOW)).toMatchObject({ ok: false, error: 'implausible_drifts' });
+    expect(parseClaim(validClaim({ drifts: -1 }), NOW)).toMatchObject({ ok: false, error: 'invalid_payload' });
+    expect(parseClaim(validClaim({ drifts: 2.5 }), NOW)).toMatchObject({ ok: false, error: 'invalid_payload' });
+  });
+
+  it('does not refuse a drift-heavy run as an impossible score', () => {
+    // THE case this ceiling exists for. Powerslides pay by the second and can
+    // out-earn every other source combined; before the drift term was added to
+    // the ceiling, a genuinely good sideways DEGEN run scored high enough to be
+    // thrown out as a forgery. An anti-cheat rule that only ever fires on the
+    // players who earned it is worse than no rule.
+    const duration = 200;
+    const driftHeavy = validClaim({
+      duration_s: duration,
+      started_at: NOW - duration * 1000 - 20_000,
+      distance_m: 8_000,
+      drifts: 60,
+      score: 10_000 + 8_000 * 4 + duration * (800 + MAX_DRIFT_POINTS_PER_S) - 1,
+    });
+    expect(parseClaim(driftHeavy, NOW)).toMatchObject({ ok: true });
+  });
+
+  it('but the ceiling is still a ceiling', () => {
+    const duration = 200;
+    const absurd = validClaim({
+      duration_s: duration,
+      started_at: NOW - duration * 1000 - 20_000,
+      distance_m: 8_000,
+      drifts: 60,
+      score: 10_000 + 8_000 * 4 + duration * (800 + MAX_DRIFT_POINTS_PER_S) + 1,
+    });
+    expect(parseClaim(absurd, NOW)).toMatchObject({ ok: false, error: 'implausible_score' });
+  });
+
+  it('a forged drift count cannot buy a higher score ceiling', () => {
+    // The ceiling is TIME-bounded, never per-drift: `drifts` is attacker-supplied,
+    // so charging an allowance per claimed drift would let a forged claim mint
+    // itself unlimited headroom. You can only be sideways for as long as the run.
+    const duration = 60;
+    const overCeiling = 10_000 + 1_000 * 4 + duration * (800 + MAX_DRIFT_POINTS_PER_S) + 5_000;
+    const modest = validClaim({ duration_s: duration, distance_m: 1_000, drifts: 1, score: overCeiling });
+    const stuffed = validClaim({ duration_s: duration, distance_m: 1_000, drifts: 100, score: overCeiling });
+    expect(parseClaim(modest, NOW)).toMatchObject({ ok: false, error: 'implausible_score' });
+    // Claiming 100× the drifts buys exactly nothing: same score, same refusal.
+    expect(parseClaim(stuffed, NOW)).toMatchObject({ ok: false, error: 'implausible_score' });
   });
 });

@@ -395,6 +395,7 @@ export async function submitScore(summary: RunSummary, opts: SubmitScoreOptions)
     overtakes: summary.overtakes,
     crashes: summary.crashes,
     top_speed_kph: summary.topSpeedKph,
+    drifts: summary.drifts,
     level: opts.level,
     ended_by: opts.endedBy,
     ...(opts.playerName ? { player_name: opts.playerName } : {}),

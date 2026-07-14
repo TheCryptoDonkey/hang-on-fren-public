@@ -829,10 +829,28 @@ interface CarSpec {
   glass: string;
   tail: string;
   trim: string;
-  stance: 'low' | 'mid' | 'tall';
+  /** `box` is the working-vehicle silhouette: tall, slab-sided, cab up top. */
+  stance: 'low' | 'mid' | 'tall' | 'box';
   spoiler?: boolean;
   roundTail?: boolean;
   rust?: boolean;
+  // --- working-vehicle dressing (the regional traffic) ---
+  /** Roof beacon colour — orange on a plough/tractor, amber on a truck. */
+  beacon?: string;
+  /** Police light bar (red + blue). */
+  lightbar?: boolean;
+  /** Snow-plough blade slung across the front. */
+  blade?: string;
+  /** Roof rack / luggage — campers and holiday traffic. */
+  rack?: boolean;
+  /** Buggy roll cage over an open body. */
+  cage?: boolean;
+  /** Fire-truck ladder along the roof. */
+  ladder?: boolean;
+  /** Fat off-road tyres poking proud of the body. */
+  bigWheels?: boolean;
+  /** Taxi roof sign colour. */
+  taxiSign?: string;
 }
 
 function roundRectPath(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number): void {
@@ -850,14 +868,15 @@ function makeCarSprite(spec: CarSpec): SpriteImage {
   const { w, h } = spec;
   return bake(w, h, ctx => {
     const cx = w / 2;
-    const bodyW = w * (spec.stance === 'low' ? 0.9 : spec.stance === 'tall' ? 0.78 : 0.84);
+    const box = spec.stance === 'box';
+    const bodyW = w * (spec.stance === 'low' ? 0.9 : spec.stance === 'tall' ? 0.78 : box ? 0.88 : 0.84);
     const bx = cx - bodyW / 2;
-    const tyreH = h * 0.2;
-    const tyreW = w * 0.16;
+    const tyreH = h * (spec.bigWheels ? 0.27 : 0.2);
+    const tyreW = w * (spec.bigWheels ? 0.21 : 0.16);
     const groundY = h - 3;
-    const bodyBottom = groundY - tyreH * 0.35;
-    const bodyTop = h * (spec.stance === 'low' ? 0.5 : spec.stance === 'tall' ? 0.3 : 0.4);
-    const cabTop = h * (spec.stance === 'low' ? 0.34 : spec.stance === 'tall' ? 0.12 : 0.22);
+    const bodyBottom = groundY - tyreH * (spec.bigWheels ? 0.5 : 0.35);
+    const bodyTop = h * (spec.stance === 'low' ? 0.5 : spec.stance === 'tall' ? 0.3 : box ? 0.22 : 0.4);
+    const cabTop = h * (spec.stance === 'low' ? 0.34 : spec.stance === 'tall' ? 0.12 : box ? 0.08 : 0.22);
 
     // shadow
     ctx.fillStyle = 'rgba(0,0,0,0.22)';
@@ -930,6 +949,66 @@ function makeCarSprite(spec: CarSpec): SpriteImage {
       ctx.fill();
     }
 
+    // --- regional working-vehicle dressing ---------------------------------
+    // Enough silhouette to tell a snow plough from a squad car from a tractor at
+    // a glance — which is the whole point of giving each region its own traffic.
+    if (spec.rack) {
+      ctx.fillStyle = spec.trim;
+      ctx.fillRect(cx - bodyW * 0.42, cabTop - h * 0.05, bodyW * 0.84, h * 0.035);
+      ctx.fillStyle = spec.bodyDark;
+      ctx.fillRect(cx - bodyW * 0.3, cabTop - h * 0.09, bodyW * 0.6, h * 0.045); // luggage
+    }
+    if (spec.ladder) {
+      ctx.fillStyle = '#d8d8d0';
+      ctx.fillRect(cx - bodyW * 0.44, cabTop - h * 0.045, bodyW * 0.88, h * 0.03);
+      ctx.fillStyle = '#9a9a92';
+      for (let i = 0; i < 7; i += 1) {
+        ctx.fillRect(cx - bodyW * 0.42 + i * bodyW * 0.14, cabTop - h * 0.045, w * 0.012, h * 0.03);
+      }
+    }
+    if (spec.cage) {
+      ctx.strokeStyle = '#2a2a30';
+      ctx.lineWidth = Math.max(2, w * 0.028);
+      ctx.beginPath(); // roll hoop over an open body
+      ctx.moveTo(bx + bodyW * 0.1, bodyTop);
+      ctx.lineTo(bx + bodyW * 0.16, cabTop);
+      ctx.lineTo(bx + bodyW * 0.84, cabTop);
+      ctx.lineTo(bx + bodyW * 0.9, bodyTop);
+      ctx.stroke();
+    }
+    if (spec.blade) {
+      ctx.fillStyle = spec.blade;
+      roundRectPath(ctx, cx - w * 0.48, bodyBottom - h * 0.06, w * 0.96, h * 0.16, w * 0.03);
+      ctx.fill();
+      ctx.fillStyle = 'rgba(255,255,255,0.35)'; // scraped steel edge
+      ctx.fillRect(cx - w * 0.48, bodyBottom + h * 0.07, w * 0.96, h * 0.03);
+      ctx.strokeStyle = 'rgba(0,0,0,0.5)';
+      ctx.lineWidth = Math.max(2, w * 0.012);
+      roundRectPath(ctx, cx - w * 0.48, bodyBottom - h * 0.06, w * 0.96, h * 0.16, w * 0.03);
+      ctx.stroke();
+    }
+    if (spec.lightbar) {
+      const lw = bodyW * 0.5;
+      ctx.fillStyle = '#e02030';
+      ctx.fillRect(cx - lw / 2, cabTop - h * 0.055, lw / 2, h * 0.04);
+      ctx.fillStyle = '#2060e0';
+      ctx.fillRect(cx, cabTop - h * 0.055, lw / 2, h * 0.04);
+    }
+    if (spec.beacon) {
+      ctx.fillStyle = spec.beacon;
+      ctx.beginPath();
+      ctx.ellipse(cx, cabTop - h * 0.035, w * 0.045, h * 0.035, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    if (spec.taxiSign) {
+      ctx.fillStyle = spec.taxiSign;
+      roundRectPath(ctx, cx - bodyW * 0.18, cabTop - h * 0.06, bodyW * 0.36, h * 0.05, 2);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(0,0,0,0.45)';
+      ctx.lineWidth = Math.max(1.5, w * 0.01);
+      ctx.stroke();
+    }
+
     // dark arcade outline
     ctx.strokeStyle = 'rgba(0,0,0,0.5)';
     ctx.lineWidth = Math.max(2, w * 0.014);
@@ -944,6 +1023,20 @@ const CAR_SPECS: Record<string, CarSpec> = {
   'car-porsche': { w: 150, h: 100, body: '#d9dee4', bodyDark: '#9aa0a8', roof: '#c2c8ce', glass: '#2b3040', tail: '#e23b3b', trim: '#333', stance: 'mid', spoiler: true, roundTail: true },
   'car-bentley': { w: 150, h: 116, body: '#123f2e', bodyDark: '#0c2a1f', roof: '#0e3325', glass: '#274850', tail: '#e04b4b', trim: '#c9b981', stance: 'tall' },
   'car-banger': { w: 150, h: 112, body: '#7a6a45', bodyDark: '#584c31', roof: '#6a5c3d', glass: '#38402f', tail: '#c05a3a', trim: '#3a3a3a', stance: 'mid', rust: true },
+  // --- regional traffic: the vehicles that belong to each place --------------
+  // The vehicles you meet belong to the road you are on — coaches and ploughs on
+  // the mountain, pickups and buggies in the canyon, cabs and squad cars in the
+  // city, tractors in the valley — so the traffic itself tells you where you are.
+  'car-camper': { w: 152, h: 126, body: '#f2ede0', bodyDark: '#cfc7b4', roof: '#e8c34a', glass: '#3c4a52', tail: '#e05a4a', trim: '#c9752f', stance: 'box', rack: true },
+  'car-bus': { w: 168, h: 134, body: '#2f6fb5', bodyDark: '#204d80', roof: '#e8edf2', glass: '#2b3a4a', tail: '#e04b4b', trim: '#d8dde2', stance: 'box' },
+  'car-plough': { w: 166, h: 130, body: '#f2a01e', bodyDark: '#c47a0c', roof: '#d98f16', glass: '#33403c', tail: '#e04b4b', trim: '#2f3338', stance: 'box', blade: '#d94f2a', beacon: '#ffb43c', bigWheels: true },
+  'car-pickup': { w: 156, h: 116, body: '#c98a52', bodyDark: '#a06a3a', roof: '#b57a45', glass: '#3e4a44', tail: '#d95a3a', trim: '#3a3a3a', stance: 'mid', bigWheels: true, rust: true },
+  'car-buggy': { w: 140, h: 104, body: '#e5484d', bodyDark: '#b52f36', roof: '#2a2a30', glass: '#2a2a30', tail: '#ffb43c', trim: '#2a2a30', stance: 'mid', cage: true, bigWheels: true },
+  'car-taxi': { w: 152, h: 106, body: '#f5c518', bodyDark: '#c69c0a', roof: '#f5c518', glass: '#26303f', tail: '#e04b4b', trim: '#1b1b20', stance: 'mid', taxiSign: '#1b1b20' },
+  'car-police': { w: 154, h: 106, body: '#f2f4f6', bodyDark: '#c2c6cc', roof: '#1c2740', glass: '#26303f', tail: '#e04b4b', trim: '#1c2740', stance: 'mid', lightbar: true },
+  'car-tractor': { w: 148, h: 128, body: '#3f8f3a', bodyDark: '#2c6b28', roof: '#2c6b28', glass: '#3c4a3c', tail: '#e04b4b', trim: '#e8b13c', stance: 'box', beacon: '#ffb43c', bigWheels: true },
+  'car-jeep': { w: 148, h: 116, body: '#5a6b46', bodyDark: '#3f4d31', roof: '#3f4d31', glass: '#39433c', tail: '#d95a3a', trim: '#2a2a2a', stance: 'tall', bigWheels: true },
+  'car-firetruck': { w: 172, h: 136, body: '#d4232b', bodyDark: '#9c151c', roof: '#e8e8e0', glass: '#2b3a4a', tail: '#ffb43c', trim: '#e8e8e0', stance: 'box', ladder: true, beacon: '#ff4d4d' },
 };
 
 function fallbackPetrol(): SpriteImage {
@@ -1213,6 +1306,18 @@ const FALLBACKS: Record<string, () => SpriteImage> = {
   'car-porsche': () => makeCarSprite(CAR_SPECS['car-porsche']),
   'car-bentley': () => makeCarSprite(CAR_SPECS['car-bentley']),
   'car-banger': () => makeCarSprite(CAR_SPECS['car-banger']),
+  // Regional working vehicles — all code-drawn (no PNG art), so the generator IS
+  // the art. Each is dressed to read as its region's traffic at a glance.
+  'car-camper': () => makeCarSprite(CAR_SPECS['car-camper']),
+  'car-bus': () => makeCarSprite(CAR_SPECS['car-bus']),
+  'car-plough': () => makeCarSprite(CAR_SPECS['car-plough']),
+  'car-pickup': () => makeCarSprite(CAR_SPECS['car-pickup']),
+  'car-buggy': () => makeCarSprite(CAR_SPECS['car-buggy']),
+  'car-taxi': () => makeCarSprite(CAR_SPECS['car-taxi']),
+  'car-police': () => makeCarSprite(CAR_SPECS['car-police']),
+  'car-tractor': () => makeCarSprite(CAR_SPECS['car-tractor']),
+  'car-jeep': () => makeCarSprite(CAR_SPECS['car-jeep']),
+  'car-firetruck': () => makeCarSprite(CAR_SPECS['car-firetruck']),
   rose: fallbackRose,
   'pickup-petrol': fallbackPetrol,
   'pickup-cake': fallbackCake,

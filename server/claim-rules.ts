@@ -18,6 +18,32 @@ export const MAX_DURATION_S = 60 * 60;
 export const MAX_DISTANCE_M = FINISH_M + 1_000;
 /** Top speed is 260 km/h ≈ 72 m/s; 80 m/s allows integrator slack. */
 export const MAX_SPEED_M_PER_S = 80;
+/**
+ * Drift income per second, as a ceiling. Derived, not guessed:
+ *
+ *   scoring.ts pays `angleArea × 900 × modeMul × flowMul` on a landed slide,
+ *   where angleArea accrues at (|slip| × speedFraction) per second.
+ *
+ *   A rider cannot hold |slip| at 1.0 — that IS the spin threshold — but call it
+ *   0.85 sustained. Take DEGEN (modeMul 1.5) and a maxed FREN FLOW chain
+ *   (flowMul 2.0), and hold the slide for the entire run:
+ *
+ *       0.85 × 900 × 1.5 × 2.0  ≈  2,300 points/second
+ *
+ * That is nearly three times the ENTIRE pre-drift allowance below, so it has to
+ * be accounted for explicitly. It deliberately is NOT charged per claimed drift:
+ * `drifts` is attacker-controlled, so a per-drift allowance would let a forged
+ * claim buy itself an arbitrarily high ceiling. Time is the one budget a cheat
+ * cannot inflate — you can only be sideways for as long as the run lasted.
+ */
+export const MAX_DRIFT_POINTS_PER_S = 2_400;
+/**
+ * A scoring slide has to be held for MIN_SCORING_DRIFT_S (0.35s) and re-entered
+ * before the next, so two a second is already generous. This only keeps the
+ * published `drifts` tag honest — the score ceiling above is time-bounded and
+ * does not trust this number.
+ */
+export const MAX_DRIFTS_PER_S = 2;
 
 export interface ClaimInput {
   game: typeof GAME_ID;
@@ -33,6 +59,13 @@ export interface ClaimInput {
   overtakes: number;
   crashes: number;
   top_speed_kph: number;
+  /**
+   * Powerslides landed. OPTIONAL: a client built before the powerslide shipped
+   * (or a stale cached PWA) submits a claim without it, and those runs must keep
+   * publishing rather than 422 on a field they have never heard of. Absent is
+   * read as zero.
+   */
+  drifts?: number;
   level: number;
   ended_by: 'time' | 'finish';
   player_name?: string;
@@ -88,12 +121,28 @@ export function parseClaim(body: unknown, now = Date.now()): ParseResult {
     return { ok: false, status: 422, error: 'implausible_distance' };
   }
   if (claim.top_speed_kph > 400) return { ok: false, status: 422, error: 'implausible_speed' };
+  if (claim.drifts !== undefined) {
+    if (!Number.isInteger(claim.drifts) || claim.drifts < 0) {
+      return { ok: false, status: 422, error: 'invalid_payload', detail: 'drifts must be a non-negative integer' };
+    }
+    if (claim.drifts > claim.duration_s * MAX_DRIFTS_PER_S) {
+      return { ok: false, status: 422, error: 'implausible_drifts' };
+    }
+  }
 
   // Score ceiling: distance points dominate (~1/m, 1.5× on degen); pickups,
   // overtakes, streak multipliers and the finish time-bonus ride on top. This
   // is deliberately loose — it only has to make nonsense claims impossible,
   // not price every run exactly.
-  const plausibleScore = 10_000 + claim.distance_m * 4 + claim.duration_s * 800;
+  //
+  // The drift term is NOT decoration. Powerslides pay by the second and can
+  // out-earn everything else on this line put together (see
+  // MAX_DRIFT_POINTS_PER_S), so without it a genuinely good drift-heavy DEGEN
+  // run would be refused as an impossible score — the worst possible failure for
+  // an anti-cheat rule, because it only ever fires on the players who earned it.
+  const plausibleScore = 10_000
+    + claim.distance_m * 4
+    + claim.duration_s * (800 + MAX_DRIFT_POINTS_PER_S);
   if (claim.score > plausibleScore) return { ok: false, status: 422, error: 'implausible_score' };
 
   // Chain-state flavour: keep only sane values so nonsense never reaches the

@@ -206,6 +206,8 @@ for (const { pubkey, claim } of best.values()) {
     crashes: claim.crashes,
     bestRoseStreak: 0,
     topSpeedKph: claim.top_speed_kph,
+    drifts: claim.drifts ?? 0,
+    bestDriftS: 0,
     durationS: claim.duration_s,
     endedBy: claim.ended_by === 'finish' ? 'finish' : 'time',
   };

@@ -22,6 +22,9 @@ export const ROAD = {
 
 export const CAMERA_DEPTH = 1 / Math.tan(((ROAD.fieldOfView / 2) * Math.PI) / 180);
 
+/** World units per metre — the odometer's convention (shared with world.ts). */
+export const UNITS_PER_M = 100;
+
 /** Screen-height fraction where the rider's wheel contact is drawn (render.ts). */
 export const RIDER_SCREEN_FRAC = 0.96;
 /**
@@ -59,6 +62,31 @@ export interface Segment {
   /** Y-clip set each frame so nearer hills occlude farther sprites. */
   clip: number;
   scenery: SceneryItem[];
+  /**
+   * The span of road overhead here, if any. Stamped onto the segment rather than
+   * looked up per frame: the renderer asks this question for every one of the
+   * ~260 segments it draws, every frame.
+   */
+  overhead: Overhead | null;
+}
+
+/**
+ * Something the road passes UNDER. Everything in the scenery kit stands beside
+ * the road; nothing crosses it, and a road you never go under reads as flat
+ * however much you decorate its verges.
+ *
+ * A TUNNEL is walls plus a ceiling — you are enclosed, the sky is gone, and the
+ * engine comes back at you off the tiles. An OVERPASS is the same ceiling with no
+ * walls and a couple of pillars: a bridge deck flashing overhead in a moment of
+ * shadow. They are the same geometry at different lengths, so they are one type.
+ */
+export type OverheadKind = 'tunnel' | 'overpass';
+
+export interface Overhead {
+  kind: OverheadKind;
+  /** Inclusive segment span. */
+  start: number;
+  end: number;
 }
 
 export interface Track {
@@ -66,6 +94,8 @@ export interface Track {
   length: number; // total world length
   /** Named authored set-pieces, used by tests and the dev visual harness. */
   features: Record<TrackFeatureName, TrackFeature>;
+  /** Every tunnel and overpass on the road, in track order. */
+  overheads: Overhead[];
 }
 
 export type TrackFeatureName = 'billion-bend' | 'blind-summit-west' | 'blind-summit-east';
@@ -90,6 +120,7 @@ function addSegment(segments: Segment[], curve: number, y: number): void {
     color: Math.floor(n / ROAD.rumbleSegments) % 2 ? 'dark' : 'light',
     clip: 0,
     scenery: [],
+    overhead: null,
   });
 }
 
@@ -241,7 +272,71 @@ export function buildTrack(): Track {
   const residual = lastY(s);
   if (Math.abs(residual) > 0.5) addRoad(s, LEN.medium, LEN.short, LEN.medium, 0, -residual);
 
-  return { segments: s, length: s.length * ROAD.segmentLength, features };
+  const overheads = addOverheads(s);
+
+  return { segments: s, length: s.length * ROAD.segmentLength, features, overheads };
+}
+
+/** A tunnel this many segments long is a proper tunnel; an overpass is a flash. */
+const TUNNEL_LEN = 80;
+const OVERPASS_LEN = 3;
+/** Nothing overhead within this many segments of the loop seam. */
+const SEAM_GUARD = 60;
+
+/**
+ * Bore the tunnels and throw the bridges across, then stamp every affected
+ * segment so the renderer never has to search for them.
+ *
+ * Placed as fractions of the finished road rather than authored inline, so the
+ * track can be re-shaped freely without anyone having to remember to move the
+ * tunnels — they land in the same PLACES on the journey regardless of how the
+ * corners in between get rewritten.
+ */
+function addOverheads(segments: Segment[]): Overhead[] {
+  const n = segments.length;
+  const at = (frac: number, len: number, kind: OverheadKind): Overhead | null => {
+    const start = Math.floor(n * frac);
+    const end = start + len;
+    // Never straddle the seam: the loop point would put a tunnel mouth behind you
+    // and its far wall in front, which is exactly as odd as it sounds.
+    if (start < SEAM_GUARD || end > n - SEAM_GUARD) return null;
+    return { kind, start, end };
+  };
+  const overheads = [
+    at(0.14, OVERPASS_LEN, 'overpass'),
+    at(0.21, TUNNEL_LEN, 'tunnel'),
+    at(0.36, OVERPASS_LEN, 'overpass'),
+    at(0.48, TUNNEL_LEN + 40, 'tunnel'), // the long one
+    at(0.6, OVERPASS_LEN, 'overpass'),
+    at(0.72, TUNNEL_LEN, 'tunnel'),
+    at(0.84, OVERPASS_LEN, 'overpass'),
+  ].filter((o): o is Overhead => o !== null);
+
+  for (const overhead of overheads) {
+    for (let i = overhead.start; i <= overhead.end && i < n; i += 1) {
+      segments[i].overhead = overhead;
+    }
+  }
+  return overheads;
+}
+
+/**
+ * How enclosed the road is at `z`: 0 out in the open, 1 deep inside a tunnel.
+ *
+ * Ramped rather than switched. A tunnel that snaps to full darkness the instant
+ * its first segment passes under the wheels is a light switch, not a tunnel; the
+ * dark closes in over the length of the mouth and opens out again at the far end.
+ * An overpass is far too short to ever reach 1, which is the point — it is a
+ * flicker of shadow, and it gets one for free from the same ramp.
+ */
+export function enclosureAt(track: Track, z: number): number {
+  const seg = findSegment(track, z);
+  const overhead = seg.overhead;
+  if (!overhead) return 0;
+  const ramp = 6; // segments to fade fully in / out
+  const fromStart = seg.index - overhead.start;
+  const toEnd = overhead.end - seg.index;
+  return clamp(Math.min(fromStart, toEnd) / ramp, 0, 1);
 }
 
 /**
@@ -314,7 +409,87 @@ export function findSegment(track: Track, z: number): Segment {
   return track.segments[index];
 }
 
-/** Project a world point to screen, mutating its `screen` fields. */
+/**
+ * Nudge a finish distance so the tape lands at the END of a STRAIGHT.
+ *
+ * The road loops, but total distance and track position are locked together
+ * (`z_total = distanceM · 100`), so a given finish distance always falls on the
+ * same stretch of tarmac — and the nominal one lands mid-corner, where you crest
+ * into the flag with no warning. This finds the nearest run of straight road
+ * whose exit sits near the nominal finish and returns the distance that lands the
+ * tape there instead, so the finish arch stands at the end of a straight you can
+ * see all the way down. The shift is at most `maxShiftM`; if no straight is near
+ * (it always is), it returns the nominal unchanged.
+ */
+export function alignFinishToStraight(
+  track: Track,
+  nominalM: number,
+  runInM = 260,
+  maxShiftM = 900,
+): number {
+  const segs = track.segments;
+  const n = segs.length;
+  const STRAIGHT_EPS = 0.7; // |curve| below this reads as straight at speed
+  const runIn = Math.round((runInM * UNITS_PER_M) / ROAD.segmentLength); // segs of run-in
+  const maxShift = Math.round((maxShiftM * UNITS_PER_M) / ROAD.segmentLength); // segs
+
+  const finishZ = wrap(nominalM * UNITS_PER_M, track.length);
+  const finishSeg = Math.floor(finishZ / ROAD.segmentLength) % n;
+
+  const straightExit = (end: number): boolean => {
+    for (let k = 0; k <= runIn; k += 1) {
+      const idx = ((end - k) % n + n) % n;
+      if (Math.abs(segs[idx].curve) > STRAIGHT_EPS) return false;
+    }
+    return true;
+  };
+
+  // Search outward from the nominal exit for the nearest straight exit.
+  for (let d = 0; d <= maxShift; d += 1) {
+    for (const end of d === 0 ? [finishSeg] : [finishSeg + d, finishSeg - d]) {
+      const idx = ((end % n) + n) % n;
+      if (straightExit(idx)) {
+        return nominalM + ((end - finishSeg) * ROAD.segmentLength) / UNITS_PER_M;
+      }
+    }
+  }
+  return nominalM;
+}
+
+/**
+ * Screen-space horizontal shift produced by yawing the camera `yaw` radians.
+ *
+ * A camera yaw rotates the whole view about the vertical axis. To first order —
+ * and every point we draw is far enough down the road for that to hold — it
+ * shifts EVERY point by the same number of pixels, whatever its depth: rotating
+ * camera-space by a small yaw gives camX' ≈ camX − camZ·yaw, and since
+ * scale·camZ is exactly CAMERA_DEPTH, the resulting screen shift
+ * (scale·camX'·w/2) loses its depth term entirely. So a yaw is a pure pan: the
+ * road, the scenery, the horizon and the bike all swing together, which is
+ * precisely the "camera looks into the corner" move.
+ */
+export function yawPan(yaw: number, width: number): number {
+  return -yaw * CAMERA_DEPTH * (width / 2);
+}
+
+/** Projection scale at the point the rider is drawn — used to place the bike. */
+export const RIDER_SCALE = CAMERA_DEPTH / RIDER_FWD;
+
+/**
+ * Where the bike is DRAWN horizontally, given a yawed camera that trails the
+ * bike by `camLag` road-offset units. The renderer needs this to place the
+ * sprite; the game loop needs the same answer to pour tyre smoke out from under
+ * it. It lives here, once, so those two can never disagree — the same reason
+ * sprite widths live in geometry.ts.
+ */
+export function riderScreenX(width: number, camYaw: number, camLag: number): number {
+  return width / 2 + yawPan(camYaw, width) + RIDER_SCALE * camLag * ROAD.roadWidth * (width / 2);
+}
+
+/**
+ * Project a world point to screen, mutating its `screen` fields. `xPan` is the
+ * camera-yaw pan from `yawPan()`, applied identically at every depth.
+ */
 export function project(
   point: ProjectedPoint,
   cameraX: number,
@@ -323,6 +498,7 @@ export function project(
   width: number,
   height: number,
   roadWidth: number,
+  xPan = 0,
 ): void {
   const camX = point.world.x - cameraX;
   const camY = point.world.y - cameraY;
@@ -331,7 +507,7 @@ export function project(
   point.screen.scale = scale;
   // No rounding — sub-pixel positions keep the road and roadside sprites from
   // shimmering as segments advance.
-  point.screen.x = width / 2 + (scale * camX * width) / 2;
+  point.screen.x = width / 2 + (scale * camX * width) / 2 + xPan;
   point.screen.y = height / 2 - (scale * camY * height) / 2;
   point.screen.w = (scale * roadWidth * width) / 2;
 }
@@ -346,6 +522,23 @@ export interface Player {
   maxSpeed: number;
   lean: number; // -1..1 smoothed visual lean
   offRoad: boolean;
+  // ---- powerslide (the OutRun drift) ----
+  /**
+   * Heading offset from the road's direction, in radians (+ = nose pointing
+   * right). In a grip corner this is a token turn-in angle; in a slide it is the
+   * slip angle, and it is what actually turns the bike (see `driftTurn`).
+   */
+  yaw: number;
+  /** |yaw| normalised against the spin-out limit: 0 = tracking true, 1 = gone. */
+  slip: number;
+  /** True while the tyres have let go and the bike is in a committed slide. */
+  drifting: boolean;
+  /** Which way the slide is pointing: -1 left, +1 right, 0 when gripping. */
+  driftDir: number;
+  /** Seconds held in the current slide — feeds the drift score. */
+  driftTime: number;
+  /** Set for one step when the slide over-rotates: the caller turns it into a wipeout. */
+  spinOut: boolean;
 }
 
 export interface DriveInput {
@@ -353,6 +546,13 @@ export interface DriveInput {
   right: boolean;
   throttle: boolean;
   brake: boolean;
+  /**
+   * A completed FLICK this step (-1 left / +1 right), from flick.ts — the
+   * counter-steer gesture (hold one way, stab the other, pin it back) that
+   * breaks the tyres loose. A second way into a slide alongside brake-into-turn;
+   * 0/absent on every ordinary step. See `updateDrift`.
+   */
+  flick?: number;
 }
 
 export interface DriveTuning {
@@ -365,6 +565,22 @@ export interface DriveTuning {
   steerDamp: number; // tyre grip — self-centres the bike (per second)
   maxSteerVel: number; // cap on lateral velocity
   centrifugal: number; // how much a bend runs the bike wide
+  // ---- powerslide ----
+  driftEntrySpeed: number; // speedPct below which the tyres won't break away
+  driftHoldYaw: number; // the slip angle a held slide settles at
+  driftCreep: number; // rad/s the held angle widens the longer you stay in it
+  driftYawRate: number; // how fast the slip angle chases its held target (per sec)
+  driftCounterYaw: number; // fraction of the held angle counter-steer tightens to
+  driftCounterRate: number; // how fast counter-steer pulls the angle in (per sec)
+  driftRecover: number; // rad/s the slide settles with no steering input
+  driftTurn: number; // how strongly slip angle converts into a turning force
+  driftDrag: number; // speed scrubbed per radian of slip, per second
+  driftGrip: number; // fraction of tyre grip left once sliding (self-centring)
+  driftSteerMul: number; // how much the BARS still do once the tyres have let go
+  driftSteerCap: number; // lateral-velocity cap multiplier while sliding
+  maxYaw: number; // slip angle beyond which the bike spins out
+  driftExitYaw: number; // slip below this and the slide is over
+  driftMinSpeed: number; // speedPct below which a slide can no longer be held
 }
 
 export const DEFAULT_TUNING: DriveTuning = {
@@ -377,16 +593,204 @@ export const DEFAULT_TUNING: DriveTuning = {
   steerDamp: 4.2, // settles quickly back to centre when you let off
   maxSteerVel: 3,
   centrifugal: 0.45,
+  driftEntrySpeed: 0.5,
+  driftHoldYaw: 0.45, // ~26° — a big, readable slide you can live in
+  // The slide goes HOT at ~2.1s: past that, the angle it wants to sit at is more
+  // lock than the bike has, so holding it wide will spin you and the only way to
+  // stay in it is to keep it tight. (The number matters: the yaw only ever chases
+  // this target asymptotically, so if the target merely APPROACHED full lock the
+  // bike could never actually cross it, the spin-out would be unreachable, and
+  // every word above about risk would be decoration.)
+  driftCreep: 0.13,
+  // The tail has to SNAP out, not ooze out. A corner lasts about a second; the
+  // sliding tyre's lateral velocity has a ~0.5s time constant, so a slide that
+  // merely starts building on entry is still ramping up as the corner ends — and
+  // grip, which reaches full effect in a quarter of a second, quietly beats it.
+  // A drift that only comes good after the bend is over is not a mechanic, it is
+  // a liability. Hence a fast yaw build and a real kick at the moment it lets go.
+  driftYawRate: 5,
+  // Counter-steer TIGHTENS the slide; it does not kill it. This is the single
+  // change that turns the drift from a stunt into a skill. Scrubbing the angle
+  // straight back to zero (as this first did) meant any correction to keep the
+  // bike on the road instantly ended the drift — and since a held slide crosses
+  // the whole road in about half a second, a correction is always needed. The
+  // slide was therefore unbalanceable by construction: you could start one and
+  // you could end one, but you could never RIDE one.
+  //
+  // Now the bars pick the angle — wide (hold) or tight (counter) — while the bike
+  // stays sideways throughout, and you steer your line by feathering between the
+  // two. Letting go of the bars is what stands it back up.
+  driftCounterYaw: 0.35,
+  driftCounterRate: 4.5,
+  driftRecover: 2.0,
+  // The four below are ONE budget and have to be read together. A slide is not
+  // "grip, but more of everything" — it is a TRADE: the bars go light
+  // (driftSteerMul), and the slip angle takes over the job of turning the bike
+  // (driftTurn). Tuning them independently is how the first cut flung the bike
+  // clean off the tarmac in half a second — full steering AND almost no damping
+  // AND a raised cap, all stacked, so the slide simply teleported sideways.
+  //
+  // Where it has to land: ~1.5× grip's lateral rate on a straight, and ~1.8× in
+  // a fast bend, because a bend is spending grip's authority on not being flung
+  // wide while the slide is spending almost none. That gap IS the drift — it is
+  // why you would ever risk one — and it only shows up in corners, which is
+  // exactly where it should.
+  driftSteerMul: 0.5,
+  driftTurn: 10,
+  driftGrip: 0.45, // a sliding tyre still drags — it is not ice
+  driftSteerCap: 1.5,
+  driftDrag: 2400,
+  maxYaw: 0.72, // ~41° — past this you have thrown it away
+  driftExitYaw: 0.07,
+  driftMinSpeed: 0.3,
 };
 
+/** The slip angle stamped on at the moment the tyres let go — the initial flick. */
+const DRIFT_SEED_YAW = 0.3;
+/**
+ * The lateral shove the bike gets as the tail lets go, scaled by speed. This is
+ * the physical event — the rear stepping out — and without it the slide has to
+ * accelerate sideways from a standstill through a heavily damped system, which
+ * takes most of the corner (see `driftYawRate`).
+ */
+const DRIFT_KICK = 1.5;
+/** A slide can't end on the step it started (the seed would trip the exit test). */
+const DRIFT_MIN_HOLD = 0.05;
+
 export function createPlayer(maxSpeed = ROAD.segmentLength / (1 / 60) / 1.35): Player {
-  return { z: 0, x: 0, vx: 0, speed: 0, maxSpeed, lean: 0, offRoad: false };
+  return {
+    z: 0,
+    x: 0,
+    vx: 0,
+    speed: 0,
+    maxSpeed,
+    lean: 0,
+    offRoad: false,
+    yaw: 0,
+    slip: 0,
+    drifting: false,
+    driftDir: 0,
+    driftTime: 0,
+    spinOut: false,
+  };
+}
+
+/** Slam the bike back to gripping and pointing straight (respawn / new run). */
+export function resetDrift(player: Player): void {
+  player.yaw = 0;
+  player.slip = 0;
+  player.drifting = false;
+  player.driftDir = 0;
+  player.driftTime = 0;
+  player.spinOut = false;
 }
 
 /**
- * Advance the player one step with a lateral-velocity model so it feels like a
- * motorbike: input builds lateral speed, tyre grip damps it back toward centre,
- * and a bend runs the bike wide (needs counter-steer). Mutates `player`.
+ * The powerslide state machine — the heart of the OutRun handling model.
+ *
+ * ENTRY is a learnable move, two ways in above `driftEntrySpeed`: brake INTO a
+ * turn, OR flick the bars — stab the opposite way then pin it back (the gesture
+ * lives in flick.ts and arrives here as `input.flick`). Either breaks the tyres
+ * loose in the direction you are turning. (It never breaks away on its own; a
+ * drift you didn't ask for reads as a bug, not a thrill.)
+ *
+ * HELD — keep the bars turned INTO the slide and it settles at an equilibrium
+ * angle rather than winding up without bound, so a drift is somewhere you can
+ * live for the length of a corner. But that equilibrium CREEPS wider the longer
+ * you stay in it, and once it creeps past `maxYaw` the bike is gone. So a drift
+ * is free for a second or two, then it starts asking for the bill: greed has to
+ * be paid for with a catch.
+ *
+ * CATCH / EXIT — counter-steer scrubs the angle straight back off. Under
+ * `driftExitYaw` (or below `driftMinSpeed`) the tyres bite again and you're back
+ * on grip. Get greedy instead and it spins.
+ *
+ * A drift is a TARMAC move: it neither starts nor survives off the road. Without
+ * that rule the bike will happily sit sideways in a field racking up drift score
+ * for as long as it can keep its speed up, which is both an exploit and a lie —
+ * ploughing through a meadow is not a powerslide.
+ */
+function updateDrift(player: Player, input: DriveInput, steerInput: number, speedPct: number, onRoad: boolean, dt: number, tuning: DriveTuning): void {
+  player.spinOut = false;
+
+  if (!player.drifting) {
+    // A flick lets go in the direction you are cornering (its own sign, since it
+    // fires on the step you pin the bars BACK into the turn); a brake-drift lets
+    // go in the direction you are steering. Either needs a committed corner.
+    const flick = input.flick ?? 0;
+    const brakeEntry = input.brake && steerInput !== 0;
+    const entryDir = flick !== 0 ? flick : steerInput;
+    if (onRoad && (flick !== 0 || brakeEntry) && speedPct >= tuning.driftEntrySpeed) {
+      player.drifting = true;
+      player.driftDir = entryDir;
+      player.driftTime = 0;
+      player.yaw = entryDir * DRIFT_SEED_YAW;
+      player.vx += entryDir * DRIFT_KICK * speedPct; // the tail lets go, NOW
+    } else {
+      // Gripping: the nose points a little into the corner, proportional to how
+      // hard the bike is actually cornering. Cosmetic heading, no slide.
+      const target = clamp(player.vx / tuning.maxSteerVel, -1, 1) * 0.16;
+      player.yaw = approach(player.yaw, target, 8, dt);
+      player.slip = 0;
+      return;
+    }
+  }
+
+  player.driftTime += dt;
+  // The WIDE angle — where the slide sits if you stay on the bars — creeps out
+  // with total time sideways. This is the whole risk curve: a long drift is
+  // quietly running up a bill, and past ~2s the angle it wants is more lock than
+  // the bike has, so simply staying on it is what spins you.
+  const hold = tuning.driftHoldYaw + player.driftTime * tuning.driftCreep;
+  if (steerInput === player.driftDir) {
+    player.yaw = approach(player.yaw, player.driftDir * hold, tuning.driftYawRate, dt);
+  } else if (steerInput === -player.driftDir) {
+    // Tighten, don't kill: the bike stays sideways at a shallower angle, which
+    // swings it back the other way across the road. This is the correction — and
+    // it is deliberately measured against the ORIGINAL held angle, NOT the crept
+    // one, so counter-steer is always a way out. Letting it creep too made a long
+    // slide impossible to pull back in: the "tight" line drifted out with the
+    // wide one until it was still turning hard enough to run you off the road,
+    // and the drift ended in a hedge instead of a spin. If the risk is going to
+    // be that you over-rotate, then the pull-back has to stay honest.
+    player.yaw = approach(player.yaw, player.driftDir * tuning.driftHoldYaw * tuning.driftCounterYaw, tuning.driftCounterRate, dt);
+  } else {
+    // Hands off the bars: it stands back up. This is how you END a slide.
+    const decay = tuning.driftRecover * dt;
+    player.yaw = Math.abs(player.yaw) <= decay ? 0 : player.yaw - Math.sign(player.yaw) * decay;
+  }
+
+  player.slip = clamp(Math.abs(player.yaw) / tuning.maxYaw, 0, 1);
+
+  // Wound it past the limit — the bike is gone.
+  if (Math.abs(player.yaw) > tuning.maxYaw) {
+    player.spinOut = true;
+    return;
+  }
+  // Caught it, ran out of the speed needed to sustain it, or slid off the tarmac
+  // — on grass you are no longer drifting, you are just leaving.
+  if (player.driftTime > DRIFT_MIN_HOLD
+    && (Math.abs(player.yaw) < tuning.driftExitYaw || speedPct < tuning.driftMinSpeed || !onRoad)) {
+    player.drifting = false;
+    player.driftDir = 0;
+    player.slip = 0;
+  }
+}
+
+/**
+ * Advance the player one step. Two handling regimes share one lateral model:
+ *
+ *  GRIP — input builds lateral speed, tyre grip damps it back toward centre, and
+ *  a bend runs the bike wide (needs counter-steer).
+ *
+ *  SLIDE — the tyres have let go, so grip barely self-centres any more, and the
+ *  bike is instead turned by its SLIP ANGLE: `sin(yaw)` is fed straight into the
+ *  lateral force. That is the arcade bargain OutRun is built on — a slide points
+ *  the bike round a bend that grip alone would run you wide of, and costs you
+ *  only a little speed (far less than braking), in exchange for having to
+ *  balance the angle on the bars or throw it away.
+ *
+ * Mutates `player`.
  */
 export function updatePlayer(
   player: Player,
@@ -398,19 +802,40 @@ export function updatePlayer(
   const seg = findSegment(track, player.z);
   const speedPct = player.speed / player.maxSpeed;
   const steerInput = (input.right ? 1 : 0) - (input.left ? 1 : 0);
+  // Where the bike is standing as this step BEGINS. (`player.offRoad` is only
+  // refreshed further down, from the position this step is about to produce.)
+  const onRoad = Math.abs(player.x) <= 1;
 
-  // Steering acceleration scales with speed — no steering at a standstill.
-  player.vx += steerInput * tuning.steerAccel * speedPct * dt;
+  updateDrift(player, input, steerInput, speedPct, onRoad, dt, tuning);
+
+  // Steering acceleration scales with speed — no steering at a standstill. Once
+  // the tyres have let go the bars go LIGHT: you are no longer steering with
+  // grip you do not have. The slide is doing the steering now.
+  const steerAuthority = tuning.steerAccel * (player.drifting ? tuning.driftSteerMul : 1);
+  player.vx += steerInput * steerAuthority * speedPct * dt;
   // A bend flings the bike toward the outside.
   player.vx -= seg.curve * speedPct * speedPct * tuning.centrifugal * dt;
-  // Tyre grip pulls lateral velocity back toward zero (self-centring).
-  player.vx *= Math.exp(-tuning.steerDamp * dt);
-  player.vx = clamp(player.vx, -tuning.maxSteerVel, tuning.maxSteerVel);
+  // The slide turns the bike by pointing its nose: slip angle becomes real
+  // lateral force. This is what a drift BUYS you, and it is what replaces the
+  // steering authority the slide just took away.
+  if (player.drifting) {
+    player.vx += Math.sin(player.yaw) * speedPct * tuning.driftTurn * dt;
+  }
+  // Tyre grip pulls lateral velocity back toward zero (self-centring) — mostly
+  // gone once the tyres have let go, which is why a slide keeps sliding.
+  const damp = tuning.steerDamp * (player.drifting ? tuning.driftGrip : 1);
+  player.vx *= Math.exp(-damp * dt);
+  const cap = tuning.maxSteerVel * (player.drifting ? tuning.driftSteerCap : 1);
+  player.vx = clamp(player.vx, -cap, cap);
   player.x += player.vx * dt;
 
   if (input.brake) player.speed += tuning.brake * dt;
   else if (input.throttle) player.speed += tuning.accel * dt;
   else player.speed += tuning.decel * dt;
+  // Sliding sideways scrubs speed with the angle — but gently enough that a
+  // shallow, well-held drift still gains on the throttle. Wind it up to full
+  // lock and it bleeds away: the angle is the price.
+  if (player.drifting) player.speed -= Math.abs(player.yaw) * tuning.driftDrag * dt;
 
   player.offRoad = player.x < -1 || player.x > 1;
   if (player.offRoad && player.speed > tuning.offRoadLimit) {
@@ -430,12 +855,14 @@ export function updatePlayer(
   }
   player.z = wrap(player.z + dt * player.speed, track.length);
 
-  // Lean blends what the RIDER is asking (steer input) with what the BIKE is
-  // actually doing (lateral velocity): a hard carve holds visible lean while the
-  // bike is still moving sideways, then eases upright as grip settles it — an
-  // analogue weight-shift rather than a three-position switch. Input keeps the
-  // larger share so lean still reads as intent, not drift.
-  const leanTarget = clamp(steerInput * 0.55 + (player.vx / tuning.maxSteerVel) * 0.65, -1, 1);
+  // Lean. Gripping, it blends what the RIDER is asking (steer input) with what
+  // the BIKE is doing (lateral velocity) — an analogue weight-shift rather than
+  // a three-position switch. Sliding, the rider commits hard into the corner the
+  // slide is pointing at, whatever the bars are doing (that's the whole look of a
+  // powerslide: bike sideways, rider hanging off the inside).
+  const leanTarget = player.drifting
+    ? clamp(player.driftDir * 0.85 + steerInput * 0.15, -1, 1)
+    : clamp(steerInput * 0.55 + (player.vx / tuning.maxSteerVel) * 0.65, -1, 1);
   player.lean = approach(player.lean, leanTarget, 10, dt);
 
   return seg;

@@ -257,6 +257,11 @@ function buildGameSignedScore(claim: ClaimInput, playerPubkey: string): ReturnTy
     crashes: claim.crashes,
     bestRoseStreak: 0,
     topSpeedKph: claim.top_speed_kph,
+    // The claim carries the drift COUNT but not the longest slide — the board
+    // only publishes the count, and there is no reason to make clients send a
+    // stat nothing reads. Older clients omit it entirely; absent reads as zero.
+    drifts: claim.drifts ?? 0,
+    bestDriftS: 0,
     durationS: claim.duration_s,
     endedBy: claim.ended_by,
   };

@@ -18,6 +18,10 @@ export interface ScoreState {
   bestRoseStreak: number;
   roseStreak: number;
   topSpeed: number;
+  /** Powerslides landed (held, then caught cleanly rather than spun). */
+  drifts: number;
+  /** Longest single slide held, in seconds. */
+  bestDriftS: number;
 }
 
 // Points. Distance dominates (skill-first), pickups/overtakes are the spice.
@@ -26,6 +30,10 @@ const POINTS_PER_FUEL = 120;
 const POINTS_PER_ROSE = 400; // rare special
 const POINTS_PER_OVERTAKE = 250;
 const POINTS_PER_NEAR_MISS = 60;
+/** Points banked per second of slide, at full lock and full speed. */
+const POINTS_PER_DRIFT_SECOND = 900;
+/** A slide has to be committed to pay — a flick of the tail is not a drift. */
+export const MIN_SCORING_DRIFT_S = 0.35;
 
 export function createScore(mult = 1): ScoreState {
   return {
@@ -40,6 +48,8 @@ export function createScore(mult = 1): ScoreState {
     bestRoseStreak: 0,
     roseStreak: 0,
     topSpeed: 0,
+    drifts: 0,
+    bestDriftS: 0,
   };
 }
 
@@ -89,6 +99,35 @@ export function addStuntBonus(state: ScoreState, points: number, actionMul = 1):
   state.score += Math.round(points * state.mult * actionMul);
 }
 
+/**
+ * Bank a powerslide that was HELD and then CAUGHT. Nothing is paid out while the
+ * bike is sideways — only on a clean exit — because a drift you threw away is not
+ * a drift you landed, and paying by the frame would make spinning it into the
+ * scenery the optimal way to farm points.
+ *
+ * `angleArea` is the integral of |slip| × speed fraction over the slide, so a
+ * long, deep, fast slide pays far better than a slow flick: exactly the
+ * risk/reward curve the handling model sets up.
+ */
+export function addDrift(state: ScoreState, seconds: number, angleArea: number, actionMul = 1): number {
+  const points = driftPayout(state, seconds, angleArea, actionMul);
+  if (points <= 0) return 0;
+  state.drifts += 1;
+  if (seconds > state.bestDriftS) state.bestDriftS = seconds;
+  state.score += points;
+  return points;
+}
+
+/**
+ * What the slide in progress WOULD pay if it were caught right now. The HUD
+ * shows this live, so the drift meter is a real running total the rider is
+ * gambling with rather than a decorative bar — the same number `addDrift` banks.
+ */
+export function driftPayout(state: ScoreState, seconds: number, angleArea: number, actionMul = 1): number {
+  if (seconds < MIN_SCORING_DRIFT_S) return 0;
+  return Math.round(angleArea * POINTS_PER_DRIFT_SECOND * state.mult * actionMul);
+}
+
 export function addOvertake(state: ScoreState, actionMul = 1): void {
   state.overtakes += 1;
   state.score += POINTS_PER_OVERTAKE * state.mult * actionMul;
@@ -114,6 +153,8 @@ export interface RunSummary {
   crashes: number;
   bestRoseStreak: number;
   topSpeedKph: number;
+  drifts: number;
+  bestDriftS: number;
   durationS: number;
   endedBy: 'time' | 'crashes' | 'finish';
 }
@@ -129,6 +170,8 @@ export function summarise(state: ScoreState, durationS: number, endedBy: 'time' 
     crashes: state.crashes,
     bestRoseStreak: state.bestRoseStreak,
     topSpeedKph: Math.round(state.topSpeed),
+    drifts: state.drifts,
+    bestDriftS: Math.round(state.bestDriftS * 10) / 10,
     durationS: Math.round(durationS),
     endedBy,
   };
@@ -222,6 +265,7 @@ export function buildScoreEvent(summary: RunSummary, playerPubkey = 'guest', opt
     ['distance', String(summary.distanceM)],
     ['roses', String(summary.roses)],
     ['overtakes', String(summary.overtakes)],
+    ['drifts', String(summary.drifts)],
     ['crashes', String(summary.crashes)],
     ['duration', String(summary.durationS)],
     ['top_speed_kph', String(summary.topSpeedKph)],

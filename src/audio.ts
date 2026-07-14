@@ -82,9 +82,57 @@ export function isAudioUnlocked(): boolean {
   return unlocked;
 }
 
+// ---- gearbox ---------------------------------------------------------------
+// The engine's TIMBRE (the two-stroke firing pulse, its harmonic ladder and the
+// exhaust rasp below) is left exactly as it was — it is good. What it lacked was
+// STRUCTURE: revs slid in one unbroken line from idle to top speed, which is a
+// slide whistle, not a machine. Real speed is sold by a LADDER — the note climbs,
+// drops on a shift, and climbs again — and that ladder is also the only reason a
+// rev limiter or a downshift can exist as sounds at all. So the note is now
+// driven by revs-within-a-gear rather than by road speed directly.
+//
+// Top of each gear as a fraction of base top speed. The bands widen as they go,
+// so the low cogs snap through and top gear is the long, screaming one.
+const GEAR_TOPS = [0.2, 0.36, 0.53, 0.7, 0.86, 1] as const;
+const GEARS = GEAR_TOPS.length;
+const SHIFT_TIME = 0.13; // seconds the clutch is out and the note dips
+const DOWNSHIFT_GAP = 0.03; // hysteresis, so a gear boundary can't flap
+
+let gear = 0;
+let shiftUntil = 0;
+
+function gearFloor(g: number): number {
+  return g === 0 ? 0 : GEAR_TOPS[g - 1];
+}
+
+/** The mechanical thunk of a cog going home — brighter up, heavier down. */
+function shiftClunk(up: boolean): void {
+  sfxPitch = 1;
+  noise(0.05, 0.04 * SFX_ARCADE_GAIN, up ? 2600 : 1700, 'bandpass', 0);
+  chirp(up ? 300 : 170, up ? 165 : 290, 0.09, 'sawtooth', 0.035, 0.004, 900, 'lowpass');
+}
+
+/** Reset the box to first — call when a run starts, so it never begins in top. */
+export function resetGearbox(): void {
+  gear = 0;
+  shiftUntil = 0;
+}
+
+/** Which gear the box is in (1-based), for the HUD. */
+export function currentGear(): number {
+  return gear + 1;
+}
+
 export interface EngineFrame {
   playing: boolean;
-  speed: number; // 0..1
+  /**
+   * Speed as a fraction of the BASE top speed — deliberately NOT of the current
+   * maxSpeed, which a turbo raises. Normalising against a moving ceiling would
+   * make a boost read as *lower* revs and drop a gear at the exact moment the
+   * bike lunges. Here a boost pushes past 1 and the engine screams into its
+   * limiter instead, which is what a boost should sound like.
+   */
+  speed: number;
   throttle: number; // 0..1
 }
 
@@ -92,30 +140,55 @@ export function updateEngine(frame: EngineFrame): void {
   if (!audioCtx || !engineOsc || !engineGain || !engineFilter || !engineSubOsc || !engineSubGain ||
       !engineSubFilter || !engineNoiseGain || !engineNoiseFilter) return;
   const now = audioCtx.currentTime;
-  const speed = clamp(frame.speed, 0, 1);
+  const speed = clamp(frame.speed, 0, 1.3);
   const throttle = clamp(frame.throttle, 0, 1);
-  const moving = clamp(speed * 0.78 + throttle * 0.28, 0, 1);
+
+  // Pick the cog. Shifting up at the top of a band and back down a little below
+  // its floor gives the hysteresis that stops a boundary chattering.
+  let next = gear;
+  if (speed > GEAR_TOPS[gear] && gear < GEARS - 1) next = gear + 1;
+  else if (gear > 0 && speed < gearFloor(gear) - DOWNSHIFT_GAP) next = gear - 1;
+  if (next !== gear) {
+    const up = next > gear;
+    gear = next;
+    shiftUntil = now + SHIFT_TIME;
+    if (frame.playing) shiftClunk(up);
+  }
+
+  // Revs WITHIN the cog: this is the ladder. Each upshift drops the note back to
+  // the bottom of the band and it climbs again.
+  const lo = gearFloor(gear);
+  const hi = GEAR_TOPS[gear];
+  const rpm = clamp(0.3 + 0.7 * ((speed - lo) / Math.max(0.01, hi - lo)), 0, 1.25);
+
+  const moving = clamp(clamp(speed, 0, 1) * 0.78 + throttle * 0.28, 0, 1);
   // A Vespa's two-stroke note is a low firing pulse with a thick ladder of
   // harmonics and ragged exhaust noise. Keep the firing rate below the old
   // synth-like whine, then open the resonances and rasp as revs rise.
   const flutter = Math.sin(now * 5.3) * (1.2 + moving * 2.8) + Math.sin(now * 13.7) * (0.5 + throttle * 1.8);
-  const firingRate = 48 + speed * 112 + throttle * 22 + flutter;
-  const level = frame.playing ? 0.052 + moving * 0.105 + throttle * 0.018 : 0;
-  engineOsc.frequency.setTargetAtTime(firingRate, now, 0.045);
-  engineFilter.frequency.setTargetAtTime(720 + moving * 1700 + throttle * 420, now, 0.06);
+  const firingRate = 48 + rpm * 116 + throttle * 22 + flutter;
+  // Past the top of top gear (only reachable on a turbo) the limiter bounces off
+  // the stop — a hard, fast flutter, not a smooth climb.
+  const limiter = rpm > 1 ? 0.6 + 0.4 * Math.sin(now * 96) : 1;
+  const dip = now < shiftUntil ? 0.34 : 1; // clutch out: the note falls away
+  const level = frame.playing ? (0.052 + moving * 0.105 + throttle * 0.018) * dip * limiter : 0;
+  engineOsc.frequency.setTargetAtTime(firingRate, now, 0.035);
+  engineFilter.frequency.setTargetAtTime(720 + rpm * 1700 + throttle * 420, now, 0.06);
   engineFilter.Q.setTargetAtTime(1.15 + moving * 0.65, now, 0.08);
-  engineGain.gain.setTargetAtTime(level, now, 0.055);
+  engineGain.gain.setTargetAtTime(level, now, 0.04);
 
   // Half-rate crankcase thump gives the exhaust pulse some body without the
-  // oversized sub-bass drone the previous engine carried.
-  engineSubOsc.frequency.setTargetAtTime(Math.max(24, firingRate * 0.5), now, 0.065);
+  // oversized sub-bass drone the previous engine carried. It tracks ROAD speed,
+  // not revs, so the bottom end stays planted through a shift instead of dropping
+  // out from under the bike along with the note.
+  engineSubOsc.frequency.setTargetAtTime(Math.max(24, (48 + clamp(speed, 0, 1) * 112) * 0.5), now, 0.065);
   engineSubFilter.frequency.setTargetAtTime(150 + moving * 160, now, 0.08);
   engineSubGain.gain.setTargetAtTime(frame.playing ? 0.012 + moving * 0.03 : 0, now, 0.07);
 
   // Filtered noise supplies the breathy, metallic two-stroke rasp visible in
   // the reference spectrum between the main exhaust harmonics.
-  engineNoiseFilter.frequency.setTargetAtTime(620 + moving * 1900 + throttle * 380, now, 0.055);
-  engineNoiseGain.gain.setTargetAtTime(frame.playing ? 0.007 + moving * 0.032 + throttle * 0.012 : 0, now, 0.06);
+  engineNoiseFilter.frequency.setTargetAtTime(620 + rpm * 1900 + throttle * 380, now, 0.055);
+  engineNoiseGain.gain.setTargetAtTime(frame.playing ? (0.007 + moving * 0.032 + throttle * 0.012) * dip : 0, now, 0.06);
 }
 
 export interface RumbleFrame {
@@ -199,6 +272,196 @@ export function updateTurbo(frame: TurboFrame): void {
   const i = frame.active ? clamp(frame.intensity, 0, 1) : 0;
   turboGain.gain.setTargetAtTime(i * 0.16, now, i > 0 ? 0.03 : 0.12);
   turboFilter.frequency.setTargetAtTime(700 + i * 2600 + Math.sin(now * 9) * 200, now, 0.05);
+}
+
+/**
+ * A car tearing past. Two things sell it, and neither is the noise itself:
+ *
+ *  DOPPLER — the pitch drops as the car stops closing and starts receding. A
+ *  whoosh at constant pitch reads as a sound effect; a whoosh that falls reads as
+ *  an object with momentum going somewhere.
+ *
+ *  PAN — it goes past on the side it actually went past on, and keeps travelling
+ *  outward as it goes, so the stereo image sweeps rather than sits.
+ *
+ * `side` is the car's lateral offset from the bike (negative = it went by on your
+ * left); `intensity` is how fast you took it and how close you came.
+ */
+export function playPassBy(side: number, intensity = 1): void {
+  if (!audioCtx || !sfxBus) return;
+  const amp = clamp(intensity, 0.15, 1.6);
+  const now = audioCtx.currentTime;
+  const dur = 0.42;
+  const pan = clamp(side * 1.6, -0.95, 0.95);
+
+  const src = audioCtx.createBufferSource();
+  src.buffer = getBrightNoiseBuffer();
+  const band = audioCtx.createBiquadFilter();
+  band.type = 'bandpass';
+  band.Q.value = 1.1;
+  // The Doppler drop: closing → receding, about a fifth down.
+  const f0 = 1500 + amp * 900;
+  band.frequency.setValueAtTime(f0, now);
+  band.frequency.exponentialRampToValueAtTime(f0 * 0.55, now + dur);
+
+  const panner = audioCtx.createStereoPanner();
+  panner.pan.setValueAtTime(pan * 0.5, now);
+  panner.pan.linearRampToValueAtTime(pan, now + dur); // keeps travelling outward
+
+  const out = audioCtx.createGain();
+  out.gain.setValueAtTime(0.0001, now);
+  out.gain.linearRampToValueAtTime(0.13 * amp, now + 0.05); // it arrives fast
+  out.gain.exponentialRampToValueAtTime(0.0001, now + dur);
+
+  src.connect(band);
+  band.connect(panner);
+  panner.connect(out);
+  out.connect(sfxBus);
+  src.start(now, 0, dur + 0.02);
+  releaseNodes([src, band, panner, out], [src], (dur + 0.2) * 1000);
+}
+
+// ---- tunnel echo ------------------------------------------------------------
+// A tunnel you can see but not HEAR is a painted backdrop. The moment the walls
+// close in, your own engine should come back at you off the tiles — that returning
+// slap is most of what makes the space feel real, and it is the thing you notice
+// the instant you burst back out into the open and it stops.
+//
+// A feedback delay tapped off the vehicle bus, held shut at zero gain outside.
+// Cheap where a convolution reverb would not be: this runs on phones.
+
+let echoDelay: DelayNode | null = null;
+let echoFeedback: GainNode | null = null;
+let echoDamp: BiquadFilterNode | null = null;
+let echoSend: GainNode | null = null;
+
+export interface EnclosureFrame {
+  /** 0 out in the open … 1 deep under a tunnel. */
+  amount: number;
+}
+
+export function updateEcho(frame: EnclosureFrame): void {
+  if (!audioCtx || !echoSend || !echoFeedback || !echoDamp) return;
+  const now = audioCtx.currentTime;
+  const a = clamp(frame.amount, 0, 1);
+  // Opens fast (the wall arrives) and closes fast (daylight) — a slow release
+  // would smear the echo out across the road beyond the exit.
+  echoSend.gain.setTargetAtTime(a * 0.4 * settings.sfx, now, 0.08);
+  // A bigger space rings longer; the returning sound is also duller, because the
+  // top end is what the concrete eats first.
+  echoFeedback.gain.setTargetAtTime(0.22 + a * 0.3, now, 0.12);
+  echoDamp.frequency.setTargetAtTime(1500 + a * 900, now, 0.12);
+}
+
+// ---- traffic engines --------------------------------------------------------
+// Until now the traffic was silent right up to the instant it went past, at which
+// point a whoosh appeared out of nowhere. Cars you are hunting down should be
+// AUDIBLE while you hunt them — you should hear the van you are about to come up
+// behind, and hear which side it is on, before you can pick it out of the haze.
+//
+// A small pool of voices, keyed on Car.id. The pool is deliberately tiny: four
+// engines is already a busy-sounding road, and every extra voice is a permanent
+// oscillator burning CPU on a phone.
+
+const TRAFFIC_VOICES = 4;
+
+interface TrafficVoice {
+  /** Which car this voice is currently being, or null when idle. */
+  carId: number | null;
+  osc: OscillatorNode;
+  /** Detuned second saw — one oscillator alone reads as a synth, not an engine. */
+  osc2: OscillatorNode;
+  filter: BiquadFilterNode;
+  panner: StereoPannerNode;
+  gain: GainNode;
+}
+
+let trafficVoices: TrafficVoice[] = [];
+
+function buildTrafficVoices(ctx: AudioContext, out: AudioNode): TrafficVoice[] {
+  const voices: TrafficVoice[] = [];
+  for (let i = 0; i < TRAFFIC_VOICES; i += 1) {
+    const osc = ctx.createOscillator();
+    osc.type = 'sawtooth';
+    const osc2 = ctx.createOscillator();
+    osc2.type = 'sawtooth';
+    osc2.detune.value = 14; // a few cents apart: beating gives it a rough idle
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.value = 400;
+    filter.Q.value = 1.4;
+    const panner = ctx.createStereoPanner();
+    const gain = ctx.createGain();
+    gain.gain.value = 0;
+    osc.connect(filter);
+    osc2.connect(filter);
+    filter.connect(panner);
+    panner.connect(gain);
+    gain.connect(out);
+    osc.start();
+    osc2.start();
+    voices.push({ carId: null, osc, osc2, filter, panner, gain });
+  }
+  return voices;
+}
+
+/** One car as the mixer needs it — see world.ts `audibleTraffic`. */
+export interface TrafficSoundFrame {
+  id: number;
+  proximity: number; // 0..1
+  pan: number; // -1..1
+  rpm: number; // 0..1
+  closing: number; // 0..1
+}
+
+/**
+ * Drive the traffic engines. Called every frame like the player's own engine.
+ *
+ * Voices are matched to cars BY ID and held there. Re-allocating by proximity
+ * rank each frame would be simpler and would sound broken: two cars swapping
+ * places in the sort order would swap their engines with them, and a machine
+ * would appear to change pitch instantly for no reason the player can see.
+ */
+export function updateTraffic(cars: readonly TrafficSoundFrame[]): void {
+  if (!audioCtx || !trafficVoices.length) return;
+  const now = audioCtx.currentTime;
+
+  // Hold every voice that is still following a car we can hear.
+  const live = new Set(cars.map(c => c.id));
+  for (const voice of trafficVoices) {
+    if (voice.carId !== null && !live.has(voice.carId)) voice.carId = null;
+  }
+
+  for (const car of cars) {
+    let voice = trafficVoices.find(v => v.carId === car.id);
+    if (!voice) {
+      voice = trafficVoices.find(v => v.carId === null);
+      if (!voice) continue; // pool full — this car is quieter than four others
+      voice.carId = car.id;
+      // Start the new voice silent: fading it in from zero is what stops a car
+      // entering earshot from arriving as a click.
+      voice.gain.gain.setValueAtTime(0, now);
+    }
+    // Doppler: a car you are closing on is coming at you, so its note rides up.
+    const doppler = 1 + car.closing * 0.22;
+    const base = (58 + car.rpm * 120) * doppler;
+    voice.osc.frequency.setTargetAtTime(base, now, 0.06);
+    voice.osc2.frequency.setTargetAtTime(base * 1.5, now, 0.06); // a fifth up: body
+    // Distant engines are muffled by the air between you; they open up as they close.
+    voice.filter.frequency.setTargetAtTime(240 + car.rpm * 520 + car.proximity * 900, now, 0.08);
+    voice.panner.pan.setTargetAtTime(car.pan, now, 0.05);
+    voice.gain.gain.setTargetAtTime(car.proximity * car.proximity * 0.2 * settings.sfx, now, 0.07);
+  }
+
+  // Anything not following a car fades out rather than cutting.
+  for (const voice of trafficVoices) {
+    if (voice.carId === null) voice.gain.gain.setTargetAtTime(0, now, 0.12);
+  }
+}
+
+/** Cut every traffic engine — new run, pause, title screen. */
+export function silenceTraffic(): void {
+  updateTraffic([]);
 }
 
 export function playSfx(kind: ToneKind, intensity = 1, pitch = 1): void {
@@ -375,6 +638,29 @@ function getCtx(): AudioContext {
   sfxBus.connect(master);
   vehicleBus.connect(master);
   musicBus.connect(master);
+  // Traffic engines ride the vehicle bus alongside the player's own, so the
+  // whole road is balanced against the music as one thing.
+  trafficVoices = buildTrafficVoices(audioCtx, vehicleBus);
+
+  // Tunnel echo: a damped feedback delay tapped off the whole vehicle bus (your
+  // engine, the traffic, the tyres — everything a wall would bounce back), held
+  // shut until updateEcho opens it. It returns to MASTER, not back into the
+  // vehicle bus: feeding it back into its own source is a runaway loop.
+  echoSend = audioCtx.createGain();
+  echoSend.gain.value = 0;
+  echoDelay = audioCtx.createDelay(0.5);
+  echoDelay.delayTime.value = 0.11; // a slap, not a cavern
+  echoFeedback = audioCtx.createGain();
+  echoFeedback.gain.value = 0.25;
+  echoDamp = audioCtx.createBiquadFilter();
+  echoDamp.type = 'lowpass';
+  echoDamp.frequency.value = 1800;
+  vehicleBus.connect(echoSend);
+  echoSend.connect(echoDelay);
+  echoDelay.connect(echoDamp);
+  echoDamp.connect(echoFeedback);
+  echoFeedback.connect(echoDelay); // the tail
+  echoDamp.connect(master);
   master.connect(compressor);
   compressor.connect(audioCtx.destination);
 
