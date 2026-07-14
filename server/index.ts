@@ -32,17 +32,9 @@ import {
   validateEventUrlTag,
 } from 'nostr-tools/nip98';
 import { buildScoreEvent, GAME_ID, GAME_PUBKEY, SCORE_KIND, type RunSummary } from '../src/scoring.js';
+import { DEFAULT_WRITE_RELAYS } from '../src/relays.js';
 import { parseClaim, cleanPlayerName, MAX_DISTANCE_M, STALE_RUN_MS, type ClaimInput } from './claim-rules.js';
 
-const DEFAULT_WRITE_RELAYS = [
-  'wss://relay.gamestr.io',
-  'wss://relay.trotters.cc',
-  'wss://nos.lol',
-  'wss://relay.damus.io',
-  'wss://relay.nostr.band',
-  'wss://relay.primal.net',
-  'wss://relay.ditto.pub',
-] as const;
 const WRITE_RELAYS = loadWriteRelays();
 const PORT = Number(process.env.PORT ?? process.env.HANGONFREN_API_PORT ?? 3191);
 const HOST = process.env.HOST ?? '127.0.0.1';

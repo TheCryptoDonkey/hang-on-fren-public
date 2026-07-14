@@ -6,6 +6,12 @@ on:
       - main
       - master
   workflow_dispatch:
+    inputs:
+      migrate_scores:
+        description: Reconcile historic best scores onto both Gamestr relays
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -79,6 +85,10 @@ jobs:
       - name: Build score-claim service
         run: npm run build:server
 
+      - name: Build historic-score migration
+        if: github.event_name == 'workflow_dispatch' && inputs.migrate_scores == true
+        run: npm run build:migrate
+
       - name: Configure SSH
         env:
           DEPLOY_HOST: ${{ secrets.HOF_DEPLOY_HOST }}
@@ -123,4 +133,20 @@ jobs:
           sudo systemctl restart hangonfren-api.service
           curl --retry 8 --retry-delay 1 --retry-connrefused --retry-all-errors \
             -fsS http://127.0.0.1:3191/healthz
+          REMOTE
+
+      - name: Reconcile and verify historic scores
+        if: github.event_name == 'workflow_dispatch' && inputs.migrate_scores == true
+        env:
+          DEPLOY_HOST: ${{ secrets.HOF_DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.HOF_DEPLOY_USER }}
+        run: |
+          set -euo pipefail
+          staged="/tmp/hangonfren-migrate-${GITHUB_SHA}.js"
+          rsync -az -e "ssh -i ~/.ssh/hang-on-fren-deploy" server-dist/migrate-gamestr.js "$DEPLOY_USER@$DEPLOY_HOST:$staged"
+          ssh -i ~/.ssh/hang-on-fren-deploy "$DEPLOY_USER@$DEPLOY_HOST" "STAGED='$staged' bash -se" <<'REMOTE'
+          set -euo pipefail
+          trap 'rm -f "$STAGED"' EXIT
+          sudo bash -c 'set -euo pipefail; set -a; . "$1"; set +a; export HANGONFREN_WRITE_RELAYS="wss://main.relay.gamestr.io,wss://test.relay.gamestr.io"; MIGRATE_DRY_RUN=1 node "$2"; node "$2"' \
+            _ /etc/hangonfren-api.env "$STAGED"
           REMOTE

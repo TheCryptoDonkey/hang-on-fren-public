@@ -64,3 +64,11 @@ On the VPS:
 
 Local dev: `npm run dev:api` (builds + runs the service with publishing off)
 alongside `npm run dev` — the vite dev server proxies `/api` to it.
+
+## Historic score reconciliation
+
+When Gamestr relay endpoints change, run the `Deploy` workflow manually with
+`migrate_scores` enabled. The job first shows the dry-run plan, then replays the
+best score for every player and level from the append-only claim log onto both
+current Gamestr relays. It fails unless every replayed score can be read back
+from both relays; the game signing key remains in the VPS environment file.

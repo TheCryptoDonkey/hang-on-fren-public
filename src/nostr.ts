@@ -16,6 +16,7 @@ import { finalizeEvent, generateSecretKey, getPublicKey, verifyEvent } from 'nos
 import { bytesToHex, hexToBytes } from 'nostr-tools/utils';
 import { GAME_ID, GAME_PUBKEY, GAME_TITLE, SCORE_KIND, type RunSummary } from './scoring.js';
 import { assetUrl } from './asset-url.js';
+import { DEFAULT_READ_RELAYS, DEFAULT_WRITE_RELAYS } from './relays.js';
 
 const GUEST_KEY = 'hangonfren:guest:v1';
 const MODE_KEY = 'hangonfren:identity-mode:v1';
@@ -28,22 +29,9 @@ const CLAIM_API = '/api/claim';
 const NIP98_KIND = 27235;
 const SIGN_TIMEOUT_MS = 30_000;
 
-export const WRITE_RELAYS = [
-  'wss://relay.gamestr.io',
-  'wss://relay.trotters.cc',
-  'wss://nos.lol',
-  'wss://relay.damus.io',
-  'wss://relay.nostr.band',
-  'wss://relay.primal.net',
-  'wss://relay.ditto.pub',
-] as const;
+export const WRITE_RELAYS = DEFAULT_WRITE_RELAYS;
 
-const READ_RELAYS = [
-  'wss://relay.gamestr.io',
-  'wss://relay.trotters.cc',
-  'wss://nos.lol',
-  'wss://relay.damus.io',
-] as const;
+const READ_RELAYS = DEFAULT_READ_RELAYS;
 
 export type IdentityMode = 'guest' | 'nostr';
 
