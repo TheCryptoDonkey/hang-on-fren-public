@@ -108,6 +108,12 @@ declare -a MUSIC_MAP=(
   "Old Prague — Allegretto Circuit.wav|old-prague-allegretto.m4a"
   "Taj Mahal — Roses at Dawn.wav|taj-mahal-roses-at-dawn.m4a"
   "Two Cavemen, One Broken Timeline.wav|two-cavemen-one-broken-timeline.m4a"
+  # 600B YEARS BC per-stage beds + the goal-screen victory sting.
+  "Dawn of everything.wav|dawn-of-everything.m4a"
+  "Dusk of the dinosaurs.wav|dusk-of-the-dinosaurs.m4a"
+  "The longest night.wav|the-longest-night.m4a"
+  "The Crooked Time Machine.wav|the-crooked-time-machine.m4a"
+  "timeline restored!.wav|timeline-restored.m4a"
 )
 for pair in "${MUSIC_MAP[@]}"; do
   wav="$WAV_SRC/${pair%%|*}"; out="$MUSIC_OUT/${pair##*|}"

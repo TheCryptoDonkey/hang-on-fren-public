@@ -57,17 +57,20 @@ const STAGE_MUSIC: Readonly<Record<TourId, Readonly<Record<number, string>>>> = 
     3: assetUrl('music/taj-mahal-roses-at-dawn.m4a'),
   },
   stone: {
-    // One bed for all five prehistoric legs. The repeats are deliberate:
-    // stageMusicUrl falls back to the TITLE theme for a missing index, and
-    // startMusic is idempotent per URL — so listing every leg keeps the stone
-    // bed rolling seamlessly through each checkpoint.
-    0: assetUrl('music/two-cavemen-one-broken-timeline.m4a'),
-    1: assetUrl('music/two-cavemen-one-broken-timeline.m4a'),
-    2: assetUrl('music/two-cavemen-one-broken-timeline.m4a'),
-    3: assetUrl('music/two-cavemen-one-broken-timeline.m4a'),
-    4: assetUrl('music/two-cavemen-one-broken-timeline.m4a'),
+    // A bespoke bed per prehistoric leg, tracking the day's arc from the palettes
+    // (JURASSIC → MIRE → AMBER → PRIMAL → ERUPTION): dawn, the namesake mid-tour
+    // theme, dusk, the long night, then the fiery run home.
+    0: assetUrl('music/dawn-of-everything.m4a'), // S1 THE STONED AGE — dawn
+    1: assetUrl('music/two-cavemen-one-broken-timeline.m4a'), // S2 FERN MIRE
+    2: assetUrl('music/dusk-of-the-dinosaurs.m4a'), // S3 RAPTOR ALLEY — dusk
+    3: assetUrl('music/the-longest-night.m4a'), // S4 TREX COUNTRY — night
+    4: assetUrl('music/the-crooked-time-machine.m4a'), // S5 THE ERUPTION — climax
   },
 };
+
+// The goal-screen (girls) celebration for a 600B YEARS BC run — "timeline
+// restored!" — instead of the main theme every other tour's victory rides.
+const STONE_VICTORY_URL = assetUrl('music/timeline-restored.m4a');
 
 /** The music bed for wherever the rider currently is. */
 function stageMusicUrl(): string {
@@ -1146,6 +1149,9 @@ function startRun(tour: TourId = selectedTour): void {
   // Warm the next region bed now so the first checkpoint swap is gap-free; each
   // later bed is warmed as its checkpoint is crossed (frame's stage-change block).
   if (STAGE_MUSIC[tour][1]) preloadMusic(STAGE_MUSIC[tour][1]);
+  // The stone tour's short goal-screen sting is tiny — warm it up front so it's
+  // ready the instant the rider crosses the 600B YEARS BC finish.
+  if (tour === 'stone') preloadMusic(STONE_VICTORY_URL);
   for (const url of Object.values(VOICE)) if (url) preloadVoiceClip(url);
   for (const url of Object.values(STING)) preloadVoiceClip(url);
   playSfx('rev', 1);
@@ -1571,7 +1577,9 @@ function winRun(): void {
   // party does its job on the run-in; left standing in the frozen victory
   // frame behind the big tableau cast it doubled them up to six.
   if (state.stoneAge) world.markers = world.markers.filter(m => m.sprite !== 'finish-line-cavewomen');
-  startMusic(MUSIC_URL); // the celebration rides the main theme
+  // The stone tour's goal tableau gets its own "timeline restored!" sting; every
+  // other tour's celebration rides the main theme.
+  startMusic(state.stoneAge ? STONE_VICTORY_URL : MUSIC_URL);
   finishStage(levelCount() - 1, null);
   snapshotBitcoin();
   state.finishTimeLeft = timer.timeLeft;
