@@ -1359,16 +1359,15 @@ function shade(hex: string, amount: number): string {
 // a texel would be sub-pixel mush — stay flat colour under the fog.
 
 const TILE = 48;
-/** Ground texture LOD. The road band is narrow, so it can afford texture out
- *  to where a texel is ~1px; the ground slab spans the whole frame width, so
- *  it drops to flat colour earlier — right about where its texels stop being
- *  distinguishable from the flat fill anyway. Keeps the pattern-fill area (the
- *  expensive part on a software canvas) down to the rows that actually read. */
-function roadTextured(seg: Segment): boolean {
-  return seg.p1.screen.y - seg.p2.screen.y >= 3 && seg.p1.screen.w >= 48;
-}
-function slabTextured(seg: Segment): boolean {
-  return seg.p1.screen.y - seg.p2.screen.y >= 3 && seg.p1.screen.w >= 72;
+/** How loudly this band's texture draws: 1 up close, easing to 0 out where
+ *  the texels drop sub-pixel and the distance fog owns the frame. A hard LOD
+ *  cutover drew a visible seam across the world (flat band before the
+ *  horizon); a fade is invisible — and skipping the fills that would land at
+ *  alpha 0 keeps the pattern-pass cost bounded (hundreds of 2px far bands
+ *  each paying fill overhead added ~50% frame time in software rendering). */
+function bandTexAlpha(seg: Segment): number {
+  if (seg.p1.screen.y - seg.p2.screen.y < 1) return 0;
+  return clamp((seg.p1.screen.w - 22) / 38, 0, 1);
 }
 
 /** Per-material texture styling.
@@ -1651,17 +1650,18 @@ function renderSides(
   // The ground beyond the lip on each side. A `flat` side is the SAME ground
   // as the verge, so it skips its fill and lets the textured slab run to the
   // frame edge; sea / canyon / rock repaint over the texture past the lip.
-  const sideTextured = slabTextured(seg) && p1.w >= 90;
+  const sideTexA = bandTexAlpha(seg);
   const fillSide = (kind: SideKind, x1: number, y1: number, x2: number, y2: number, x3: number, y3: number, x4: number, y4: number): void => {
     if (kind === 'flat') return;
     polygon(ctx, x1, y1, x2, y2, x3, y3, x4, y4, sideColor(kind, terrain, palette, dark));
     // Rock mottle over an open cliff shoulder; the water texture over the sea
     // (the animated surf rolls over the top of it).
     const tex: TileKind | null = kind === 'cliff' ? 'rock' : kind === 'sea' ? 'water' : null;
-    if (tex && sideTextured) {
+    if (tex && sideTexA > 0) {
       const tile = groundPattern(ctx, tex, sideColor(kind, terrain, palette, dark), '', dark);
       if (tile) {
         tile.pat.setTransform(groundMatrix(seg, tile.h, tex));
+        ctx.globalAlpha = sideTexA;
         ctx.fillStyle = tile.pat;
         ctx.beginPath();
         ctx.moveTo(x1, y1);
@@ -1670,6 +1670,7 @@ function renderSides(
         ctx.lineTo(x4, y4);
         ctx.closePath();
         ctx.fill();
+        ctx.globalAlpha = 1;
       }
     }
   };
@@ -1755,19 +1756,17 @@ function renderSegment(ctx: CanvasRenderingContext2D, width: number, height: num
   // verge with rock / sea / canyon (but a tunnel bore fills its own walls).
   ctx.fillStyle = grass;
   ctx.fillRect(bleedX, p2.y, bleedW, p1.y - p2.y + 1);
-  if (slabTextured(seg) && seg.overhead?.kind !== 'tunnel') {
-    // The biome's pixel tile over the slab; the sides repaint whatever lies
-    // beyond a sea / canyon / rock lip on top of it. Laterally clamped to the
-    // rows' visible reach — on far rows the slab spans the whole frame but its
-    // texels are speckle-dust, so painting the periphery buys nothing.
+  const texA = bandTexAlpha(seg);
+  if (texA > 0 && seg.overhead?.kind !== 'tunnel') {
+    // The biome's pixel tile over the full slab; the sides repaint whatever
+    // lies beyond a sea / canyon / rock lip on top of it.
     const tile = groundPattern(ctx, palette.ground, grass, palette.rumbleDark, dark);
     if (tile) {
-      const reach = (VERGE + 8) * p1.w;
-      const x0 = Math.max(bleedX, p1.x - reach);
-      const x1 = Math.min(bleedX + bleedW, p1.x + reach);
       tile.pat.setTransform(groundMatrix(seg, tile.h, palette.ground));
+      ctx.globalAlpha = texA;
       ctx.fillStyle = tile.pat;
-      ctx.fillRect(x0, p2.y, x1 - x0, p1.y - p2.y + 1);
+      ctx.fillRect(bleedX, p2.y, bleedW, p1.y - p2.y + 1);
+      ctx.globalAlpha = 1;
     }
   }
   if (seg.overhead?.kind !== 'tunnel') renderSides(ctx, width, seg, palette, terrain, time);
@@ -1777,12 +1776,13 @@ function renderSegment(ctx: CanvasRenderingContext2D, width: number, height: num
   polygon(ctx, p1.x - p1.w - r1, p1.y, p1.x - p1.w, p1.y, p2.x - p2.w, p2.y, p2.x - p2.w - r2, p2.y, rumble);
   polygon(ctx, p1.x + p1.w + r1, p1.y, p1.x + p1.w, p1.y, p2.x + p2.w, p2.y, p2.x + p2.w + r2, p2.y, rumble);
   polygon(ctx, p1.x - p1.w, p1.y, p1.x + p1.w, p1.y, p2.x + p2.w, p2.y, p2.x - p2.w, p2.y, road);
-  if (roadTextured(seg)) {
+  if (texA > 0) {
     // Asphalt wears the same chunky texels as the ground; lane paint goes on
     // over the top so the markings stay crisp.
     const tile = groundPattern(ctx, 'tarmac', road, '', dark);
     if (tile) {
       tile.pat.setTransform(groundMatrix(seg, tile.h, 'tarmac'));
+      ctx.globalAlpha = texA;
       ctx.fillStyle = tile.pat;
       ctx.beginPath();
       ctx.moveTo(p1.x - p1.w, p1.y);
@@ -1791,6 +1791,7 @@ function renderSegment(ctx: CanvasRenderingContext2D, width: number, height: num
       ctx.lineTo(p2.x - p2.w, p2.y);
       ctx.closePath();
       ctx.fill();
+      ctx.globalAlpha = 1;
     }
   }
 
