@@ -1363,7 +1363,6 @@ function sideColor(kind: SideKind, terrain: Terrain, palette: Palette, dark: boo
 function renderSides(
   ctx: CanvasRenderingContext2D,
   width: number,
-  height: number,
   seg: Segment,
   palette: Palette,
   terrain: Terrain,
@@ -1395,20 +1394,11 @@ function renderSides(
   lip(l1, l2, terrain.left);
   lip(r1, r2, terrain.right);
 
-  // Rock walls: a vertical face standing on the lip. Its screen x does not change
-  // with height (only the top edge lifts), so up close the wall simply fills that
-  // side of the frame — exactly as a cliff should.
-  const wall = (x1: number, x2: number, kind: SideKind): void => {
-    if (kind !== 'cliff') return;
-    const h = terrain.cliffHeight;
-    const t1 = upFrom(p1, h, height);
-    const t2 = upFrom(p2, h, height);
-    polygon(ctx, x1, p1.y, x1, t1, x2, t2, x2, p2.y, dark ? terrain.cliffDark : terrain.cliffLight);
-    const cap = Math.max(1, (p1.y - p2.y) * 0.5); // a lit top edge / silhouette
-    polygon(ctx, x1, t1, x1, t1 + cap, x2, t2 + cap * 0.5, x2, t2, rgba(shade(terrain.cliffLight, 0.28), 0.7));
-  };
-  wall(l1, l2, terrain.left);
-  wall(r1, r2, terrain.right);
+  // (The old `cliff` rock/retaining wall — a flat two-tone vertical face rising
+  // from the verge — has been removed. It read as a flat grey slab that clashed
+  // with the pixel-art and, worse, buried the painted horizon backdrop behind a
+  // featureless wall. A `cliff` side now stays open ground, so the coast / city /
+  // valley art shows through where the wall used to stand.)
 }
 
 function renderSegment(ctx: CanvasRenderingContext2D, width: number, height: number, seg: Segment, fogT: number, palette: Palette, lamps: Lamp[], terrain: Terrain): void {
@@ -1427,7 +1417,7 @@ function renderSegment(ctx: CanvasRenderingContext2D, width: number, height: num
   // verge with rock / sea / canyon (but a tunnel bore fills its own walls).
   ctx.fillStyle = grass;
   ctx.fillRect(bleedX, p2.y, bleedW, p1.y - p2.y + 1);
-  if (seg.overhead?.kind !== 'tunnel') renderSides(ctx, width, height, seg, palette, terrain);
+  if (seg.overhead?.kind !== 'tunnel') renderSides(ctx, width, seg, palette, terrain);
 
   const r1 = rumbleWidth(p1.w);
   const r2 = rumbleWidth(p2.w);
