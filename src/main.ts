@@ -1063,6 +1063,18 @@ canvas.addEventListener('mousedown', e => {
   else if (state.paused) state.paused = false;
 });
 
+// ---- pinch-zoom lockout -----------------------------------------------------
+// This is a fixed-viewport arcade canvas: there is nothing to zoom into, and
+// once a mobile browser zooms in there is no in-game way to get back out — the
+// player is just stuck peering at a corner of the scene. The viewport meta's
+// `user-scalable=no` stops this on Android but is IGNORED by iOS Safari (10+),
+// which drives pinch-zoom through the non-standard `gesture*` events instead.
+// Cancelling those at the document level pins the scene at 1:1 on iPhone too,
+// wherever the pinch starts (canvas, touch buttons, or the support overlay).
+for (const type of ['gesturestart', 'gesturechange', 'gestureend']) {
+  document.addEventListener(type, e => e.preventDefault(), { passive: false });
+}
+
 // ---- gamepad ----------------------------------------------------------------
 // Polled alongside keys/touch: left stick or d-pad steers, bottom/left face
 // button or either trigger brakes, and face/Start buttons advance the menus

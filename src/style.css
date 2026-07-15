@@ -22,6 +22,19 @@ body {
 }
 
 /*
+ * Interactive chrome outside the canvas (support button, donate modal) still
+ * needs to receive taps, so it can't be touch-action:none like the canvas — but
+ * `manipulation` keeps the tap while stripping the browser's double-tap-to-zoom.
+ * The fixed-viewport game has nothing to zoom into and no way back out once it
+ * does, so we lock every interactive surface to 1:1. (Pinch-zoom is handled in
+ * JS — see the gesture guards in main.ts.)
+ */
+button,
+a {
+  touch-action: manipulation;
+}
+
+/*
  * The canvas element ALWAYS fills the viewport via CSS alone (position:fixed +
  * inset:0). We never set its width/height from JS — that used to desync on
  * desktop/Retina and leave the scene drawn into only part of the window with a
