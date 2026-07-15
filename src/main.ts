@@ -1143,6 +1143,9 @@ function startRun(tour: TourId = selectedTour): void {
   // A run always opens on its tour's first region — start that region's bed
   // (score.distance still holds the LAST run here, so don't use stageMusicUrl).
   startMusic(STAGE_MUSIC[tour][0] ?? MUSIC_URL);
+  // Warm the next region bed now so the first checkpoint swap is gap-free; each
+  // later bed is warmed as its checkpoint is crossed (frame's stage-change block).
+  if (STAGE_MUSIC[tour][1]) preloadMusic(STAGE_MUSIC[tour][1]);
   for (const url of Object.values(VOICE)) if (url) preloadVoiceClip(url);
   for (const url of Object.values(STING)) preloadVoiceClip(url);
   playSfx('rev', 1);
@@ -2125,6 +2128,9 @@ function update(dt: number): void {
     // Regions can carry their own music bed (Old Prague does) — swap on the
     // checkpoint so the tune turns over with the scenery.
     startMusic(stageMusicUrl());
+    // Buffer the bed one stage ahead so its checkpoint swap is gap-free too.
+    const nextBed = STAGE_MUSIC[getActiveTour()][stageIdx + 1];
+    if (nextBed) preloadMusic(nextBed);
     playSfx('milestone', 0.9);
     playSfx('combo', 0.7);
     playSting(STING.checkpoint, 1);
@@ -2876,10 +2882,10 @@ async function boot(): Promise<void> {
     navigator.serviceWorker.register(assetUrl('sw.js')).catch(() => undefined);
   }
   initMusic(MUSIC_URL);
-  // Buffer the per-region beds before they're needed.
-  for (const beds of Object.values(STAGE_MUSIC)) {
-    for (const url of Object.values(beds)) preloadMusic(url);
-  }
+  // Region beds are NOT buffered here — that would pull ~13MB of music the
+  // player may never reach onto the initial load. They're warmed just-in-time
+  // instead: the run's first + next bed at startRun, the following bed at each
+  // checkpoint (see startRun and the stage-change block in frame()).
   // Restore the persisted identity (reconnects a NIP-07 session quietly) and
   // warm the global gamestr board for the title screen. Both best-effort.
   void restoreIdentity().catch(() => undefined);

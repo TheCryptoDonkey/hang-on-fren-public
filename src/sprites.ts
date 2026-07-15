@@ -13,11 +13,19 @@ export interface SpriteImage {
 
 const ALPHA_FLOOR = 64; // pixels below this alpha are erased (removes the glow)
 
-function makeCanvas(w: number, h: number): { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D } {
+// `readback` opts the temporary canvas into a CPU-backed buffer so the
+// getImageData() call in loadTrimmed doesn't pay a GPU→CPU readback per sprite
+// (103 of them at boot). The trimmed OUTPUT canvas must stay GPU-backed — it's
+// blitted every frame — so it is created without this flag.
+function makeCanvas(
+  w: number,
+  h: number,
+  readback = false,
+): { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D } {
   const canvas = document.createElement('canvas');
   canvas.width = Math.max(1, Math.round(w));
   canvas.height = Math.max(1, Math.round(h));
-  const ctx = canvas.getContext('2d')!;
+  const ctx = canvas.getContext('2d', readback ? { willReadFrequently: true } : undefined)!;
   return { canvas, ctx };
 }
 
@@ -31,7 +39,7 @@ async function loadTrimmed(url: string): Promise<SpriteImage | null> {
   });
   if (!img || !img.width) return null;
 
-  const { canvas, ctx } = makeCanvas(img.width, img.height);
+  const { canvas, ctx } = makeCanvas(img.width, img.height, true);
   ctx.drawImage(img, 0, 0);
   const data = ctx.getImageData(0, 0, canvas.width, canvas.height);
   const px = data.data;
