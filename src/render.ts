@@ -43,6 +43,7 @@ const PICKUP_SPRITE: Record<string, string> = {
   joint: 'pickup-joint',
   pill: 'pickup-pill',
   crystal: 'pickup-crystal',
+  sacredstone: 'pickup-sacredstone',
 };
 
 // Sprite widths (fraction of the full road width) live in geometry.ts — the
@@ -161,6 +162,53 @@ function drawClouds(
     }
   }
   ctx.globalAlpha = 1;
+  ctx.restore();
+}
+
+/**
+ * The PRIMAL NIGHT visitor: a classic saucer casually mooching across the
+ * starfield on the prehistoric tour's night leg. Pure sky-dressing — it never
+ * lands and never interacts, which is the joke: nobody in 600 billion years BC
+ * looks up. It cruises a slow lap of the sky on a lazy sine wander with a
+ * gentle tilt, fades in as the night falls (palette.star carries the day-arc)
+ * and vanishes under cave cover like everything else up there.
+ */
+function drawUfo(
+  ctx: CanvasRenderingContext2D,
+  w: number,
+  horizon: number,
+  palette: Palette,
+  time: number,
+  cover: number,
+  store: SpriteStore,
+  stoneAge: boolean,
+): void {
+  if (!stoneAge || horizon <= 0) return;
+  // Only the deep-night stretch of the day-arc (star ramps 0 → 0.85 → 0.3).
+  const night = clamp((palette.star - 0.35) / 0.4, 0, 1);
+  const alpha = night * (1 - clamp(cover, 0, 1));
+  if (alpha <= 0.02) return;
+  const art = store.get('ufo');
+  if (!art) return;
+  // The casual wander: a right-to-left cruise that takes the best part of a
+  // minute to cross, riding two slow sines so it drifts rather than flies a rail.
+  const span = w * 1.5;
+  const x = span - wrap(time * (w / 38), span) - (span - w) / 2;
+  const y = horizon * (0.24 + 0.1 * Math.sin(time * 0.23) + 0.04 * Math.sin(time * 0.71));
+  const uw = w * 0.058;
+  const uh = uw * (art.h / art.w);
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(Math.sin(time * 0.45) * 0.05);
+  // Under-glow lives HERE, not in the art: painted glows kept dragging a whole
+  // painted sky in with them (see the ufo spec in tools/gen-art.mjs).
+  const glow = glowSprite('ufo-glow', '#7ce8b0', [[0, 0.5], [1, 0]]);
+  if (glow) {
+    ctx.globalAlpha = alpha * 0.5;
+    ctx.drawImage(glow, -uw * 0.7, -uh * 0.4, uw * 1.4, uh * 1.7);
+  }
+  ctx.globalAlpha = alpha * 0.94;
+  ctx.drawImage(art.canvas, -uw / 2, -uh / 2, uw, uh);
   ctx.restore();
 }
 
@@ -455,9 +503,9 @@ export interface Scene {
    *  tableau shows the finish cast, not the back of the scooter. */
   hideRider?: boolean;
   /** Which player sprite family to draw: 'hero' (the Vespa, default) or
-   *  'caveman' (the secret level's log car). */
+   *  'caveman' (the prehistoric tour's log car). */
   heroSet?: string;
-  /** The secret level's tunnels are MOUNTAIN CAVES: rock strata walls, a
+  /** The prehistoric tour's tunnels are MOUNTAIN CAVES: rock strata walls, a
    *  jagged rocky mouth, and candle flames lining the sides instead of strip
    *  lights. */
   cave?: boolean;
@@ -558,6 +606,8 @@ export function renderScene(scene: Scene): void {
   }
   // Weather drifts over the painted sky — but not through a tunnel roof.
   drawClouds(ctx, width, horizon, horizonShift + xPan, palette, scene.time, scene.enclosure ?? 0);
+  // …and on the prehistoric night leg, something else is up there too.
+  drawUfo(ctx, width, horizon, palette, scene.time, scene.enclosure ?? 0, store, cave);
 
   // Road, far to near so nearer segments overwrite fog on farther ones.
   // Anything at or past a tunnel mouth is drawn THROUGH it — see findAperture.
@@ -1067,7 +1117,7 @@ function drawBore(
   // with depth so the bore recedes into its own gloom. This is what lifts the
   // interior from "flat concrete box" to something with 32-bit surface.
   //
-  // A CAVE (the secret level) wears the same course machinery as rock STRATA:
+  // A CAVE (the prehistoric tour) wears the same course machinery as rock STRATA:
   // dark earth in the roof shadow, banded sandstone down the wall, a candle
   // ledge, and a warm candle-lit lower band the flames actually sit in.
   if (tunnel) {

@@ -329,7 +329,7 @@ export interface SubmitScoreOptions {
   runId: string;
   playerName?: string;
   level: number;
-  /** Which tour the run rode — the secret stone tour publishes tagged and
+  /** Which tour the run rode — the prehistoric stone tour publishes tagged and
    *  namespaced so it never mixes with the road boards. */
   tour?: 'grand' | 'world' | 'stone';
   /** Wall-clock ms bounds of the run — the claim service sanity-checks them. */
@@ -561,8 +561,9 @@ export async function fetchGlobalBoard(limit = 5, force = false): Promise<Global
     const score = Number(tag('score'));
     if (!Number.isFinite(score) || score <= 0) continue;
     if (tag('cheated') === 'true') continue;
-    // Secret-level scores live on their own timeline — the main TOP FRENS
-    // board is road-tour only, so a 600 BILLION BC run never mixes in.
+    // Prehistoric scores live on their own timeline: the 600B YEARS BC tour's
+    // pill/drift economy prices runs on a different scale, so the main TOP
+    // FRENS board stays road-tour only and BC runs board apart.
     if (tag('tour') === 'stone') continue;
     // Game-signed events attribute the player via the `p` tag; without one
     // there is nobody to credit, so the event is skipped.

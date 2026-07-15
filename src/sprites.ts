@@ -491,7 +491,7 @@ function fallbackDeadTree(): SpriteImage {
   });
 }
 
-// --- 600 BILLION BC (secret level) fallbacks ---------------------------------
+// --- 600B YEARS BC (prehistoric tour) fallbacks ---------------------------------
 
 // Giant prehistoric tree fern: shaggy trunk, a crown of long arching fronds.
 function fallbackFern(): SpriteImage {
@@ -548,7 +548,7 @@ function fallbackBones(): SpriteImage {
   });
 }
 
-// Smoking volcano cone with lava streaks — the secret level's landmark.
+// Smoking volcano cone with lava streaks — the prehistoric tour's landmark.
 function fallbackVolcano(): SpriteImage {
   return bake(200, 160, ctx => {
     ctx.fillStyle = '#2e2226';
@@ -574,6 +574,44 @@ function fallbackVolcano(): SpriteImage {
     for (const [cx, cy, r] of [[100, 20, 14], [116, 10, 11], [130, 4, 8]] as const) {
       ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill();
     }
+  });
+}
+
+// The PRIMAL NIGHT visitor — a classic saucer for the sky of the prehistoric
+// tour's night leg (render.ts drawUfo). Dome, disc, rim lights: the full cliché.
+function fallbackUfo(): SpriteImage {
+  return bake(220, 110, ctx => {
+    ctx.fillStyle = '#79d9a0'; // glass dome
+    ctx.beginPath(); ctx.ellipse(110, 40, 34, 26, 0, Math.PI, 0); ctx.fill();
+    ctx.fillStyle = '#aeb6c8'; // the disc
+    ctx.beginPath(); ctx.ellipse(110, 54, 96, 22, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#7d8598'; // underside
+    ctx.beginPath(); ctx.ellipse(110, 62, 66, 14, 0, 0, Math.PI); ctx.fill();
+    ctx.strokeStyle = '#2a3040';
+    ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.ellipse(110, 54, 96, 22, 0, 0, Math.PI * 2); ctx.stroke();
+    ctx.fillStyle = '#ffd23f'; // rim lights
+    for (let i = 0; i < 7; i += 1) {
+      ctx.beginPath(); ctx.arc(34 + i * 25, 56, 4, 0, Math.PI * 2); ctx.fill();
+    }
+  });
+}
+
+// The 600.wtf sacred stone — a river pebble with the twelve digits of
+// 600 000 000 000 burnt into it. Fallback approximates the relic; the real
+// photo ships in public/pickups/600b/sacred-stone.webp.
+function fallbackSacredStone(): SpriteImage {
+  return bake(120, 150, ctx => {
+    ctx.fillStyle = '#8f8a84'; // the pebble
+    ctx.beginPath(); ctx.ellipse(60, 78, 54, 68, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#a09a92'; // worn top light
+    ctx.beginPath(); ctx.ellipse(48, 52, 30, 34, -0.4, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#2e2a26'; // burnt digits, four rows of three
+    ctx.font = '900 26px "Trebuchet MS", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    const rows = ['600', '000', '000', '000'];
+    rows.forEach((row, i) => ctx.fillText(row, 60, 40 + i * 27));
   });
 }
 
@@ -1901,6 +1939,7 @@ const FALLBACKS: Record<string, () => SpriteImage> = {
   'prop-bones': fallbackBones,
   'prop-volcano': fallbackVolcano,
   'hazard-hole': fallbackHole,
+  ufo: fallbackUfo,
   'dino-trex': fallbackTrex,
   'dino-raptor': fallbackRaptor,
   mammoth: fallbackMammoth,
@@ -1957,6 +1996,7 @@ const FALLBACKS: Record<string, () => SpriteImage> = {
   'pickup-joint': fallbackJoint,
   'pickup-pill': fallbackPill,
   'pickup-crystal': fallbackCrystal,
+  'pickup-sacredstone': fallbackSacredStone,
 };
 
 const ART_URLS: Record<string, string> = {
@@ -1964,7 +2004,7 @@ const ART_URLS: Record<string, string> = {
   'hero-lean-left': assetUrl('art/hero-lean-left.webp'),
   'hero-lean-right': assetUrl('art/hero-lean-right.webp'),
   'hero-wipeout': assetUrl('art/hero-wipeout.webp'),
-  // 600 BILLION BC — the secret level's log car, beasts, pickups and scenery.
+  // 600B YEARS BC — the prehistoric tour's log car, beasts, pickups and scenery.
   // The '-2' frames flip with frame 1 at speed (turning stone wheels); the
   // wipeout stages animate the tumble. One lean frame, mirrored (hero style).
   'caveman-straight': assetUrl('art/caveman-straight.webp'),
@@ -1983,11 +2023,16 @@ const ART_URLS: Record<string, string> = {
   'pickup-joint': assetUrl('art/pickup-joint.webp'),
   'pickup-pill': assetUrl('art/pickup-pill.webp'),
   'pickup-crystal': assetUrl('art/pickup-crystal.webp'),
+  // The relic itself, photographed — from 600.wtf/img/sacred-stone.webp.
+  'pickup-sacredstone': assetUrl('pickups/600b/sacred-stone.webp'),
   'prop-fern': assetUrl('art/prop-fern.webp'),
   'prop-bones': assetUrl('art/prop-bones.webp'),
   'prop-volcano': assetUrl('art/prop-volcano.webp'),
   'hazard-hole': assetUrl('art/hazard-hole.webp'),
+  ufo: assetUrl('art/ufo.webp'),
   'horizon-jurassic': assetUrl('art/horizon-jurassic.webp'),
+  'horizon-jurassic-night': assetUrl('art/horizon-jurassic-night.webp'),
+  'horizon-jurassic-eruption': assetUrl('art/horizon-jurassic-eruption.webp'),
   'car-classic': assetUrl('art/car-classic.webp'),
   'car-van': assetUrl('art/car-van.webp'),
   'scooter-rival': assetUrl('art/scooter-rival.webp'),

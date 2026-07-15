@@ -48,9 +48,12 @@ describe('claim-rules', () => {
     expect(parseClaim(validClaim({ tour: 'moon' as ClaimInput['tour'] }), NOW)).toMatchObject({ ok: false, error: 'invalid_payload' });
   });
 
-  it('refuses a stone claim beyond its single level', () => {
-    // The secret trip is one leg — there is no stone level 2 to score at.
-    expect(parseClaim(validClaim({ tour: 'stone', level: 2 }), NOW)).toMatchObject({ ok: false, error: 'invalid_level' });
+  it('accepts stone claims across its five legs, refuses beyond', () => {
+    // The secret trip runs five legs (21 km) — a finish claims at level 5.
+    expect(parseClaim(validClaim({ tour: 'stone', level: 2, distance_m: 5000, score: 12000, duration_s: 90, started_at: NOW - 100_000 }), NOW).ok).toBe(true);
+    expect(parseClaim(validClaim({ tour: 'stone', level: 5, distance_m: 21_000, score: 40_000, duration_s: 400, started_at: NOW - 410_000 }), NOW).ok).toBe(true);
+    expect(parseClaim(validClaim({ tour: 'stone', level: 6 }), NOW)).toMatchObject({ ok: false, error: 'invalid_level' });
+    expect(parseClaim(validClaim({ tour: 'stone', level: 0 }), NOW)).toMatchObject({ ok: false, error: 'invalid_level' });
   });
 
   it('rejects stale, future and inverted run clocks', () => {

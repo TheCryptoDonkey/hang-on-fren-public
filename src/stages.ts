@@ -75,18 +75,20 @@ export const TRANSITION = 0.22;
 // --- tours -------------------------------------------------------------------
 
 /** Which journey a run rides: the main grand tour, the 600B world tour
- *  (the conference circuit — see WORLD_STAGES), or the SECRET single-level
- *  prehistoric trip (600 BILLION BC — tap the title logo to find it). */
+ *  (the conference circuit — see WORLD_STAGES), or the prehistoric 600B YEARS
+ *  BC tour — five legs of drift valley (tapping the title logo still
+ *  quick-starts it, a leftover from its days as the secret level). */
 export type TourId = 'grand' | 'world' | 'stone';
 
 export const TOUR_TITLES: Record<TourId, string> = {
   grand: 'GRAND TOUR',
   world: '600B WORLD TOUR',
-  stone: '600 BILLION BC',
+  stone: '600B YEARS BC',
 };
 
-/** How many levels the secret prehistoric trip runs (one long broken timeline). */
-export const STONE_LEVELS = 1;
+/** How many levels the prehistoric tour runs — five legs, 21 km (the
+ *  numerology writes itself: half a grand tour, all of the bitcoin). */
+export const STONE_LEVELS = 5;
 
 let activeTour: TourId = 'grand';
 
@@ -310,7 +312,13 @@ const TAJ: Palette = {
 
 const WORLD_KEYFRAMES: readonly Palette[] = [MANCHESTER, PRAGUE, MALLORCA, TAJ];
 
-// --- 600 BILLION BC (the secret prehistoric trip) -----------------------------
+// --- 600 BILLION BC (the prehistoric tour) -----------------------------
+
+// The prehistoric trip is now five legs of ONE day — the same steaming valley
+// carried from morning to the eruption at dawn, so the 21 km reads as a journey
+// through time rather than five different postcards. Every palette keeps the
+// JURASSIC signatures: gravel road (lane == roadLight — nobody painted lane
+// markings 600 billion years ago), bone-white/hide-brown rumble, green verges.
 
 // S1. JURASSIC VALLEY — steaming fern jungle under a smoking volcano: teal haze
 // sky, lagoon water, lush green verges, a dusty GRAVEL road with bone-white and
@@ -327,7 +335,55 @@ const JURASSIC: Palette = {
   sun: '#ffe9b0', star: 0,
 };
 
-const STONE_KEYFRAMES: readonly Palette[] = [JURASSIC];
+// S2. FERN MIRE — midday deep in the swamp: heavier green, thicker mist off the
+// water, the gravel darkened by the wet.
+const MIRE: Palette = {
+  skyTop: '#4aa8a8', skyHorizon: '#d8e4b0', sea: '#2a8f80',
+  hillsFar: '#6a9a70', hillsNear: '#3f6f42',
+  grassLight: '#6aa04e', grassDark: '#5f9544', ground: 'grass',
+  roadLight: '#8a8070', roadDark: '#807666',
+  rumbleLight: '#d8ccb2', rumbleDark: '#6a422a', lane: '#8a8070',
+  offRoadLight: '#96865a', offRoadDark: '#8a7a4e', fog: '#c2d4b8',
+  sun: '#fff2c8', star: 0,
+};
+
+// S3. AMBER DUSK — the sun drops behind the volcano: gold sky, long shadows,
+// the ferns burning copper at the edges.
+const AMBER: Palette = {
+  skyTop: '#c8823c', skyHorizon: '#ffd9a0', sea: '#3f8f80',
+  hillsFar: '#a08858', hillsNear: '#5f6a3a',
+  grassLight: '#96a04e', grassDark: '#8a9544', ground: 'grass',
+  roadLight: '#a08a6f', roadDark: '#968064',
+  rumbleLight: '#f0dcb2', rumbleDark: '#7a422a', lane: '#a08a6f',
+  offRoadLight: '#b8945a', offRoadDark: '#ac884e', fog: '#e8cfa0',
+  sun: '#ffcf7a', star: 0.1,
+};
+
+// S4. PRIMAL NIGHT — the first starfield anyone ever ignored: deep teal dark,
+// the lagoon black, the volcano a silhouette with a warning glow.
+const PRIMAL: Palette = {
+  skyTop: '#0e2430', skyHorizon: '#3a5a52', sea: '#0f3f3a',
+  hillsFar: '#24403a', hillsNear: '#1a302a',
+  grassLight: '#3a5f3e', grassDark: '#335634', ground: 'grass',
+  roadLight: '#5f584c', roadDark: '#575044',
+  rumbleLight: '#a89a82', rumbleDark: '#4a2e1e', lane: '#5f584c',
+  offRoadLight: '#6a5f42', offRoadDark: '#5e5338', fog: '#2a423a',
+  sun: '#e8f0ff', star: 0.85,
+};
+
+// S5. THE ERUPTION — the timeline finally snaps: ember sky, lava light on the
+// gravel, ash on the wind. The finale holds this all the way to the tape.
+const ERUPTION: Palette = {
+  skyTop: '#4a1a20', skyHorizon: '#c86a2a', sea: '#8f3a1a',
+  hillsFar: '#6a3a30', hillsNear: '#42241e',
+  grassLight: '#6a6a3a', grassDark: '#5f5f30', ground: 'grass',
+  roadLight: '#6f5f52', roadDark: '#655548',
+  rumbleLight: '#c8a882', rumbleDark: '#5a2e1a', lane: '#6f5f52',
+  offRoadLight: '#7a5f3e', offRoadDark: '#6e5332', fog: '#7a3a24',
+  sun: '#ff8a3c', star: 0.3,
+};
+
+const STONE_KEYFRAMES: readonly Palette[] = [JURASSIC, MIRE, AMBER, PRIMAL, ERUPTION];
 
 // Each region drives its OWN traffic: the vehicles you meet belong to the place
 // you're riding through — coaches and ploughs on the mountain, pickups and
@@ -370,9 +426,20 @@ const WORLD_STAGES: readonly { name: string; roster: readonly string[] }[] = [
 ];
 
 const STONE_STAGES: readonly { name: string; roster: readonly string[] }[] = [
-  // S1 The Stoned Age — mammoths lumber ahead; the dinosaurs CHARGE AT you
-  // (world.ts gives dino-* sprites oncoming speed).
-  { name: 'THE STONED AGE', roster: ['dino-trex', 'dino-raptor', 'mammoth'] },
+  // The beast mix IS the difficulty curve (only three prehistoric sprites
+  // exist, so repetition weights the spawn odds): mammoths lumber ahead as
+  // slow roadblocks, the dinosaurs CHARGE AT you (world.ts gives dino-*
+  // sprites oncoming speed) — raptors fast and darting, the trex a wall.
+  // S1 The Stoned Age — a gentle welcome: mostly mammoths, the odd raptor.
+  { name: 'THE STONED AGE', roster: ['mammoth', 'mammoth', 'dino-raptor'] },
+  // S2 Fern Mire — the swamp stirs: raptors join the mammoth traffic.
+  { name: 'FERN MIRE', roster: ['dino-raptor', 'mammoth', 'mammoth', 'dino-raptor'] },
+  // S3 Raptor Alley — dusk is hunting hour: the fast dodges come in packs.
+  { name: 'RAPTOR ALLEY', roster: ['dino-raptor', 'dino-raptor', 'mammoth'] },
+  // S4 Trex Country — the night belongs to the big teeth.
+  { name: 'TREX COUNTRY', roster: ['dino-trex', 'dino-trex', 'dino-raptor', 'mammoth'] },
+  // S5 The Eruption — everything at once for the run home.
+  { name: 'THE ERUPTION', roster: ['dino-trex', 'dino-raptor', 'mammoth'] },
 ];
 
 /**
@@ -443,6 +510,14 @@ const STONE_SCENERY_KITS: readonly SceneryKit[] = [
   // S1 THE STONED AGE — giant tree ferns and palms, dinosaur bones on the verge,
   // a smoking volcano for a landmark.
   { trees: ['prop-fern', 'prop-palm', 'prop-fern'], accent: 'prop-bones', landmark: 'prop-volcano' },
+  // S2 FERN MIRE — the ferns close in, reeds at the water margin.
+  { trees: ['prop-fern', 'prop-fern', 'prop-reed'], accent: 'prop-reed', landmark: 'prop-volcano' },
+  // S3 RAPTOR ALLEY — dusk savanna: palms thin out, bones thicken.
+  { trees: ['prop-palm', 'prop-coconut', 'prop-fern'], accent: 'prop-bones', landmark: 'prop-volcano' },
+  // S4 TREX COUNTRY — dead trunks against the starfield, bones everywhere.
+  { trees: ['prop-deadtree', 'prop-fern', 'prop-deadtree'], accent: 'prop-bones', landmark: 'prop-volcano' },
+  // S5 THE ERUPTION — charred trunks and glowing rock for the run home.
+  { trees: ['prop-deadtree'], accent: 'prop-lavarock', landmark: 'prop-volcano' },
 ];
 
 export function sceneryKitAt(distanceM: number): SceneryKit {
@@ -516,10 +591,19 @@ const WORLD_TERRAIN: readonly Terrain[] = [
   { left: 'flat', right: 'flat', cliffLight: '#c8b48c', cliffDark: '#b09a72', dropColor: '#cfe0d0', cliffHeight: 1600 },
 ];
 
-// One for the single prehistoric leg: red-rock canyon wall inland, the ground
-// falling away to the steaming lagoon on the other shoulder.
+// One per prehistoric leg — the ground tells the same day-arc as the palettes.
 const STONE_TERRAIN: readonly Terrain[] = [
+  // S1 THE STONED AGE — red-rock canyon wall inland, the ground falling away
+  // to the steaming lagoon on the other shoulder.
   { left: 'cliff', right: 'drop', cliffLight: '#8a664a', cliffDark: '#6d4e3a', dropColor: '#2f9f8f', cliffHeight: 3800 },
+  // S2 FERN MIRE — open swamp flats running down to the lagoon.
+  { left: 'flat', right: 'sea', cliffLight: '#6a8a5a', cliffDark: '#547046', dropColor: '#2a8f80', cliffHeight: 1400 },
+  // S3 RAPTOR ALLEY — a gorge: rock both sides, drifting between the walls.
+  { left: 'cliff', right: 'cliff', cliffLight: '#a87a48', cliffDark: '#8a5f36', dropColor: '#3f8f80', cliffHeight: 4400 },
+  // S4 TREX COUNTRY — the night plain, open under the first starfield.
+  { left: 'flat', right: 'flat', cliffLight: '#3a4a3e', cliffDark: '#2c3a30', dropColor: '#0f3f3a', cliffHeight: 1200 },
+  // S5 THE ERUPTION — basalt wall inland, the lava field falling away seaward.
+  { left: 'cliff', right: 'drop', cliffLight: '#4a3a34', cliffDark: '#342722', dropColor: '#c8401a', cliffHeight: 4600 },
 ];
 
 function activeTerrain(): readonly Terrain[] {
@@ -557,7 +641,10 @@ export function rosterAt(distanceM: number): readonly string[] {
 // instead, one phase per city, closing on the gala at the Taj.
 const MARKET_PHASES = ['BEAR MARKET', 'BULL RUN', 'TO THE MOON', 'NEW DAWN'] as const;
 const CONFERENCE_PHASES = ['REGISTRATION DAY', 'KEYNOTE DAY', 'PANEL MARATHON', 'CLOSING GALA'] as const;
-const STONE_PHASES = ['ONE BROKEN TIMELINE'] as const;
+const STONE_PHASES = [
+  'ONE BROKEN TIMELINE', 'DEEPER INTO THE MIRE', 'DUSK OF THE DINOSAURS',
+  'THE LONGEST NIGHT', 'DAWN OF EVERYTHING',
+] as const;
 
 export function marketPhaseAt(distanceM: number): string {
   const phases: readonly string[] = activeTour === 'world'
@@ -644,7 +731,12 @@ const BIOME_NAMES = [
   'riviera', 'beach', 'alpine', 'desert', 'city', 'valley', 'autumn', 'lake', 'volcano', 'finale',
 ] as const;
 const WORLD_BIOME_NAMES = ['manchester', 'prague', 'mallorca', 'tajmahal'] as const;
-const STONE_BIOME_NAMES = ['jurassic'] as const;
+// The first three legs ride the one daytime jurassic panorama (the palettes
+// carry morning → mire → dusk over it), but a painted sky cannot be dimmed by
+// a palette — so the PRIMAL NIGHT and THE ERUPTION legs get their own
+// panoramas, and the standard checkpoint crossfade turns dusk into night and
+// night into fire.
+const STONE_BIOME_NAMES = ['jurassic', 'jurassic', 'jurassic', 'jurassic-night', 'jurassic-eruption'] as const;
 export type BiomeBackdrop = typeof BIOME_NAMES[number] | typeof WORLD_BIOME_NAMES[number] | typeof STONE_BIOME_NAMES[number];
 export type TimeOfDay = { a: BiomeBackdrop; b: BiomeBackdrop; t: number };
 

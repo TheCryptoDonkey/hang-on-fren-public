@@ -188,52 +188,80 @@ describe('stages: 600B world tour (the conference circuit)', () => {
 describe('stages: 600 BILLION BC (the secret prehistoric level)', () => {
   afterEach(() => setActiveTour('grand'));
 
-  it('is a single 4.2 km leg', () => {
+  it('runs five legs over 21 km', () => {
     setActiveTour('stone');
-    expect(levelCount()).toBe(1);
-    expect(finishDistanceM()).toBe(STAGE_M);
-    expect(stageAt(held(0)).name).toBe('THE STONED AGE');
+    expect(levelCount()).toBe(5);
+    expect(finishDistanceM()).toBe(5 * STAGE_M);
+    expect(finishDistanceM()).toBe(21_000);
+    const names = ['THE STONED AGE', 'FERN MIRE', 'RAPTOR ALLEY', 'TREX COUNTRY', 'THE ERUPTION'];
+    names.forEach((name, k) => expect(stageAt(held(k)).name).toBe(name));
   });
 
-  it('clamps to its one leg rather than wrapping', () => {
+  it('clamps to the eruption finale rather than wrapping', () => {
     setActiveTour('stone');
-    expect(stageIndexAt(held(0))).toBe(0);
-    expect(stageIndexAt(held(7))).toBe(0);
-    expect(stageAt(finishDistanceM() + 5000).name).toBe('THE STONED AGE');
+    expect(stageIndexAt(held(4))).toBe(4);
+    expect(stageIndexAt(held(7))).toBe(4);
+    expect(stageAt(finishDistanceM() + 5000).name).toBe('THE ERUPTION');
   });
 
-  it('fields dinosaurs and a mammoth instead of cars', () => {
+  it('escalates the beast mix: mammoths first, trex country by night', () => {
     setActiveTour('stone');
-    const roster = rosterAt(held(0));
-    expect(roster).toContain('dino-trex');
-    expect(roster).toContain('dino-raptor');
-    expect(roster).toContain('mammoth');
+    // The gentle welcome is mammoth-weighted with no trex at all…
+    expect(rosterAt(held(0))).toContain('mammoth');
+    expect(rosterAt(held(0))).not.toContain('dino-trex');
+    // …dusk belongs to the raptors, the night to the big teeth…
+    expect(rosterAt(held(2))).toContain('dino-raptor');
+    expect(rosterAt(held(3))).toContain('dino-trex');
+    // …and the eruption fields everything at once.
+    const finale = rosterAt(held(4));
+    expect(finale).toContain('dino-trex');
+    expect(finale).toContain('dino-raptor');
+    expect(finale).toContain('mammoth');
   });
 
-  it('dresses the roadside in ferns, bones and a volcano', () => {
+  it('dresses each leg of the valley, ferns to charred trunks', () => {
     setActiveTour('stone');
-    const kit = sceneryKitAt(held(0));
-    expect(kit.trees).toContain('prop-fern');
-    expect(kit.accent).toBe('prop-bones');
-    expect(kit.landmark).toBe('prop-volcano');
+    expect(sceneryKitAt(held(0)).trees).toContain('prop-fern');
+    expect(sceneryKitAt(held(0)).accent).toBe('prop-bones');
+    expect(sceneryKitAt(held(1)).trees).toContain('prop-reed');
+    expect(sceneryKitAt(held(3)).trees).toContain('prop-deadtree');
+    expect(sceneryKitAt(held(4)).accent).toBe('prop-lavarock');
+    // The smoking volcano watches the WHOLE trip — it is the destination.
+    for (let k = 0; k < 5; k += 1) expect(sceneryKitAt(held(k)).landmark).toBe('prop-volcano');
   });
 
-  it('holds the jurassic backdrop and palette to the finish line', () => {
+  it('turns the day panorama into night and then fire as the legs turn over', () => {
     setActiveTour('stone');
+    // Daytime panorama carries the first three legs (the palettes do the
+    // morning → mire → dusk work over it)…
     expect(timeOfDayAt(held(0))).toEqual({ a: 'jurassic', b: 'jurassic', t: 0 });
+    expect(timeOfDayAt(held(2)).a).toBe('jurassic');
+    // …then the night and eruption legs get their own painted skies, with the
+    // standard checkpoint crossfade turning dusk into night into fire.
+    expect(timeOfDayAt(held(2)).b).toBe('jurassic-night');
+    expect(timeOfDayAt(held(3)).a).toBe('jurassic-night');
+    expect(timeOfDayAt(held(4))).toEqual({ a: 'jurassic-eruption', b: 'jurassic-eruption', t: 0 });
+    // The palettes carry the same arc on the code-drawn ground.
     expect(paletteAt(held(0)).grassLight).not.toBe(DEFAULT_PALETTE.grassLight);
-    expect(paletteAt(finishDistanceM() - 1).grassLight).toBe(paletteAt(held(0)).grassLight);
+    expect(paletteAt(held(3)).grassLight).not.toBe(paletteAt(held(0)).grassLight);
+    expect(paletteAt(held(3)).star).toBeGreaterThan(0.5); // the primal night starfield
+    // The finale holds to the tape, like every other tour.
+    expect(paletteAt(finishDistanceM() - 1).grassLight).toBe(paletteAt(held(4)).grassLight);
   });
 
-  it('subtitles the whole trip ONE BROKEN TIMELINE', () => {
+  it('tells the broken-timeline story one phase per leg', () => {
     setActiveTour('stone');
     expect(marketPhaseAt(held(0))).toBe('ONE BROKEN TIMELINE');
-    expect(marketPhaseAt(finishDistanceM() - 1)).toBe('ONE BROKEN TIMELINE');
+    expect(marketPhaseAt(held(1))).toBe('DEEPER INTO THE MIRE');
+    expect(marketPhaseAt(held(2))).toBe('DUSK OF THE DINOSAURS');
+    expect(marketPhaseAt(held(3))).toBe('THE LONGEST NIGHT');
+    expect(marketPhaseAt(held(4))).toBe('DAWN OF EVERYTHING');
+    expect(marketPhaseAt(finishDistanceM() - 1)).toBe('DAWN OF EVERYTHING');
   });
 
   it('is never rose-rich (that belongs to the Taj)', () => {
     setActiveTour('stone');
-    expect(roseRichAt(held(0))).toBe(false);
+    for (let k = 0; k < 5; k += 1) expect(roseRichAt(held(k))).toBe(false);
   });
 
   it('restores the grand tour untouched after switching back', () => {

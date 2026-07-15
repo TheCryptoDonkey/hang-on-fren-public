@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildTrack, decorateTrack, findSegment, createPlayer, updatePlayer, resetDrift, enclosureAt, ROAD, DEFAULT_TUNING, TIGHT_CURVE_THRESHOLD } from './road.js';
+import { buildTrack, buildStoneTrack, decorateTrack, findSegment, createPlayer, updatePlayer, resetDrift, enclosureAt, ROAD, DEFAULT_TUNING, TIGHT_CURVE_THRESHOLD } from './road.js';
 import type { DriveInput, Player, Segment, Track } from './road.js';
 
 describe('road', () => {
@@ -96,6 +96,91 @@ describe('road', () => {
     expect(p.speed).toBeLessThanOrEqual(p.maxSpeed + 1e-6);
     expect(p.x).toBeGreaterThanOrEqual(-2.4001);
     expect(p.offRoad).toBe(true);
+  });
+});
+
+describe('the stone track (600 BILLION BC drift valley)', () => {
+  it('builds a seamless ~10 km loop whose ends are flat and straight', () => {
+    const t = buildStoneTrack();
+    // Roughly half the trip per lap: the 21 km run rides the loop about twice,
+    // so every monster corner is learned on lap one and ridden on lap two.
+    expect(t.segments.length).toBeGreaterThan(4800);
+    expect(t.segments.length).toBeLessThan(6000);
+    expect(t.length).toBe(t.segments.length * ROAD.segmentLength);
+    expect(Math.abs(t.segments[t.segments.length - 1].p2.world.y)).toBeLessThan(1);
+    expect(t.segments[0].curve).toBe(0);
+    expect(t.segments[t.segments.length - 1].curve).toBe(0);
+  });
+
+  it('authors the Eternity Left — nearly 2 km of one tightening left-hander', () => {
+    const t = buildStoneTrack();
+    const feature = t.features['eternity-left'];
+    const bend = t.segments.slice(feature.startIndex, feature.endIndex + 1);
+    expect(bend.length).toBeGreaterThan(900); // ~1.9 km of continuous corner
+    // One-directional the whole way: never a single segment of right-hander.
+    expect(bend.every(s => s.curve <= 0)).toBe(true);
+    // Sustained, committed curvature — most of it is a real slide's worth…
+    expect(bend.filter(s => s.curve <= -3.5).length).toBeGreaterThan(500);
+    // …peaking at hard, far longer than one drift can survive (chain them).
+    expect(Math.min(...bend.map(s => s.curve))).toBeLessThanOrEqual(-6.4);
+  });
+
+  it('hands the Serpent esses directly into each other with no recovery straights', () => {
+    const t = buildStoneTrack();
+    const feature = t.features['serpent'];
+    const esses = t.segments.slice(feature.startIndex, feature.endIndex + 1);
+    expect(esses.length).toBeGreaterThan(800);
+    // Long committed sweepers BOTH ways…
+    expect(esses.filter(s => s.curve > 2).length).toBeGreaterThan(300);
+    expect(esses.filter(s => s.curve < -2).length).toBeGreaterThan(300);
+    // …and almost nowhere flat: the only near-straight road is the moment the
+    // curvature SNAPS through zero from one bend into the next.
+    expect(esses.filter(s => Math.abs(s.curve) < 1).length).toBeLessThan(120);
+  });
+
+  it('turns the Carousel as a dead-flat constant-radius bowl with a hairpin bite', () => {
+    const t = buildStoneTrack();
+    const feature = t.features['carousel'];
+    const bowl = t.segments.slice(feature.startIndex, feature.endIndex + 1);
+    // The long constant-radius hold you can live in sideways…
+    expect(bowl.filter(s => s.curve >= 6).length).toBeGreaterThanOrEqual(420);
+    // …the exit bite at hairpin strength…
+    expect(Math.max(...bowl.map(s => s.curve))).toBeGreaterThanOrEqual(10.9);
+    // …and genuinely FLAT, so speed (which a drift needs) is never taxed by a climb.
+    const ys = bowl.map(s => s.p2.world.y);
+    expect(Math.max(...ys) - Math.min(...ys)).toBeLessThan(1);
+  });
+
+  it('mirrors the monster with the Long Right Home, building slow and releasing late', () => {
+    const t = buildStoneTrack();
+    const feature = t.features['long-right-home'];
+    const bend = t.segments.slice(feature.startIndex, feature.endIndex + 1);
+    expect(bend.length).toBeGreaterThan(800);
+    expect(bend.every(s => s.curve >= 0)).toBe(true);
+    expect(bend.filter(s => s.curve >= 3.5).length).toBeGreaterThan(380);
+    expect(Math.max(...bend.map(s => s.curve))).toBeGreaterThanOrEqual(6.4);
+  });
+
+  it('bores the candle caves clear of the loop seam', () => {
+    const t = buildStoneTrack();
+    const tunnels = t.overheads.filter(o => o.kind === 'tunnel');
+    expect(tunnels.length).toBeGreaterThanOrEqual(2); // the Serpent cave + the long one
+    for (const o of t.overheads) {
+      expect(o.start).toBeGreaterThanOrEqual(60);
+      expect(o.end).toBeLessThanOrEqual(t.segments.length - 60);
+    }
+  });
+
+  it('drives and wraps like any other track (and takes chevrons on its hairpins)', () => {
+    const t = buildStoneTrack();
+    decorateTrack(t, []);
+    const marked = t.segments.filter(s => s.scenery.some(item => item.name.startsWith('prop-chevron-')));
+    expect(marked.length).toBeGreaterThan(10); // the hairpin pair + carousel bite
+    const p = createPlayer();
+    const input = { left: false, right: false, throttle: true, brake: false };
+    for (let i = 0; i < 600; i += 1) updatePlayer(p, t, input, 1 / 60, DEFAULT_TUNING);
+    expect(p.speed).toBeGreaterThan(0);
+    expect(p.z).toBeLessThan(t.length);
   });
 });
 

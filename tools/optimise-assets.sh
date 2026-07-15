@@ -32,7 +32,7 @@ for f in "$ART_SRC"/car-*.png "$ART_SRC"/hero-*.png "$ART_SRC"/scooter-*.png \
          "$ART_SRC"/caveman-*.png "$ART_SRC"/dino-*.png "$ART_SRC"/mammoth.png \
          "$ART_SRC"/hazard-*.png "$ART_SRC"/pickup-joint.png "$ART_SRC"/pickup-pill.png \
          "$ART_SRC"/pickup-crystal.png "$ART_SRC"/victory-*.png \
-         "$ART_SRC"/billboard-rose.png; do
+         "$ART_SRC"/ufo.png "$ART_SRC"/billboard-rose.png; do
   [ -f "$f" ] || continue
   name=$(basename "$f" .png)
   [ "$name" = "prop-finish" ] && continue          # orphan source

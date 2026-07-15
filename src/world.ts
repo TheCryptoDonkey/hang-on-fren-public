@@ -84,10 +84,11 @@ export type PickupKind =
   | 'shield'
   | 'beer'
   | 'shroom'
-  // --- 600 BILLION BC (the secret prehistoric level) ---
+  // --- 600 BILLION BC (the prehistoric tour) ---
   | 'joint' // chill: clock pause + a mellow haze
   | 'pill' // 600B orange pill — pure points, spawned in trails
-  | 'crystal'; // bitcoin timelock crystal — the stone age's petrol can
+  | 'crystal' // bitcoin timelock crystal — the stone age's petrol can
+  | 'sacredstone'; // the 600.wtf relic: STONE GRIP (drift never goes hot) + tally
 
 export interface Pickup {
   z: number;
@@ -134,7 +135,7 @@ export interface Marker {
 }
 
 /**
- * A hazard IN the road surface — the potholes of the secret prehistoric level's
+ * A hazard IN the road surface — the potholes of the prehistoric tour's
  * gravel road. Unlike traffic it never moves and unlike a pickup it hurts:
  * dropping a stone wheel into one is a wipeout. Drawn flat on the tarmac by the
  * renderer (a decal, not a billboard).
@@ -277,7 +278,7 @@ export function addPickup(world: World, player: Player, track: Track, kind: Pick
 }
 
 /**
- * A TRAIL of pickups down one lane — the 600 billion orange pills of the secret
+ * A TRAIL of pickups down one lane — the 600 billion orange pills of the prehistoric
  * level. More than treasure, the trail is the ROUTE: each one is laid in the
  * lane that will be safest when the rider actually gets there (no pothole on
  * the line, fewest beasts — an oncoming one weighted hardest), with a gentle
@@ -576,7 +577,7 @@ export function resetWorld(world: World, player: Player, track: Track, opts: { r
   world.traffic = [];
   world.pickups = []; // pickups are added on the clock by main.ts, not pre-populated
   world.markers = []; // gates/finish are added by main.ts as boundaries approach
-  world.hazards = []; // potholes are added on the clock too (secret level only)
+  world.hazards = []; // potholes are added on the clock too (prehistoric tour only)
   const target = targetCars(world);
   for (let i = 0; i < target; i += 1) world.traffic.push(spawnCarAhead(world, player, track));
   if (opts.rival !== false) world.traffic.push(spawnRival(world, player, track));

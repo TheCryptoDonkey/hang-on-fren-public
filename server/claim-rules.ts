@@ -5,7 +5,7 @@
 // be unit-tested with the rest of the suite.
 
 import { GAME_ID } from '../src/scoring.js';
-import { FINISH_M } from '../src/stages.js';
+import { FINISH_M, STONE_LEVELS } from '../src/stages.js';
 
 /** Milliseconds a finished run may lag before a claim is refused. Generous —
  *  a board run only submits after the callsign is typed. */
@@ -112,8 +112,12 @@ export function parseClaim(body: unknown, now = Date.now()): ParseResult {
 
   if (claim.score <= 0) return { ok: false, status: 422, error: 'invalid_score' };
   if (claim.level < 1 || claim.level > 10) return { ok: false, status: 422, error: 'invalid_level' };
-  // The secret prehistoric trip is a single leg — there is no stone level 2.
-  if (claim.tour === 'stone' && claim.level !== 1) return { ok: false, status: 422, error: 'invalid_level' };
+  // The secret prehistoric trip runs STONE_LEVELS legs (derived, like
+  // MAX_DISTANCE_M, so lengthening the trip client-side can't strand the
+  // server refusing honest claims).
+  if (claim.tour === 'stone' && (claim.level < 1 || claim.level > STONE_LEVELS)) {
+    return { ok: false, status: 422, error: 'invalid_level' };
+  }
   if (claim.duration_s <= 0 || claim.duration_s > MAX_DURATION_S) return { ok: false, status: 422, error: 'invalid_duration' };
   if (claim.started_at >= claim.finished_at || claim.finished_at > now + FUTURE_SLACK_MS) {
     return { ok: false, status: 422, error: 'invalid_run_clock' };

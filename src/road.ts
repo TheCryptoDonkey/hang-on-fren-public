@@ -98,7 +98,11 @@ export interface Track {
   overheads: Overhead[];
 }
 
-export type TrackFeatureName = 'billion-bend' | 'blind-summit-west' | 'blind-summit-east';
+export type TrackFeatureName =
+  // The road tours' set-pieces (buildTrack)…
+  | 'billion-bend' | 'blind-summit-west' | 'blind-summit-east'
+  // …and the prehistoric drift monsters (buildStoneTrack).
+  | 'eternity-left' | 'serpent' | 'carousel' | 'long-right-home';
 
 export interface TrackFeature {
   startIndex: number;
@@ -277,11 +281,151 @@ export function buildTrack(): Track {
   return { segments: s, length: s.length * ROAD.segmentLength, features, overheads };
 }
 
+/**
+ * The 600 BILLION BC road: a ~10 km valley loop built for POWERSLIDING. Where
+ * the Riviera track is a menace of traps and blind crests, this one is a rhythm
+ * of enormous, patient corners — each far longer than a single slide can
+ * survive (the drift goes hot at ~2s, see driftCreep), so living in one means
+ * CHAINING slides: catch, stand up, flick straight back in. The four monsters:
+ *
+ *  THE ETERNITY LEFT   — ~1.9 km of one tightening left-hander.
+ *  THE SERPENT         — four long esses handed directly into each other,
+ *                        no recovery straights anywhere.
+ *  THE CAROUSEL        — a dead-flat constant-radius bowl you can sit in
+ *                        sideways for as long as your nerve creeps, with a
+ *                        hairpin bite at the exit for the greedy.
+ *  THE LONG RIGHT HOME — the Eternity's mirror: builds even more slowly and
+ *                        releases late.
+ *
+ * Hills are kept gentle (one big blind crest for drama): a drift needs speed,
+ * and the corners themselves are the difficulty. The 21 km trip runs the loop
+ * about twice, so every corner can be learned on lap one and RIDDEN on lap two.
+ * Same invariants as buildTrack: hills return to zero, both ends are straight,
+ * wrapping player.z past the seam is invisible.
+ */
+export function buildStoneTrack(): Track {
+  const s: Segment[] = [];
+  const features = {} as Record<TrackFeatureName, TrackFeature>;
+  const markFeature = (name: TrackFeatureName, build: () => void): void => {
+    const startIndex = s.length;
+    build();
+    features[name] = { startIndex, endIndex: s.length - 1 };
+  };
+
+  addRoad(s, LEN.short, LEN.medium, LEN.short, 0, 0); // flat start straight
+  // warm-up sweepers — wide enough to practise the entry flick
+  addRoad(s, LEN.medium, LEN.medium, LEN.medium, CURVE.easy, HILL.low);
+  addRoad(s, LEN.medium, LEN.medium, LEN.medium, -CURVE.medium, -HILL.low);
+
+  // THE ETERNITY LEFT — nearly two kilometres of ONE left-hander. It starts
+  // lazy, keeps asking for more lock, peaks at hard and only lets go at the
+  // very end. No slide survives it whole; three or four chained ones can.
+  markFeature('eternity-left', () => {
+    addTransition(s, LEN.long, 0, -CURVE.easy, HILL.low);
+    addTransition(s, 300, -CURVE.easy, -CURVE.medium, HILL.low);
+    addTransition(s, 300, -CURVE.medium, -CURVE.hard, 0);
+    addTransition(s, LEN.epic, -CURVE.hard, -CURVE.medium, -HILL.low);
+    addTransition(s, LEN.medium, -CURVE.medium, 0, -HILL.low);
+  });
+
+  // breather kink right over a rise (a place to bank the drift score)
+  addRoad(s, LEN.medium, LEN.medium, LEN.medium, CURVE.medium, HILL.medium);
+
+  // THE SERPENT — four LONG esses flowing directly into each other. Each
+  // sweeper is a full slide-and-a-half; the snap across is where the flick
+  // entry earns its keep, because the bike is already loaded the right way.
+  markFeature('serpent', () => {
+    addTransition(s, LEN.medium, 0, CURVE.hard, HILL.low);
+    addTransition(s, LEN.epic, CURVE.hard, CURVE.medium, 0);
+    addTransition(s, LEN.short, CURVE.medium, -CURVE.hard, 0);
+    addTransition(s, LEN.epic, -CURVE.hard, -CURVE.medium, -HILL.low);
+    addTransition(s, LEN.short, -CURVE.medium, CURVE.hard, 0);
+    addTransition(s, LEN.epic, CURVE.hard, CURVE.medium, HILL.low);
+    addTransition(s, LEN.short, CURVE.medium, -CURVE.hard, 0);
+    addTransition(s, LEN.epic, -CURVE.hard, -CURVE.easy, -HILL.low);
+    addTransition(s, LEN.medium, -CURVE.easy, 0, 0);
+  });
+
+  // the one blind crest — a straight climb that shows only sky, then a fast
+  // right plunging down the far side
+  addRoad(s, LEN.medium, LEN.long, LEN.medium, 0, HILL.high);
+  addRoad(s, LEN.medium, LEN.long, LEN.long, CURVE.medium, -HILL.high);
+
+  // THE CAROUSEL — a dead-flat constant-radius right you can sit in sideways
+  // until the creep spins you, then a hairpin-strength bite at the exit that
+  // punishes anyone still greedy when the bowl runs out.
+  markFeature('carousel', () => {
+    addTransition(s, LEN.medium, 0, CURVE.hard, 0);
+    addTransition(s, 420, CURVE.hard, CURVE.hard, 0);
+    addTransition(s, LEN.short, CURVE.hard, CURVE.hairpin, 0);
+    addTransition(s, LEN.medium, CURVE.hairpin, 0, 0);
+  });
+
+  // the cave straight — the long candle-lit bore lands here (STONE_OVERHEADS)
+  addRoad(s, LEN.long, LEN.long, LEN.long, 0, 0);
+
+  // hairpin pair over a rise — the one tight technical squeeze on the loop
+  addRoad(s, LEN.short, LEN.short, LEN.short, -CURVE.hairpin, HILL.medium);
+  addRoad(s, LEN.short, LEN.short, LEN.short, CURVE.hairpin, -HILL.medium);
+
+  // THE LONG RIGHT HOME — the Eternity's mirror, and even more patient: it
+  // builds over two long stages, holds hard, and releases late.
+  markFeature('long-right-home', () => {
+    addTransition(s, LEN.long, 0, CURVE.easy, HILL.low);
+    addTransition(s, 280, CURVE.easy, CURVE.medium, 0);
+    addTransition(s, 280, CURVE.medium, CURVE.hard, -HILL.low);
+    addTransition(s, LEN.epic, CURVE.hard, CURVE.easy, 0);
+    addTransition(s, LEN.medium, CURVE.easy, 0, 0);
+  });
+
+  // flat-out chicane, then the finishing straight
+  addRoad(s, LEN.short, LEN.short, LEN.short, -CURVE.hard, 0);
+  addRoad(s, LEN.short, LEN.short, LEN.short, CURVE.hard, 0);
+  addRoad(s, LEN.long, LEN.long, LEN.long, 0, 0);
+
+  // Force the seam flat, exactly as buildTrack does.
+  const residual = lastY(s);
+  if (Math.abs(residual) > 0.5) addRoad(s, LEN.medium, LEN.short, LEN.medium, 0, -residual);
+
+  const overheads = addOverheads(s, STONE_OVERHEADS);
+
+  return { segments: s, length: s.length * ROAD.segmentLength, features, overheads };
+}
+
 /** A tunnel this many segments long is a proper tunnel; an overpass is a flash. */
 const TUNNEL_LEN = 80;
 const OVERPASS_LEN = 3;
 /** Nothing overhead within this many segments of the loop seam. */
 const SEAM_GUARD = 60;
+
+/** Where an overhead goes: a fraction of the finished road, a length, a kind. */
+interface OverheadSpec {
+  frac: number;
+  len: number;
+  kind: OverheadKind;
+}
+
+const ROAD_OVERHEADS: readonly OverheadSpec[] = [
+  { frac: 0.14, len: OVERPASS_LEN, kind: 'overpass' },
+  { frac: 0.21, len: TUNNEL_LEN, kind: 'tunnel' },
+  { frac: 0.36, len: OVERPASS_LEN, kind: 'overpass' },
+  { frac: 0.48, len: TUNNEL_LEN + 40, kind: 'tunnel' }, // the long one
+  { frac: 0.6, len: OVERPASS_LEN, kind: 'overpass' },
+  { frac: 0.72, len: TUNNEL_LEN, kind: 'tunnel' },
+  { frac: 0.84, len: OVERPASS_LEN, kind: 'overpass' },
+];
+
+// The stone track's caves (Scene.cave restyles tunnels into candle-lit rock
+// bores) and rock arches: one cave through the Serpent's esses, the long cave
+// on its own straight, arches flashing over the big descent and the run home.
+const STONE_OVERHEADS: readonly OverheadSpec[] = [
+  { frac: 0.06, len: OVERPASS_LEN, kind: 'overpass' },
+  { frac: 0.3, len: TUNNEL_LEN, kind: 'tunnel' },
+  { frac: 0.47, len: OVERPASS_LEN, kind: 'overpass' },
+  { frac: 0.645, len: TUNNEL_LEN + 40, kind: 'tunnel' }, // the long cave
+  { frac: 0.78, len: OVERPASS_LEN, kind: 'overpass' },
+  { frac: 0.88, len: OVERPASS_LEN, kind: 'overpass' },
+];
 
 /**
  * Bore the tunnels and throw the bridges across, then stamp every affected
@@ -292,7 +436,7 @@ const SEAM_GUARD = 60;
  * tunnels — they land in the same PLACES on the journey regardless of how the
  * corners in between get rewritten.
  */
-function addOverheads(segments: Segment[]): Overhead[] {
+function addOverheads(segments: Segment[], specs: readonly OverheadSpec[] = ROAD_OVERHEADS): Overhead[] {
   const n = segments.length;
   const at = (frac: number, len: number, kind: OverheadKind): Overhead | null => {
     const start = Math.floor(n * frac);
@@ -302,15 +446,9 @@ function addOverheads(segments: Segment[]): Overhead[] {
     if (start < SEAM_GUARD || end > n - SEAM_GUARD) return null;
     return { kind, start, end };
   };
-  const overheads = [
-    at(0.14, OVERPASS_LEN, 'overpass'),
-    at(0.21, TUNNEL_LEN, 'tunnel'),
-    at(0.36, OVERPASS_LEN, 'overpass'),
-    at(0.48, TUNNEL_LEN + 40, 'tunnel'), // the long one
-    at(0.6, OVERPASS_LEN, 'overpass'),
-    at(0.72, TUNNEL_LEN, 'tunnel'),
-    at(0.84, OVERPASS_LEN, 'overpass'),
-  ].filter((o): o is Overhead => o !== null);
+  const overheads = specs
+    .map(spec => at(spec.frac, spec.len, spec.kind))
+    .filter((o): o is Overhead => o !== null);
 
   for (const overhead of overheads) {
     for (let i = overhead.start; i <= overhead.end && i < n; i += 1) {

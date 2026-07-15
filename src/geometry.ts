@@ -21,6 +21,7 @@ export const SPRITE_WORLD_WIDTH: Record<string, number> = {
   'pickup-joint': 0.14,
   'pickup-pill': 0.11,
   'pickup-crystal': 0.14,
+  'pickup-sacredstone': 0.14,
   'car-classic': 0.32,
   'car-van': 0.3,
   'scooter-rival': 0.16,

@@ -98,23 +98,22 @@ describe('scoring', () => {
     expect(ev.tags).toContainEqual(['ended_by', 'finish']);
   });
 
-  it('namespaces and tags the secret stone tour so it never mixes with road scores', () => {
+  it('namespaces the stone tour so it never mixes with road scores', () => {
     const s = createScore();
-    addDistance(s, 4200, 200);
-    const sum = summarise(s, 120, 'finish');
-    const ev = buildScoreEvent(sum, 'abc123', { runId: 'run-1', level: 1, tour: 'stone' });
+    addDistance(s, 21_000, 200);
+    const sum = summarise(s, 400, 'finish');
+    const ev = buildScoreEvent(sum, 'abc123', { runId: 'run-1', level: 5, tour: 'stone' });
     // Its own addressable namespace: a stone run can never REPLACE (or be
-    // replaced by) the player's road-tour level-1 score.
-    expect(ev.tags).toContainEqual(['d', 'hangonfren:abc123:stone-1']);
+    // replaced by) the player's road-tour score at the same level number.
+    expect(ev.tags).toContainEqual(['d', 'hangonfren:abc123:stone-5']);
     expect(ev.tags).toContainEqual(['tour', 'stone']);
-    expect(ev.tags).toContainEqual(['t', 'secret']);
-    expect(ev.content).toContain('600 BILLION BC');
-    expect(ev.content).toContain('SECRET LEVEL');
+    expect(ev.content).toContain('600 BILLION YEARS BC');
+    // A regular tour now — the old secret-level tag is gone.
+    expect(ev.tags.some(t => t[0] === 't' && t[1] === 'secret')).toBe(false);
     // Road tours keep the plain level key (and existing events' addresses).
     const road = buildScoreEvent(sum, 'abc123', { runId: 'run-1', level: 1, tour: 'grand' });
     expect(road.tags).toContainEqual(['d', 'hangonfren:abc123:1']);
     expect(road.tags).toContainEqual(['tour', 'grand']);
-    expect(road.tags.some(t => t[0] === 't' && t[1] === 'secret')).toBe(false);
   });
 
   it('stamps the bitcoin chain snapshot onto the event when provided', () => {

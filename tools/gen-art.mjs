@@ -687,6 +687,44 @@ const ASSETS = [
       'cracked grey stone edges radiating hairline fracture lines and a few scattered pebbles around the rim. ' + SPRITE_STYLE,
   },
   {
+    // The PRIMAL NIGHT visitor — drifts across the starfield on the secret
+    // level's night leg (render.ts drawUfo). Side-on so the wander reads.
+    name: 'ufo', model: 'gpt-image-1.5', size: '1024x1024',
+    prompt:
+      // This subject REFUSES the transparent canvas (UFO → the model paints a
+      // night sky behind it, twice). So: a solid magenta key screen instead,
+      // chroma-keyed out after generation — magenta touches nothing on the
+      // saucer. Glow is added in code where it can breathe (render.ts).
+      'A classic retro FLYING SAUCER UFO seen from the side, slightly tilted: a wide brushed-silver metallic disc ' +
+      'with a pale-green glass dome on top and a ring of small round yellow lights around the rim. Crisp hard ' +
+      'edges, NO glow, NO light beams. The ENTIRE background is one solid flat uniform MAGENTA (#FF00FF) — no ' +
+      'gradient, no vignette, no sky. ' + SPRITE_STYLE,
+  },
+  {
+    // The prehistoric tour's PRIMAL NIGHT leg — the same valley after dark.
+    // The palette day-arc can only darken the code-drawn ground; the sky is
+    // this painting, so the night needs its own (stage 4 of the stone tour).
+    name: 'horizon-jurassic-night', model: 'gpt-image-2', size: '1536x1024', background: 'opaque',
+    prompt:
+      'Wide panoramic arcade-game background illustration of a PREHISTORIC JURASSIC valley at NIGHT. A dense ' +
+      'starfield and a huge full moon over a dark fern jungle, a black-teal lagoon glinting with moonlight, the ' +
+      'silhouette of a huge VOLCANO with a faint warning ember glow at its crater, distant long-necked sauropod ' +
+      'dinosaur silhouettes wading in the water, meeting along a single straight HORIZON LINE running horizontally ' +
+      'across the VERTICAL MIDDLE of the image. Flat, clean, deep-blue-and-teal night Sega OutRun style ' +
+      'illustration. NO road, NO cars, NO people, NO foreground objects, NO text, NO watermark, NO frame or border.',
+  },
+  {
+    // …and the finale: the timeline snaps and the volcano goes up (stage 5).
+    name: 'horizon-jurassic-eruption', model: 'gpt-image-2', size: '1536x1024', background: 'opaque',
+    prompt:
+      'Wide panoramic arcade-game background illustration of a PREHISTORIC JURASSIC valley during a volcanic ' +
+      'ERUPTION at dawn. A huge VOLCANO erupting with fountains of orange lava and a towering ash plume, an ember ' +
+      'red-and-amber sky raining faint sparks, a dark lagoon reflecting the fire, silhouetted tree ferns and ' +
+      'fleeing PTERODACTYL silhouettes, meeting along a single straight HORIZON LINE running horizontally across ' +
+      'the VERTICAL MIDDLE of the image. Flat, clean, fiery Sega OutRun style illustration. NO road, NO cars, NO ' +
+      'people, NO foreground objects, NO text, NO watermark, NO frame or border.',
+  },
+  {
     name: 'horizon-jurassic', model: 'gpt-image-2', size: '1536x1024', background: 'opaque',
     prompt:
       'Wide panoramic arcade-game background illustration of a PREHISTORIC JURASSIC valley. A lush green fern jungle ' +

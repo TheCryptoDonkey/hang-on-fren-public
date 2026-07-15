@@ -21,7 +21,7 @@ export interface RiderVisual {
   spin: number; // accumulated wheel rotation in radians
   speed: number; // 0..1, drives motion blur + wind
   time: number; // seconds, drives the hair flutter
-  /** Sprite family prefix: 'hero' (default) or 'caveman' (the secret level).
+  /** Sprite family prefix: 'hero' (default) or 'caveman' (the prehistoric tour).
    *  A set with a native `-lean-right` frame uses it un-mirrored — mirroring
    *  the two-seater log car would swap the caveman and the monkey. */
   set?: string;

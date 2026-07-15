@@ -2,7 +2,7 @@
 // road (road.ts), dynamic world (world.ts), clock economy (timer.ts), scoring
 // (scoring.ts), audio (audio.ts), rendering (render.ts) and HUD (hud.ts).
 
-import { buildTrack, decorateTrack, createPlayer, updatePlayer, resetDrift, speedKph, riderScreenX, enclosureAt, alignFinishToStraight, DEFAULT_TUNING, ROAD, RIDER_FWD, RIDER_SCREEN_FRAC, type DriveInput } from './road.js';
+import { buildTrack, buildStoneTrack, decorateTrack, createPlayer, updatePlayer, resetDrift, speedKph, riderScreenX, enclosureAt, alignFinishToStraight, DEFAULT_TUNING, ROAD, RIDER_FWD, RIDER_SCREEN_FRAC, type DriveInput } from './road.js';
 import { createWorld, resetWorld, updateWorld, addPickup, addPickupTrail, addHazard, addMarker, signedForward, draftAt, audibleTraffic, getRival, getRivalGapM, retireRival } from './world.js';
 import { createTimer, tickTimer, addRoseTime, addCanTime, timerUrgency, DEFAULT_TIMER } from './timer.js';
 import { createScore, addDistance, addRose, addFuel, addBonus, addStuntBonus, addDrift, driftPayout, penalise, addOvertake, addNearMiss, registerCrash, summarise, type RunSummary } from './scoring.js';
@@ -57,7 +57,15 @@ const STAGE_MUSIC: Readonly<Record<TourId, Readonly<Record<number, string>>>> = 
     3: assetUrl('music/taj-mahal-roses-at-dawn.m4a'),
   },
   stone: {
+    // One bed for all five prehistoric legs. The repeats are deliberate:
+    // stageMusicUrl falls back to the TITLE theme for a missing index, and
+    // startMusic is idempotent per URL — so listing every leg keeps the stone
+    // bed rolling seamlessly through each checkpoint.
     0: assetUrl('music/two-cavemen-one-broken-timeline.m4a'),
+    1: assetUrl('music/two-cavemen-one-broken-timeline.m4a'),
+    2: assetUrl('music/two-cavemen-one-broken-timeline.m4a'),
+    3: assetUrl('music/two-cavemen-one-broken-timeline.m4a'),
+    4: assetUrl('music/two-cavemen-one-broken-timeline.m4a'),
   },
 };
 
@@ -94,17 +102,34 @@ const BEER_WOBBLE_TIME = 8; // seconds of wobbly vision
 // only had a 9% roll, so whole runs went by without a single one spawning.
 const SHROOM_INTERVAL = 63; // a fly agaric sprouts every 63s (3 × 21 numerology)
 const SHROOM_TIME = 6;
-// --- 600 BILLION BC (the secret level's own clocks) ---
+// --- 600 BILLION BC (the prehistoric tour's own clocks) ---
 // The pill trails are the ROUTE: laid frequently and long, each in the lane
 // that will be safest when the rider reaches it (world.ts addPickupTrail), so
 // following the orange line IS the way through the beasts and the craters.
-const PILL_INTERVAL = 4; // a fresh trail of 600B orange pills every 4s
-const PILL_TRAIL = 7; // pills per trail
+// At this cadence the trails all but join up — a near-continuous orange line
+// the whole 21 km, which is precisely what 600 billion pills should look like.
+const PILL_INTERVAL = 2.5; // a fresh trail of 600B orange pills every 2.5s
+const PILL_TRAIL = 9; // pills per trail
 const HOLE_INTERVAL = 12; // a fresh pothole opens in the gravel every 12s
+// Joints ride their own 21s clock in the stone age (the road tours' beer slot
+// runs at 34s) — over a 21 km trip that is a LOT of joints, which is the point:
+// each one chills the clock, and the tally is half the fun of the stats card.
+const JOINT_INTERVAL = 21;
 const JOINT_FREEZE = 10; // seconds the clock chills after a joint
 const JOINT_HAZE_TIME = 5; // …and how long the mellow haze lingers
 const CRYSTAL_FREEZE = 3; // a timelock crystal also locks the clock briefly
 const PILL_POINTS = 600; // of course
+// The SACRED STONE — the 600.wtf relic itself, on the road every 42s. Grabbing
+// one grants STONE GRIP: for a few seconds the drift never goes hot (the slip
+// angle stops creeping toward the spin-out), so a monster corner can be ridden
+// sideways END TO END. The run keeps a tally, worth flexing on the stats card.
+const SACRED_INTERVAL = 42;
+const SACRED_POINTS = 2100;
+const STONE_GRIP_TIME = 10;
+// STONE GRIP is exactly one knob: driftCreep 0. Everything else about the
+// slide — entry, angles, drag, spin threshold on OVER-rotation — stays honest;
+// only the "held too long" bill stops accruing.
+const STONE_GRIP_TUNING = { ...DEFAULT_TUNING, driftCreep: 0 };
 // Slipstream: tuck in behind a car to charge a draft, then break out of the
 // wake for a slingshot — the classic risk-for-speed overtaking move.
 const DRAFT_CHARGE_TIME = 1.1; // seconds tucked in for a full charge
@@ -180,7 +205,13 @@ type Phase = 'loading' | 'title' | 'playing' | 'victory' | 'gameover';
 const canvas = document.getElementById('game') as HTMLCanvasElement;
 const ctx = canvas.getContext('2d')!;
 
-const track = buildTrack();
+// Two roads through the game: the Riviera loop the road tours lap, and the
+// prehistoric drift valley. `track` points at whichever the CURRENT run rides
+// (startRun swaps it before anything touches the world) — everything downstream
+// reads this binding, so the swap is one assignment.
+const roadTrack = buildTrack();
+const stoneTrack = buildStoneTrack();
+let track = roadTrack;
 const player = createPlayer();
 const BASE_MAX_SPEED = player.maxSpeed;
 const world = createWorld();
@@ -197,11 +228,14 @@ function cycleMode(step: number): void {
   playSfx('combo', 0.8, 1 + modeIndex * 0.12);
 }
 
+// The three tours in title-screen order (selector layout, T-key cycling).
+const TOUR_ORDER = ['grand', 'world', 'stone'] as const;
+
 function selectTour(tour: TourId): void {
   if (tour === selectedTour) return;
   selectedTour = tour;
   saveSelectedTour(tour);
-  playSfx('combo', 0.8, tour === 'world' ? 1.35 : 1);
+  playSfx('combo', 0.8, tour === 'world' ? 1.35 : tour === 'stone' ? 0.7 : 1);
 }
 
 const state = {
@@ -244,9 +278,11 @@ const state = {
   submitted: false, // this run's score has been handed to the claim service
   submitStatus: '', // shown on the game-over card
   cheated: false, // ++ level-skip used — the run stays local, never claims on gamestr
-  secret: false, // the 600 BILLION BC run — claims tagged + namespaced, off the main board
+  stoneAge: false, // a 600B YEARS BC run — claims namespaced onto its own board
   tour: 'grand' as TourId, // which tour THIS run rode (stamped onto the claim)
   joints: 0, // joints smoked this run (the stone age keeps count)
+  stones: 0, // sacred stones found this run — the 600.wtf relic tally
+  stoneGrip: 0, // seconds of STONE GRIP left (drift creep suspended)
   lastPlusAt: -1, // state.time of the last + press (cheat chord detection)
   btc: {} as BtcSnapshot, // block height + price stamped onto saved scores
   titleNotice: { text: '', until: 0 }, // transient identity/publish notice on the title
@@ -259,8 +295,9 @@ const state = {
   beerAccum: 0,
   beerSpeed: 0, // seconds of beer speed-up remaining
   beerWobble: 0, // seconds of beer wobbly-vision remaining (outlasts the speed)
-  pillAccum: 0, // stone level: the 600B pill-trail clock
-  holeAccum: 0, // stone level: the pothole clock
+  pillAccum: 0, // stone tour: the 600B pill-trail clock
+  holeAccum: 0, // stone tour: the pothole clock
+  sacredAccum: 0, // stone tour: the sacred-stone relic clock
   shroomAccum: 0,
   shroom: 0, // seconds of fly-agaric invincibility/trip remaining
   shield: false, // HODL shield held — absorbs one wipeout
@@ -303,7 +340,7 @@ interface Spark {
   vr: number;
   color: string;
   petal: boolean;
-  /** A tiny spinning bitcoin — the secret level's confetti. */
+  /** A tiny spinning bitcoin — the prehistoric tour's confetti. */
   coin?: boolean;
 }
 
@@ -360,7 +397,7 @@ function spawnRoseBurst(x: number, y: number, kind: 'petrol' | 'rose' = 'rose'):
 
 /** Rain a burst of celebratory confetti petals from the top of the screen —
  *  fired on the finish line and drip-fed while the victory card is up. The
- *  secret level rains tiny spinning BITCOINS instead: thousands of them (some
+ *  prehistoric tour rains tiny spinning BITCOINS instead: thousands of them (some
  *  would say 600 billion). */
 function spawnConfetti(count = 60, coins = false): void {
   if (coins) {
@@ -867,7 +904,8 @@ function onKeyDown(e: KeyboardEvent): void {
     else if (k === 'arrowright' || k === 'd') { unlockAudio(); cycleMode(1); }
     else if (k === 'arrowup' || k === 'arrowdown' || k === 't') {
       unlockAudio();
-      selectTour(selectedTour === 'grand' ? 'world' : 'grand');
+      const step = k === 'arrowup' ? TOUR_ORDER.length - 1 : 1; // up cycles back
+      selectTour(TOUR_ORDER[(TOUR_ORDER.indexOf(selectedTour) + step) % TOUR_ORDER.length]);
     } else if (k === 'n') { unlockAudio(); toggleIdentity(); }
   } else if (state.phase === 'gameover') handleGameOverKey(e.key);
   // While typing a name, M is a letter — don't hijack it for mute.
@@ -925,8 +963,9 @@ function pointerAction(clientX: number, clientY: number): void {
     // mode; the identity row toggles guest/nostr; anywhere else starts the run.
     const { x, y } = canvasPoint(clientX, clientY);
     const u = uiScale();
-    // THE SECRET: tap (mobile) / click (desktop) the title logo itself and the
-    // timeline breaks — one prehistoric level, two cavemen, one log car.
+    // The old secret handshake lives on as lore: tap/click the logo itself and
+    // the timeline breaks straight into the 600B YEARS BC tour (a quick-start —
+    // the persisted tour selection is untouched).
     if (
       titleLogoSize > 0
       && y > titleLogoY - titleLogoSize * 0.95 && y < titleLogoY + titleLogoSize * 0.25
@@ -936,7 +975,9 @@ function pointerAction(clientX: number, clientY: number): void {
       return;
     }
     if (y > titleTourY - 30 * u && y < titleTourY + 22 * u) {
-      selectTour(x < W / 2 ? 'grand' : 'world');
+      // Three tours across the cabinet — pick by thirds.
+      const frac = titleMenuW > 0 ? (x - titleMenuX) / titleMenuW : x / W;
+      selectTour(TOUR_ORDER[clamp(Math.floor(frac * TOUR_ORDER.length), 0, TOUR_ORDER.length - 1)]);
       return;
     }
     if (y > titleModeY - 30 * u && y < titleModeY + 22 * u) {
@@ -1114,6 +1155,9 @@ function startRun(tour: TourId = selectedTour): void {
   // The tour must be active BEFORE the world resets: traffic rosters and
   // scenery kits are resolved through the active tour's stage data.
   setActiveTour(tour);
+  // …and the tour picks its road: the stone age rides its own drift valley.
+  // Swapped before resetWorld/alignFinishToStraight, which both read the track.
+  track = tour === 'stone' ? stoneTrack : roadTrack;
   timer = createTimer(DEFAULT_TIMER);
   score = createScore(mode.scoreMul);
   world.mods.density = mode.density;
@@ -1130,8 +1174,10 @@ function startRun(tour: TourId = selectedTour): void {
   state.lastGateSpawned = 0;
   state.finishSpawned = false;
   // Land the finish tape at the end of a straight so the arch reads from far out
-  // (the nominal distance falls mid-corner — see alignFinishToStraight).
-  state.finishDistance = alignFinishToStraight(track, finishDistanceM());
+  // (the nominal distance falls mid-corner — see alignFinishToStraight). The
+  // stone track is mostly monster corners, so give the search a longer leash —
+  // the nearest straight can be further away than on the Riviera loop.
+  state.finishDistance = alignFinishToStraight(track, finishDistanceM(), 260, tour === 'stone' ? 2600 : 900);
   state.outcome = 'time';
   state.finishBonus = 0;
   state.finishTimeLeft = 0;
@@ -1154,6 +1200,7 @@ function startRun(tour: TourId = selectedTour): void {
   state.beerWobble = 0;
   state.pillAccum = 0;
   state.holeAccum = 0;
+  state.sacredAccum = 0;
   state.shroomAccum = 0;
   state.shroom = 0;
   state.shield = false;
@@ -1169,9 +1216,11 @@ function startRun(tour: TourId = selectedTour): void {
   state.rivalIntro = tour === 'grand' ? 3.4 : 0;
   state.rivalResult = null;
   state.rivalResultTime = 0;
-  state.secret = tour === 'stone';
+  state.stoneAge = tour === 'stone';
   state.tour = tour;
   state.joints = 0;
+  state.stones = 0;
+  state.stoneGrip = 0;
   resetGearbox();
   resetDrift(player);
   resetFlick(flick);
@@ -1196,12 +1245,13 @@ function startRun(tour: TourId = selectedTour): void {
   state.lastPlusAt = -1;
   state.paused = false;
   state.phase = 'playing';
-  // The secret level announces itself as the timeline shatters.
+  // The prehistoric tour still announces itself as the timeline shatters —
+  // it's a regular tour now, but the entrance kept its drama.
   if (tour === 'stone') {
     playSfx('milestone', 1);
     playSfx('combo', 0.9, 0.7);
-    addPopup(state.popups, 'SECRET LEVEL!', W / 2, H * 0.3, '#ffd23f', 2.4);
-    addPopup(state.popups, TOUR_TITLES.stone, W / 2, H * 0.38, '#8fe6c4', 2.8);
+    addPopup(state.popups, 'THE TIMELINE BREAKS!', W / 2, H * 0.3, '#ffd23f', 2.4);
+    addPopup(state.popups, '600 BILLION YEARS BC', W / 2, H * 0.38, '#8fe6c4', 2.8);
     addPopup(state.popups, 'TWO CAVEMEN · ONE BROKEN TIMELINE', W / 2, H * 0.45, '#ff9d2e', 3.2);
   }
 }
@@ -1240,7 +1290,7 @@ function submitRunScore(playerName?: string): void {
       runId: state.runId,
       playerName: name,
       level: stageIndexAt(summary.distanceM) + 1,
-      // The secret run claims TAGGED (tour=stone + its own d-tag namespace),
+      // A prehistoric run claims TAGGED (tour=stone + its own d-tag namespace),
       // so it can never mix with — or replace — a road-tour score.
       tour: state.tour,
       startedAt: state.runStartedAt,
@@ -1250,12 +1300,11 @@ function submitRunScore(playerName?: string): void {
       btcUsdCents: btc.usdCents,
     }))
     .then(result => {
-      const flavour = state.secret ? 'SECRET SCORE' : 'SCORE';
       state.submitStatus = result === null
-        ? `${flavour} KEPT LOCAL — NO CLAIM SERVICE`
+        ? 'SCORE KEPT LOCAL — NO CLAIM SERVICE'
         : result.status === 'published'
-          ? `${flavour} ON GAMESTR ✓  ${result.ok}/${result.total} relays${state.secret ? ' — OWN BOARD' : ''}`
-          : `${flavour} ACCEPTED — PUBLISHING SOON`;
+          ? `SCORE ON GAMESTR ✓  ${result.ok}/${result.total} relays${state.stoneAge ? ' — BC BOARD' : ''}`
+          : 'SCORE ACCEPTED — PUBLISHING SOON';
       setTitleNotice(state.submitStatus);
       if (result !== null) {
         void fetchGlobalBoard(5, true)
@@ -1518,7 +1567,7 @@ function winRun(): void {
   // Exactly ONE trio of cavewomen on the GOAL screen. The road-side welcome
   // party does its job on the run-in; left standing in the frozen victory
   // frame behind the big tableau cast it doubled them up to six.
-  if (state.secret) world.markers = world.markers.filter(m => m.sprite !== 'finish-line-cavewomen');
+  if (state.stoneAge) world.markers = world.markers.filter(m => m.sprite !== 'finish-line-cavewomen');
   startMusic(MUSIC_URL); // the celebration rides the main theme
   finishStage(levelCount() - 1, null);
   snapshotBitcoin();
@@ -1539,7 +1588,7 @@ function winRun(): void {
   playSfx('milestone', 1);
   playSfx('combo', 0.9);
   playSting(STING.checkpoint, 1);
-  spawnConfetti(state.secret ? 220 : 90, state.secret);
+  spawnConfetti(state.stoneAge ? 220 : 90, state.stoneAge);
   spawnFireworkBurst(W * 0.22, H * 0.22);
   spawnFireworkBurst(W * 0.5, H * 0.13);
   spawnFireworkBurst(W * 0.78, H * 0.25);
@@ -1602,7 +1651,7 @@ function update(dt: number): void {
         state.confettiAccum -= 0.45;
         // The stone age rains bitcoins, and it rains them HARD (600 billion
         // takes a while to fall).
-        spawnConfetti(state.secret ? 34 : 16, state.secret);
+        spawnConfetti(state.stoneAge ? 34 : 16, state.stoneAge);
       }
       state.fireworkAccum += dt;
       if (state.fireworkAccum >= 0.58) {
@@ -1671,8 +1720,18 @@ function update(dt: number): void {
   }
   if (state.invuln > 0) state.invuln = Math.max(0, state.invuln - dt);
 
+  // STONE GRIP ticks down; when it fades, the drift's risk clock is honest
+  // again — worth a word, since it can fade mid-slide.
+  if (state.stoneGrip > 0) {
+    state.stoneGrip = Math.max(0, state.stoneGrip - dt);
+    if (state.stoneGrip === 0) {
+      addPopup(state.popups, 'STONE GRIP FADES', W / 2, H * 0.56, '#c8b48c', 1.2);
+      playSfx('tick', 0.5);
+    }
+  }
+
   const prevZ = player.z;
-  const seg = updatePlayer(player, track, input, dt);
+  const seg = updatePlayer(player, track, input, dt, state.stoneGrip > 0 ? STONE_GRIP_TUNING : DEFAULT_TUNING);
   const moved = ((player.z - prevZ + track.length) % track.length);
   addDistance(score, moved / 100, speedKph(player));
 
@@ -1880,6 +1939,20 @@ function update(dt: number): void {
           spawnRoseBurst(bx, by, 'petrol');
           addPopup(state.popups, `+${PILL_POINTS}`, bx, by - H * 0.06, '#ff9d2e', 0.9);
           break;
+        case 'sacredstone':
+          // The 600.wtf relic. STONE GRIP: the drift's held angle stops
+          // creeping toward the spin-out, so a monster corner can be ridden
+          // sideways end to end. The tally is the flex; the points are real.
+          state.stones += 1;
+          state.stoneGrip = STONE_GRIP_TIME;
+          addBonus(score, SACRED_POINTS, actionMul);
+          playSfx('milestone', 1);
+          playSfx('combo', 0.9, 0.8);
+          vibrate([20, 30, 20]);
+          spawnRoseBurst(bx, by, 'petrol');
+          addPopup(state.popups, `SACRED STONE x${state.stones} — STONE GRIP ${STONE_GRIP_TIME}s`, W / 2, H * 0.5, '#e8dcc2', 2);
+          addPopup(state.popups, `+${SACRED_POINTS}`, bx, by - H * 0.06, '#ffd76b', 1.1);
+          break;
         case 'crystal':
           // Bitcoin timelock crystal — the stone age's petrol can: the same
           // +21s clock top-up, plus a brief timelock while it settles.
@@ -1978,11 +2051,13 @@ function update(dt: number): void {
     state.roseAccum -= roseEvery;
     addPickup(world, player, track, pickTreatKind());
   }
-  // No beer in 600 billion BC — its clock slot rolls JOINTS instead, so the
-  // cavemen are never left waiting on the 42s treat lottery for a smoke.
+  // No beer in 600 billion BC — its clock slot rolls JOINTS instead (and rolls
+  // them faster: every 21s, not 34), so the cavemen are never left waiting on
+  // the 42s treat lottery for a smoke.
+  const viceEvery = stoneAge ? JOINT_INTERVAL : BEER_INTERVAL;
   state.beerAccum += dt;
-  if (state.beerAccum >= BEER_INTERVAL) {
-    state.beerAccum -= BEER_INTERVAL;
+  if (state.beerAccum >= viceEvery) {
+    state.beerAccum -= viceEvery;
     addPickup(world, player, track, stoneAge ? 'joint' : 'beer');
   }
   state.shroomAccum += dt;
@@ -1990,7 +2065,7 @@ function update(dt: number): void {
     state.shroomAccum -= SHROOM_INTERVAL;
     addPickup(world, player, track, 'shroom');
   }
-  // The secret level's own clocks: trails of 600B orange pills to hoover up,
+  // The prehistoric tour's own clocks: trails of 600B orange pills to hoover up,
   // and fresh potholes cracking open in the gravel.
   if (stoneAge) {
     state.pillAccum += dt;
@@ -2002,6 +2077,12 @@ function update(dt: number): void {
     if (state.holeAccum >= HOLE_INTERVAL) {
       state.holeAccum -= HOLE_INTERVAL;
       addHazard(world, player, track);
+    }
+    // …and the relic itself, every 42s: grab it for STONE GRIP.
+    state.sacredAccum += dt;
+    if (state.sacredAccum >= SACRED_INTERVAL) {
+      state.sacredAccum -= SACRED_INTERVAL;
+      addPickup(world, player, track, 'sacredstone');
     }
   }
   if (timer.timeLeft <= EMERGENCY_AT && state.emergencyArmed) {
@@ -2326,14 +2407,18 @@ function renderTitle(store: SpriteStore): void {
   // Also capped by height: on a landscape PHONE the touch-floored u would
   // otherwise push the logo's cap line above the top of the frame.
   const titleSize = Math.min((portrait ? 58 : 104) * u, W * (portrait ? 0.125 : 0.11), H * 0.16);
-  // Publish the logo's tap zone — tapping the logo itself is the secret level.
+  // Publish the logo's tap zone — tapping the logo quick-starts the prehistoric tour (the old secret handshake).
   titleLogoY = logoY;
   titleLogoSize = titleSize;
   ctx.font = `900 ${titleSize}px 'Trebuchet MS', sans-serif`;
   outlinedText('HANG ON, FREN', W / 2, logoY, '#ffd23f', u, 9);
   ctx.font = `700 ${(portrait ? 13 : 18) * u}px 'Trebuchet MS', sans-serif`;
   outlinedText(
-    selectedTour === 'world' ? 'THE 600B VICTORY LAP' : 'AN ENDLESS RIVIERA VESPA ROAD-TRIBUTE',
+    selectedTour === 'world'
+      ? 'THE 600B VICTORY LAP'
+      : selectedTour === 'stone'
+        ? 'TWO CAVEMEN · ONE BROKEN TIMELINE'
+        : 'AN ENDLESS RIVIERA VESPA ROAD-TRIBUTE',
     W / 2, logoY + (portrait ? 24 : 34) * u, '#bfe9ff', u, 4,
   );
 
@@ -2358,20 +2443,24 @@ function renderTitle(store: SpriteStore): void {
   titleModeY = modeY;
   panel(cabX, cabY, cabW, cabH, 20 * u, 'rgba(7,17,28,0.78)', 'rgba(255,215,110,0.4)', 1.5 * u);
 
-  // tour selector — tap the left half for GRAND, the right half for the WORLD tour
+  // tour selector — three tours across the cabinet, tap by thirds
   ctx.font = `800 ${12 * u}px 'Trebuchet MS', sans-serif`;
   outlinedText(isTouch ? 'TOUR   ·   TAP TO SWITCH' : 'TOUR   ·   ▲▼ / T · TAP', W / 2, tourLabelY, '#9fd0ff', u, 3);
-  (['grand', 'world'] as const).forEach((tour, i) => {
-    const x = cabX + cabW * (i === 0 ? 0.28 : 0.72);
+  TOUR_ORDER.forEach((tour, i) => {
+    const x = cabX + cabW * ((i * 2 + 1) / (TOUR_ORDER.length * 2));
     const sel = tour === selectedTour;
-    ctx.font = `${sel ? 900 : 700} ${(sel ? 22 : 15) * u}px 'Trebuchet MS', sans-serif`;
+    // Three titles share the row where two used to — a notch smaller so the
+    // longest ('600B WORLD TOUR') still clears its neighbours in portrait.
+    ctx.font = `${sel ? 900 : 700} ${(sel ? 17 : 12) * u}px 'Trebuchet MS', sans-serif`;
     outlinedText(TOUR_TITLES[tour], x, tourY, sel ? '#ffd23f' : 'rgba(255,255,255,0.5)', u, sel ? 5 : 4);
   });
   ctx.font = `700 ${13 * u}px 'Trebuchet MS', sans-serif`;
   outlinedText(
     selectedTour === 'world'
       ? 'MANCHESTER · PRAGUE · MALLORCA · TAJ MAHAL'
-      : `FREN RIVAL SHOWDOWN · ${(RIVAL_TOUR_FINISH_M / 1000).toFixed(1)} KM`,
+      : selectedTour === 'stone'
+        ? 'MAMMOTHS · RAPTORS · TREX · 21 KM OF DRIFT'
+        : `FREN RIVAL SHOWDOWN · ${(RIVAL_TOUR_FINISH_M / 1000).toFixed(1)} KM`,
     W / 2, tourDetailY, '#8fe6c4', u, 3,
   );
 
@@ -2466,7 +2555,7 @@ function drawCheckeredRibbon(y: number, height: number): void {
 }
 
 /** Which welcome party waits past the tape: the Riviera flag marshals, or the
- *  secret level's amazon cave women. */
+ *  prehistoric tour's amazon cave women. */
 function finishCastSprite(): string {
   return getActiveTour() === 'stone' ? 'finish-line-cavewomen' : 'finish-line-girls';
 }
@@ -2629,8 +2718,11 @@ function renderGameOver(_store: SpriteStore): void {
   ctx.fillStyle = '#8fe6c4';
   const rank = overallGrade(state.stageResults.filter(Boolean));
   const rivalLabel = state.rivalResult ? `RIVAL ${state.rivalResult.won ? 'WIN' : 'LOSS'}   ·   ` : '';
-  // The stone age counts its smokes where the road tours count their roses.
-  const jointLabel = state.secret ? `   ·   ${state.joints} joint${state.joints === 1 ? '' : 's'}` : '';
+  // The stone age counts its smokes and its relics where the road tours count
+  // their roses.
+  const jointLabel = state.stoneAge
+    ? `   ·   ${state.joints} joint${state.joints === 1 ? '' : 's'}   ·   ${state.stones} sacred stone${state.stones === 1 ? '' : 's'}`
+    : '';
   ctx.fillText(
     `${rivalLabel}RANK ${rank}   ·   ${(s.distanceM / 1000).toFixed(2)} km   ·   ${s.roses} roses   ·   ${s.overtakes} overtakes   ·   ${s.topSpeedKph} km/h top${jointLabel}`,
     W / 2,
@@ -2767,7 +2859,9 @@ if ((import.meta as { env?: { DEV?: boolean } }).env?.DEV) {
     state,
     player,
     world,
-    track,
+    // A getter: the binding is swapped per tour (stone rides its own track),
+    // and a captured stale reference here would silently inspect the wrong road.
+    get track() { return track; },
     get timer() { return timer; },
     get score() { return score; },
     get musicUrl() { return currentMusicUrl(); },
@@ -2794,7 +2888,8 @@ async function boot(): Promise<void> {
     .catch(() => undefined);
   const store = new SpriteStore();
   brandPetrol(store);
-  decorateTrack(track, buildSignVariants(store), buildBillboardVariants(store));
+  decorateTrack(roadTrack, buildSignVariants(store), buildBillboardVariants(store));
+  decorateTrack(stoneTrack, buildSignVariants(store), buildBillboardVariants(store));
   state.store = store;
   state.phase = 'title';
   last = performance.now();
@@ -2805,7 +2900,8 @@ async function boot(): Promise<void> {
       brandPetrol(store);
       // Rebuild + rescatter now the real art is in — this is also when the
       // rose-meme billboard first becomes available (its sticker art loads here).
-      decorateTrack(track, buildSignVariants(store), buildBillboardVariants(store));
+      decorateTrack(roadTrack, buildSignVariants(store), buildBillboardVariants(store));
+      decorateTrack(stoneTrack, buildSignVariants(store), buildBillboardVariants(store));
     })
     .catch(() => undefined);
 }

@@ -10,7 +10,8 @@ const TOUR_KEY = 'hangonfren:tour:v1';
 
 export function loadSelectedTour(): TourId {
   try {
-    return localStorage.getItem(TOUR_KEY) === 'world' ? 'world' : 'grand';
+    const stored = localStorage.getItem(TOUR_KEY);
+    return stored === 'world' || stored === 'stone' ? stored : 'grand';
   } catch {
     return 'grand';
   }

@@ -224,9 +224,10 @@ export interface ScoreEventOptions {
   playerMode?: 'guest' | 'nostr';
   /** 1-based level/region reached (gamestr-wide `level` discovery tag). */
   level?: number;
-  /** Which tour the run rode. The secret stone tour is stamped as a `tour`
-   *  tag AND scores into its own addressable namespace (see scoreLevelKey),
-   *  so a prehistoric score never mixes with the road boards. */
+  /** Which tour the run rode. The prehistoric stone tour is stamped as a
+   *  `tour` tag AND scores into its own addressable namespace (see
+   *  scoreLevelKey) — its pill/drift economy prices runs on a different scale,
+   *  so it boards apart from the road tours. */
   tour?: string;
   /** Explicit play URL for the `r`/`source` tags — the claim server passes its
    *  configured public URL; the browser client derives it from `location`. */
@@ -254,8 +255,8 @@ function scoreMessage(summary: RunSummary, level: number, playerName?: string, t
   const km = (summary.distanceM / 1000).toFixed(1);
   if (tour === 'stone') {
     return summary.endedBy === 'finish'
-      ? `${rider} survived 600 BILLION BC — ${summary.score} points over ${km} km on ${GAME_TITLE} (SECRET LEVEL)!`
-      : `${rider} scored ${summary.score} points over ${km} km in 600 BILLION BC on ${GAME_TITLE} (SECRET LEVEL).`;
+      ? `${rider} survived 600 BILLION YEARS BC — ${summary.score} points over ${km} km on ${GAME_TITLE}!`
+      : `${rider} scored ${summary.score} points over ${km} km in 600 BILLION YEARS BC on ${GAME_TITLE}.`;
   }
   if (summary.endedBy === 'finish') {
     return `${rider} finished the grand tour — ${summary.score} points over ${km} km on ${GAME_TITLE}!`;
@@ -310,10 +311,10 @@ export function buildScoreEvent(summary: RunSummary, playerPubkey = 'guest', opt
   if (opts.playerMode) tags.push(['playerMode', opts.playerMode]);
   if (opts.btcBlock) tags.push(['btc_block', String(opts.btcBlock)]);
   if (opts.btcUsdCents) tags.push(['btc_usd_cents', String(opts.btcUsdCents)]);
-  // The tour rides along so boards can tell the runs apart; the secret level
-  // additionally announces itself for gamestr-wide discovery.
+  // The tour rides along so boards can tell the runs apart. (The prehistoric
+  // tour used to add a ['t','secret'] tag from its days as the hidden level —
+  // it's a regular tour now, so the tour tag alone carries it.)
   if (opts.tour) tags.push(['tour', opts.tour]);
-  if (opts.tour === 'stone') tags.push(['t', 'secret']);
   return {
     kind: SCORE_KIND,
     created_at: Math.floor(Date.now() / 1000),
