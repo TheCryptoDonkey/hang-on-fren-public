@@ -10,8 +10,11 @@ npm-debug.log*
 /scratch-*.jpeg
 /scratch-*.png
 /hero-straight-upright.png
-# Local art source/reference stays out of git — EXCEPT the original level-music
-# WAVs, which ship in-repo (the game loads the compressed m4a copies).
+# Full-resolution originals kept in-repo: the level-music WAV masters plus the
+# source art / pickup PNGs. The game loads the compressed webp/m4a copies under
+# public/; regenerate those with tools/optimise-assets.sh.
 art-originals/*
 !art-originals/music/
+!art-originals/art/
+!art-originals/pickups/
 server-dist/
