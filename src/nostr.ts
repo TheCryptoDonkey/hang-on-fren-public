@@ -544,7 +544,14 @@ export async function fetchGlobalBoard(limit = 5, force = false): Promise<Global
   }
   const events = await Promise.all(READ_RELAYS.map(relay => fetchScoresFromRelay(relay)));
   const bestByPlayer = new Map<string, GlobalScore>();
-  for (const event of events.flat()) {
+  const flat = events.flat();
+  for (let i = 0; i < flat.length; i += 1) {
+    const event = flat[i];
+    // Schnorr verification is 1-3ms of field maths per event, and a relay dump
+    // can be dozens of events — verified in a tight loop that lands mid-run,
+    // it's a dropped-frames hitch. Yield to the frame between events so the
+    // cost smears invisibly across time instead.
+    if (i > 0) await new Promise(resolve => setTimeout(resolve, 0));
     if (!isValidScoreEvent(event)) continue;
     const tag = (name: string): string | undefined => event.tags.find(t => t[0] === name)?.[1];
     const score = Number(tag('score'));

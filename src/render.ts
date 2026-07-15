@@ -85,6 +85,34 @@ const CLOUDS = 11;
  * keeps its ceiling. Each puff is a soft radial gradient — no hard edges to
  * accumulate into cotton balls, and no nested colour strings to go NaN.
  */
+// Soft radial glows (clouds, sun halo, lens ghosts, tunnel lamps) were built
+// as fresh canvas gradients EVERY frame — twenty-plus gradient allocations
+// and (on a GPU canvas) texture uploads per frame. Each shape is baked once
+// into a small sprite and stamped with drawImage; per-use brightness rides
+// globalAlpha, so one sprite serves every intensity.
+const glowCache = new Map<string, HTMLCanvasElement | null>();
+
+function glowSprite(key: string, colour: string, stops: ReadonlyArray<readonly [number, number]>, inner = 0): HTMLCanvasElement | null {
+  let cv = glowCache.get(key);
+  if (cv === undefined) {
+    cv = document.createElement('canvas');
+    cv.width = 64;
+    cv.height = 64;
+    const c = cv.getContext('2d');
+    if (!c) {
+      cv = null;
+    } else {
+      const g = c.createRadialGradient(32, 32, 32 * inner, 32, 32, 32);
+      for (const [offset, alpha] of stops) g.addColorStop(offset, rgba(colour, alpha));
+      c.fillStyle = g;
+      c.fillRect(0, 0, 64, 64);
+    }
+    if (glowCache.size > 64) glowCache.clear();
+    glowCache.set(key, cv);
+  }
+  return cv;
+}
+
 function drawClouds(
   ctx: CanvasRenderingContext2D,
   w: number,
@@ -102,7 +130,9 @@ function drawClouds(
   const cr = Math.round(255 + (hr - 255) * 0.22);
   const cg = Math.round(255 + (hg - 255) * 0.22);
   const cb = Math.round(255 + (hb - 255) * 0.22);
-  const rgb = `${cr},${cg},${cb}`;
+  const cloudHex = `#${((1 << 24) | (cr << 16) | (cg << 8) | cb).toString(16).slice(1)}`;
+  const puff = glowSprite(`cloud|${cloudHex}`, cloudHex, [[0, 1], [1, 0]]);
+  if (!puff) return;
 
   const span = w * 1.6;
   ctx.save();
@@ -119,17 +149,15 @@ function drawClouds(
     const a = alpha * (0.4 + 0.5 * depth) * (0.2 + 0.8 * near);
     if (a <= 0.01) continue;
     const cw = w * (0.09 + depth * 0.14);
+    ctx.globalAlpha = a;
     for (let k = 0; k < 3; k += 1) {
       const lx = cx + (k - 1) * cw * 0.42;
       const ly = cy - hash(i * 13 + k) * cw * 0.12;
       const lr = cw * (0.34 + hash(i * 17 + k * 3) * 0.18);
-      const g = ctx.createRadialGradient(lx, ly, 0, lx, ly, lr);
-      g.addColorStop(0, `rgba(${rgb},${a})`);
-      g.addColorStop(1, `rgba(${rgb},0)`);
-      ctx.fillStyle = g;
-      ctx.fillRect(lx - lr, ly - lr * 0.72, lr * 2, lr * 1.44);
+      ctx.drawImage(puff, lx - lr, ly - lr * 0.72, lr * 2, lr * 1.44);
     }
   }
+  ctx.globalAlpha = 1;
   ctx.restore();
 }
 
@@ -1073,13 +1101,14 @@ function drawLamps(ctx: CanvasRenderingContext2D, lamps: readonly Lamp[]): void 
   if (!lamps.length) return;
   ctx.save();
   ctx.globalCompositeOperation = 'lighter';
+  const glow = glowSprite('lampglow', '#ffde96', [[0, 1], [1, 0]]);
   for (const lamp of lamps) {
     const reach = lamp.w * 1.6;
-    const glow = ctx.createRadialGradient(lamp.x, lamp.y, 0, lamp.x, lamp.y, reach);
-    glow.addColorStop(0, `rgba(255,222,150,${lamp.tunnel ? 0.34 : 0.2})`);
-    glow.addColorStop(1, 'rgba(255,222,150,0)');
-    ctx.fillStyle = glow;
-    ctx.fillRect(lamp.x - reach, lamp.y - reach, reach * 2, reach * 2);
+    if (glow) {
+      ctx.globalAlpha = lamp.tunnel ? 0.34 : 0.2;
+      ctx.drawImage(glow, lamp.x - reach, lamp.y - reach, reach * 2, reach * 2);
+      ctx.globalAlpha = 1;
+    }
     ctx.fillStyle = `rgba(255,244,214,${lamp.tunnel ? 0.95 : 0.55})`;
     ctx.fillRect(lamp.x - lamp.w / 2, lamp.y - lamp.h / 2, lamp.w, lamp.h);
   }
@@ -1104,6 +1133,7 @@ function drawBridgeLegs(
   const inset = p.w * 0.06;
   const c = mix('#3f454d', palette.fog, 0.2);
   const tile = groundPattern(ctx, 'rock', c);
+  const pier = tile?.levels[0] ?? null;
   for (const x of [p.x - p.w * WALL_X + inset, p.x + p.w * WALL_X - inset - legW]) {
     ctx.fillStyle = c;
     ctx.fillRect(x, roof - 2, legW, drop + 2);
@@ -1112,11 +1142,11 @@ function drawBridgeLegs(
     const footPad = Math.max(1, legW * 0.18);
     ctx.fillRect(x - footPad, p.y - footH, legW + footPad * 2, footH);
     // concrete grain, then the lit edge over it
-    if (tile) {
+    if (pier) {
       const s = Math.max(0.5, p.w / 110);
-      tile.pat.setTransform(new DOMMatrix([s, 0, 0, s, x, roof]));
+      pier.pat.setTransform(new DOMMatrix([s, 0, 0, s, x, roof]));
       ctx.globalAlpha = 0.4;
-      ctx.fillStyle = tile.pat;
+      ctx.fillStyle = pier.pat;
       ctx.fillRect(x, roof - 2, legW, drop + 2);
       ctx.globalAlpha = 1;
     }
@@ -1156,12 +1186,12 @@ function drawPortal(
     polygon(ctx, l, roof, r, roof, r, deck, l, deck, face);
     // Concrete texture over the face — the flat grey slab read as unfinished
     // next to the textured world.
-    const tile = groundPattern(ctx, 'rock', face);
-    if (tile) {
+    const deckTile = groundPattern(ctx, 'rock', face)?.levels[0] ?? null;
+    if (deckTile) {
       const s = Math.max(0.75, p.w / 90);
-      tile.pat.setTransform(new DOMMatrix([s, 0, 0, s, l, deck]));
+      deckTile.pat.setTransform(new DOMMatrix([s, 0, 0, s, l, deck]));
       ctx.globalAlpha = 0.55;
-      ctx.fillStyle = tile.pat;
+      ctx.fillStyle = deckTile.pat;
       ctx.fillRect(l, deck, r - l, roof - deck);
       ctx.globalAlpha = 1;
     }
@@ -1321,12 +1351,11 @@ function drawSunFlare(
   ctx.globalCompositeOperation = 'lighter';
 
   // Halo — the wide, soft bloom of light scattering in the air around it.
-  const halo = ctx.createRadialGradient(sx, sy, r * 0.2, sx, sy, r * 6);
-  halo.addColorStop(0, rgba(palette.sun, 0.58 * strength));
-  halo.addColorStop(0.25, rgba(palette.sun, 0.18 * strength));
-  halo.addColorStop(1, rgba(palette.sun, 0));
-  ctx.fillStyle = halo;
-  ctx.fillRect(sx - r * 6, sy - r * 6, r * 12, r * 12);
+  const halo = glowSprite(`halo|${palette.sun}`, palette.sun, [[0, 1], [0.25, 0.31], [1, 0]], 0.033);
+  if (halo) {
+    ctx.globalAlpha = 0.58 * strength;
+    ctx.drawImage(halo, sx - r * 6, sy - r * 6, r * 12, r * 12);
+  }
 
   // Ghosts: reflections between the elements of the lens, so they fall on the
   // line through the frame's centre, on the OPPOSITE side to the sun.
@@ -1341,29 +1370,26 @@ function drawSunFlare(
     [1.55, 0.13, '#8fe6c4'],
     [1.9, 0.2, palette.sun],
   ];
+  ctx.globalAlpha = 0.08 * strength;
   for (const [t, size, colour] of ghosts) {
+    const ghost = glowSprite(`ghost|${colour}`, colour, [[0, 1], [0.7, 0.44], [1, 0]]);
+    if (!ghost) continue;
     const gx = sx + dx * t * 2;
     const gy = sy + dy * t * 2;
     const gr = r * size * 2.4;
-    const g = ctx.createRadialGradient(gx, gy, 0, gx, gy, gr);
-    g.addColorStop(0, rgba(colour, 0.08 * strength));
-    g.addColorStop(0.7, rgba(colour, 0.035 * strength));
-    g.addColorStop(1, rgba(colour, 0));
-    ctx.fillStyle = g;
-    ctx.beginPath();
-    ctx.arc(gx, gy, gr, 0, Math.PI * 2);
-    ctx.fill();
+    ctx.drawImage(ghost, gx - gr, gy - gr, gr * 2, gr * 2);
   }
 
   // A horizontal streak across the sun — the anamorphic smear every arcade racer
   // has ever put over its sunset, and the thing that reads as "bright" fastest.
-  const streak = ctx.createLinearGradient(sx - r * 9, sy, sx + r * 9, sy);
-  streak.addColorStop(0, rgba(palette.sun, 0));
-  streak.addColorStop(0.5, rgba(palette.sun, 0.34 * strength));
-  streak.addColorStop(1, rgba(palette.sun, 0));
-  ctx.fillStyle = streak;
-  ctx.fillRect(sx - r * 9, sy - r * 0.09, r * 18, r * 0.18);
+  // The baked glow is radial; squashing it 100:1 flat IS the anamorphic smear.
+  const streak = glowSprite(`streak|${palette.sun}`, palette.sun, [[0, 1], [0.6, 0.5], [1, 0]]);
+  if (streak) {
+    ctx.globalAlpha = 0.34 * strength;
+    ctx.drawImage(streak, sx - r * 9, sy - r * 0.09, r * 18, r * 0.18);
+  }
 
+  ctx.globalAlpha = 1;
   ctx.restore();
 }
 
@@ -1493,16 +1519,18 @@ const TILE_STYLE: Record<TileKind, { tint: 'palette' | 'natural'; texels: number
  *  the procedural ones — same texel size, longer repeat). One shared matrix,
  *  mutated per call — setTransform copies it, and this runs for every band. */
 const PAT_MAT = new DOMMatrix();
-function groundMatrix(seg: Segment, texH: number, kind: TileKind): DOMMatrix {
+function groundMatrix(seg: Segment, level: GroundTileLevel, kind: TileKind): DOMMatrix {
   const style = TILE_STYLE[kind];
   const p1 = seg.p1.screen;
   const rowT = (p1.y - seg.p2.screen.y) / style.rows;
-  PAT_MAT.a = Math.max(0.35, p1.w / style.texels);
+  // One mip pixel spans k base texels, so everything scales by k; the phase
+  // divides by k (fractional is fine — the pattern tiles continuously).
+  PAT_MAT.a = Math.max(0.5, (p1.w / style.texels) * level.k);
   PAT_MAT.b = 0;
   PAT_MAT.c = 0;
-  PAT_MAT.d = -rowT;
+  PAT_MAT.d = -rowT * level.k;
   PAT_MAT.e = p1.x;
-  PAT_MAT.f = p1.y + ((seg.index * style.rows) % texH) * rowT;
+  PAT_MAT.f = p1.y + (((seg.index * style.rows) / level.k) % level.h) * rowT * level.k;
   return PAT_MAT;
 }
 
@@ -1512,7 +1540,20 @@ function groundMatrix(seg: Segment, texH: number, kind: TileKind): DOMMatrix {
 const tileCache = new Map<string, GroundTile | null>();
 
 type TileKind = GroundKind | 'rock' | 'tarmac' | 'water';
-interface GroundTile { pat: CanvasPattern; h: number }
+/** One mip of a ground tile: `k` texels of the base tile per pattern pixel. */
+interface GroundTileLevel { pat: CanvasPattern; h: number; k: number }
+/** A tinted tile with its mip chain [1x, 1/4, 1/16]. Far bands sample the
+ *  pre-averaged mips: full-res texels at sub-pixel scale alias differently
+ *  every frame — the "texture visibly redrawing toward the horizon" crawl.
+ *  A mip IS the texture, compressed; the horizon gets smooth stable grain. */
+interface GroundTile { levels: readonly GroundTileLevel[] }
+
+/** Pick the mip whose texels land nearest 1px on screen for this band. */
+function tileLevel(tile: GroundTile, seg: Segment, kind: TileKind): GroundTileLevel {
+  const a = seg.p1.screen.w / TILE_STYLE[kind].texels;
+  const want = a >= 1.4 ? 0 : a >= 0.35 ? 1 : 2;
+  return tile.levels[Math.min(want, tile.levels.length - 1)];
+}
 
 /** The generated texture each material wears; set by renderScene each frame
  *  (the store loads async — until a texture lands, the procedural tile runs). */
@@ -1573,8 +1614,29 @@ function groundPattern(ctx: CanvasRenderingContext2D, kind: TileKind, base: stri
       } else {
         paintTile(c, kind, base, warm);
       }
-      const pat = ctx.createPattern(cv, 'repeat');
-      tile = pat ? { pat, h: cv.height } : null;
+      // Mip chain: 1x, 1/4, 1/16 — each level chain-halved with smoothing on,
+      // so a mip pixel is the area average of the texels it stands in for.
+      const levels: GroundTileLevel[] = [];
+      let src: HTMLCanvasElement = cv;
+      let k = 1;
+      for (let li = 0; li < 3; li += 1) {
+        const pat = ctx.createPattern(src, 'repeat');
+        if (!pat) break;
+        levels.push({ pat, h: src.height, k });
+        if (src.width <= 8) break;
+        for (let halving = 0; halving < 2; halving += 1) {
+          const half = document.createElement('canvas');
+          half.width = Math.max(4, Math.floor(src.width / 2));
+          half.height = Math.max(4, Math.floor(src.height / 2));
+          const hc = half.getContext('2d');
+          if (!hc) break;
+          hc.imageSmoothingEnabled = true;
+          hc.drawImage(src, 0, 0, half.width, half.height);
+          src = half;
+        }
+        k *= 4;
+      }
+      tile = levels.length ? { levels } : null;
     }
     if (tileCache.size > 160) tileCache.clear();
     tileCache.set(key, tile);
@@ -1756,11 +1818,12 @@ function renderSides(
     // Rock mottle over an open cliff shoulder; the water texture over the sea
     // (the animated surf rolls over the top of it).
     const tex: 'rock' | 'water' | null = kind === 'cliff' ? 'rock' : kind === 'sea' ? 'water' : null;
-    if (tex && sideTextured) {
+    if (tex && sideTextured && (tex === 'water' || p1.w >= 8)) {
       const tile = tiles[tex][dark ? 1 : 0];
       if (tile) {
-        tile.pat.setTransform(groundMatrix(seg, tile.h, tex));
-        ctx.fillStyle = tile.pat;
+        const lvl = tileLevel(tile, seg, tex);
+        lvl.pat.setTransform(groundMatrix(seg, lvl, tex));
+        ctx.fillStyle = lvl.pat;
         ctx.beginPath();
         ctx.moveTo(x1, y1);
         ctx.lineTo(x2, y2);
@@ -1859,8 +1922,9 @@ function renderSegment(ctx: CanvasRenderingContext2D, width: number, height: num
     // lies beyond a sea / canyon / rock lip on top of it.
     const tile = tiles.slab[dark ? 1 : 0];
     if (tile) {
-      tile.pat.setTransform(groundMatrix(seg, tile.h, tiles.ground));
-      ctx.fillStyle = tile.pat;
+      const lvl = tileLevel(tile, seg, tiles.ground);
+      lvl.pat.setTransform(groundMatrix(seg, lvl, tiles.ground));
+      ctx.fillStyle = lvl.pat;
       ctx.fillRect(bleedX, p2.y, bleedW, p1.y - p2.y + 1);
     }
   }
@@ -1871,13 +1935,15 @@ function renderSegment(ctx: CanvasRenderingContext2D, width: number, height: num
   polygon(ctx, p1.x - p1.w - r1, p1.y, p1.x - p1.w, p1.y, p2.x - p2.w, p2.y, p2.x - p2.w - r2, p2.y, rumble);
   polygon(ctx, p1.x + p1.w + r1, p1.y, p1.x + p1.w, p1.y, p2.x + p2.w, p2.y, p2.x + p2.w + r2, p2.y, rumble);
   polygon(ctx, p1.x - p1.w, p1.y, p1.x + p1.w, p1.y, p2.x + p2.w, p2.y, p2.x - p2.w, p2.y, road);
-  if (textured) {
+  if (textured && p1.w >= 8) {
     // Asphalt wears the same chunky texels as the ground; lane paint goes on
-    // over the top so the markings stay crisp.
+    // over the top so the markings stay crisp. Below ~16px of road there is
+    // nothing to see and the fill still costs — skip it.
     const tile = tiles.tarmac[dark ? 1 : 0];
     if (tile) {
-      tile.pat.setTransform(groundMatrix(seg, tile.h, 'tarmac'));
-      ctx.fillStyle = tile.pat;
+      const lvl = tileLevel(tile, seg, 'tarmac');
+      lvl.pat.setTransform(groundMatrix(seg, lvl, 'tarmac'));
+      ctx.fillStyle = lvl.pat;
       ctx.beginPath();
       ctx.moveTo(p1.x - p1.w, p1.y);
       ctx.lineTo(p1.x + p1.w, p1.y);

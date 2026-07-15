@@ -157,7 +157,7 @@ export type WorldEvent =
    * (audio.ts `playPassBy`) rather than as a placeless blip.
    */
   | { type: 'overtake'; side: number; closing: number }
-  | { type: 'nearMiss'; side: number }
+  | { type: 'nearMiss'; side: number; closeness: number }
   | { type: 'rivalPass' }
   | { type: 'crash'; sprite: string };
 
@@ -554,7 +554,12 @@ export function updateWorld(
     // went by on the left reports negative — the sign the stereo pass-by needs.
     if (genuineStep && car.prevFwd > HIT_REAR && d <= HIT_REAR) {
       const side = clamp(laneOffset - player.x, -1, 1);
-      if (passGap < hitGap + NEAR_BAND && passGap >= effGap) events.push({ type: 'nearMiss', side });
+      if (passGap < hitGap + NEAR_BAND && passGap >= effGap) {
+        // How close the graze was, 1 = paint-swap, 0 = outer edge of the band —
+        // the score scales with it, so shaving a car pays more than brushing by.
+        const closeness = clamp(1 - (passGap - effGap) / Math.max(1e-6, hitGap + NEAR_BAND - effGap), 0, 1);
+        events.push({ type: 'nearMiss', side, closeness });
+      }
       const closing = clamp((player.speed - car.speed) / Math.max(1, player.maxSpeed), 0, 1);
       events.push({ type: 'overtake', side, closing });
       if (car.role === 'rival') events.push({ type: 'rivalPass' });

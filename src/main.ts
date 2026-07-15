@@ -1766,9 +1766,10 @@ function update(dt: number): void {
       if (score.overtakes >= 2) playSting(STING.overtake, 0.9);
     } else if (ev.type === 'nearMiss') {
       rewardFlow(FLOW_GAINS.nearMiss);
-      addNearMiss(score, flowMultiplier(state.flow));
+      const pts = addNearMiss(score, ev.closeness, flowMultiplier(state.flow));
       playSfx('nearMiss', 0.7);
-      addPopup(state.popups, 'NEAR MISS', W * 0.5, H * 0.62, '#ffd76b', 0.9);
+      // Show what the graze PAID — and the closer it was, the longer it hangs.
+      addPopup(state.popups, `NEAR MISS  +${pts.toLocaleString('en-GB')}`, W * 0.5, H * 0.62, ev.closeness > 0.66 ? '#ff9d4d' : '#ffd76b', 0.9 + ev.closeness * 0.5);
     } else if (ev.type === 'rivalPass') {
       addPopup(state.popups, 'YOU PASSED THE FREN!', W / 2, H * 0.48, '#8fe6c4', 1.35);
     }

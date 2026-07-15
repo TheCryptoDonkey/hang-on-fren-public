@@ -133,9 +133,14 @@ export function addOvertake(state: ScoreState, actionMul = 1): void {
   state.score += POINTS_PER_OVERTAKE * state.mult * actionMul;
 }
 
-export function addNearMiss(state: ScoreState, actionMul = 1): void {
+/** Bank a near miss. `closeness` 0..1 scales the reward — a graze right on
+ *  the hitbox pays 2x the base, the outer edge of the band pays half. Returns
+ *  the points banked so the HUD can show them at the moment of the pass. */
+export function addNearMiss(state: ScoreState, closeness = 1, actionMul = 1): number {
   state.nearMisses += 1;
-  state.score += POINTS_PER_NEAR_MISS * state.mult * actionMul;
+  const points = Math.round(POINTS_PER_NEAR_MISS * (0.5 + 1.5 * closeness) * state.mult * actionMul);
+  state.score += points;
+  return points;
 }
 
 export function registerCrash(state: ScoreState): void {
