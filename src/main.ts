@@ -1504,6 +1504,10 @@ function endRun(endedBy: 'time' | 'crashes'): void {
 function winRun(): void {
   state.endedBy = 'time';
   state.outcome = 'finish';
+  // Exactly ONE trio of cavewomen on the GOAL screen. The road-side welcome
+  // party does its job on the run-in; left standing in the frozen victory
+  // frame behind the big tableau cast it doubled them up to six.
+  if (state.secret) world.markers = world.markers.filter(m => m.sprite !== 'finish-line-cavewomen');
   startMusic(MUSIC_URL); // the celebration rides the main theme
   finishStage(levelCount() - 1, null);
   snapshotBitcoin();
