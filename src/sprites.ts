@@ -864,6 +864,96 @@ function roundRectPath(ctx: CanvasRenderingContext2D, x: number, y: number, w: n
   ctx.closePath();
 }
 
+// ---- 32-bit shading helpers for the code-drawn cars ------------------------
+// The regional traffic has no PNG art, so this generator IS the art and has to
+// hold its own beside the hand-painted props. A flat fill with one darker band
+// reads as programmer-art; what sells a 32-bit sprite is FORM — a body lit from
+// above and rounded across, glass that reflects the sky, lamps that sit in a
+// recess and glow. These helpers push/pull a spec colour toward white or black
+// so every panel can carry its own little ramp.
+function carHexToRgb(hex: string): [number, number, number] {
+  const s = hex.replace('#', '');
+  const f = s.length === 3 ? s.split('').map(c => c + c).join('') : s;
+  return [parseInt(f.slice(0, 2), 16), parseInt(f.slice(2, 4), 16), parseInt(f.slice(4, 6), 16)];
+}
+/** Lift (amt>0) toward white or drop (amt<0) toward black; amt in -1..1. */
+function shadeHex(hex: string, amt: number): string {
+  const [r, g, b] = carHexToRgb(hex);
+  const t = amt < 0 ? 0 : 255;
+  const k = Math.min(1, Math.abs(amt));
+  const c = (x: number): number => Math.round(x + (t - x) * k);
+  return `rgb(${c(r)},${c(g)},${c(b)})`;
+}
+function rgbaFromHex(hex: string, a: number): string {
+  const [r, g, b] = carHexToRgb(hex);
+  return `rgba(${r},${g},${b},${a})`;
+}
+
+// 4x4 ordered (Bayer) dither matrix, values 0..15.
+const BAYER4 = [
+  [0, 8, 2, 10],
+  [12, 4, 14, 6],
+  [3, 11, 1, 9],
+  [15, 7, 13, 5],
+];
+
+/**
+ * Turn a smoothly-shaded car into DITHERED PIXEL-ART, so the code-drawn traffic
+ * sits in the same 32-bit world as the hand-painted PNG cars and props rather
+ * than looking like glossy vector art beside them. Two passes in one:
+ *  - pixelate to a chunky `cell` grid (the car's art resolution), and
+ *  - ordered-dither each colour channel to `step` levels, and the alpha edge to a
+ *    stipple — the cross-hatch banding that reads as Mega-Drive/SNES shading.
+ * Run once over the finished sprite; the gradients become dither ramps and the
+ * additive lamp glows become scattered lit pixels for free.
+ */
+function pixelDither(ctx: CanvasRenderingContext2D, w: number, h: number, cell: number, step: number): void {
+  const img = ctx.getImageData(0, 0, w, h);
+  const d = img.data;
+  const cw = Math.ceil(w / cell);
+  const ch = Math.ceil(h / cell);
+  for (let cy = 0; cy < ch; cy += 1) {
+    for (let cx = 0; cx < cw; cx += 1) {
+      const x0 = cx * cell;
+      const y0 = cy * cell;
+      const x1 = Math.min(w, x0 + cell);
+      const y1 = Math.min(h, y0 + cell);
+      // average the cell so thin AA/glow fringes survive as coverage
+      let r = 0;
+      let g = 0;
+      let b = 0;
+      let a = 0;
+      let n = 0;
+      for (let y = y0; y < y1; y += 1) {
+        for (let x = x0; x < x1; x += 1) {
+          const i = (y * w + x) * 4;
+          r += d[i]; g += d[i + 1]; b += d[i + 2]; a += d[i + 3]; n += 1;
+        }
+      }
+      r /= n; g /= n; b /= n; a /= n;
+      const t = (BAYER4[cy & 3][cx & 3] + 0.5) / 16;
+      const q = (v: number): number => {
+        const level = v / step;
+        return Math.min(255, Math.round((Math.floor(level) + (level - Math.floor(level) > t ? 1 : 0)) * step));
+      };
+      const rr = q(r);
+      const gg = q(g);
+      const bb = q(b);
+      // alpha: HARD silhouette. A stippled edge just reads as a noisy halo around
+      // the car; real pixel-art cars have a clean outline with the dither kept to
+      // the interior shading. One cell of coverage is the whole pixel or none.
+      const aa = a < 128 ? 0 : 255;
+      for (let y = y0; y < y1; y += 1) {
+        for (let x = x0; x < x1; x += 1) {
+          const i = (y * w + x) * 4;
+          d[i] = rr; d[i + 1] = gg; d[i + 2] = bb; d[i + 3] = aa;
+        }
+      }
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+}
+
 function makeCarSprite(spec: CarSpec): SpriteImage {
   const { w, h } = spec;
   return bake(w, h, ctx => {
@@ -877,75 +967,212 @@ function makeCarSprite(spec: CarSpec): SpriteImage {
     const bodyBottom = groundY - tyreH * (spec.bigWheels ? 0.5 : 0.35);
     const bodyTop = h * (spec.stance === 'low' ? 0.5 : spec.stance === 'tall' ? 0.3 : box ? 0.22 : 0.4);
     const cabTop = h * (spec.stance === 'low' ? 0.34 : spec.stance === 'tall' ? 0.12 : box ? 0.08 : 0.22);
+    const bodyH = bodyBottom - bodyTop;
+    const rad = w * 0.06;
+    ctx.lineJoin = 'round';
+    // (No contact shadow here — the renderer grounds every car sprite itself, and
+    // a soft radial baked in only dithers down to a blobby stipple.)
 
-    // shadow
-    ctx.fillStyle = 'rgba(0,0,0,0.22)';
-    ctx.beginPath();
-    ctx.ellipse(cx, groundY, bodyW * 0.56, h * 0.06, 0, 0, Math.PI * 2);
-    ctx.fill();
+    // ---- rear tyres: black shoulder + a rim glint so they read as round -----
+    const drawTyre = (tx: number): void => {
+      ctx.fillStyle = '#0c0c0f';
+      roundRectPath(ctx, tx, groundY - tyreH, tyreW, tyreH, 4);
+      ctx.fill();
+      const rim = ctx.createLinearGradient(tx, 0, tx + tyreW, 0);
+      rim.addColorStop(0, 'rgba(120,126,138,0)');
+      rim.addColorStop(0.5, 'rgba(150,156,168,0.55)');
+      rim.addColorStop(1, 'rgba(120,126,138,0)');
+      ctx.fillStyle = rim;
+      roundRectPath(ctx, tx + tyreW * 0.16, groundY - tyreH * 0.72, tyreW * 0.68, tyreH * 0.44, 3);
+      ctx.fill();
+    };
+    drawTyre(bx - w * 0.02);
+    drawTyre(bx + bodyW - tyreW + w * 0.02);
 
-    // rear tyres poking out below the body
-    ctx.fillStyle = '#141414';
-    roundRectPath(ctx, bx - w * 0.02, groundY - tyreH, tyreW, tyreH, 4);
-    ctx.fill();
-    roundRectPath(ctx, bx + bodyW - tyreW + w * 0.02, groundY - tyreH, tyreW, tyreH, 4);
-    ctx.fill();
-
-    // cabin / roof (narrower than the body)
+    // ---- cabin / roof (narrower than the body), lit from above --------------
     const cabW = bodyW * (spec.stance === 'low' ? 0.72 : 0.84);
-    ctx.fillStyle = spec.roof;
-    roundRectPath(ctx, cx - cabW / 2, cabTop, cabW, bodyTop - cabTop + h * 0.05, w * 0.05);
-    ctx.fill();
-    // rear glass
-    ctx.fillStyle = spec.glass;
-    roundRectPath(ctx, cx - cabW * 0.4, cabTop + (bodyTop - cabTop) * 0.2, cabW * 0.8, (bodyTop - cabTop) * 0.5, w * 0.03);
+    const cabX = cx - cabW / 2;
+    const cabH = bodyTop - cabTop + h * 0.05;
+    const roofGrad = ctx.createLinearGradient(0, cabTop, 0, cabTop + cabH);
+    roofGrad.addColorStop(0, shadeHex(spec.roof, 0.26));
+    roofGrad.addColorStop(0.55, spec.roof);
+    roofGrad.addColorStop(1, shadeHex(spec.roof, -0.26));
+    ctx.fillStyle = roofGrad;
+    roundRectPath(ctx, cabX, cabTop, cabW, cabH, w * 0.05);
     ctx.fill();
 
-    // main body
-    ctx.fillStyle = spec.body;
-    roundRectPath(ctx, bx, bodyTop, bodyW, bodyBottom - bodyTop, w * 0.06);
+    // rear glass, recessed, with a diagonal sky reflection and a chrome surround
+    const gX = cx - cabW * 0.4;
+    const gY = cabTop + cabH * 0.18;
+    const gW = cabW * 0.8;
+    const gH = cabH * 0.52;
+    ctx.fillStyle = shadeHex(spec.glass, -0.12);
+    roundRectPath(ctx, gX, gY, gW, gH, w * 0.03);
     ctx.fill();
-    // lower shading
-    ctx.fillStyle = spec.bodyDark;
-    ctx.fillRect(bx, bodyBottom - (bodyBottom - bodyTop) * 0.3, bodyW, (bodyBottom - bodyTop) * 0.3);
+    const sky = ctx.createLinearGradient(gX, gY, gX + gW, gY + gH);
+    sky.addColorStop(0, 'rgba(226,240,255,0.42)');
+    sky.addColorStop(0.4, 'rgba(226,240,255,0.06)');
+    sky.addColorStop(0.62, 'rgba(226,240,255,0)');
+    ctx.fillStyle = sky;
+    roundRectPath(ctx, gX, gY, gW, gH, w * 0.03);
+    ctx.fill();
+    ctx.fillStyle = shadeHex(spec.trim, 0.18);
+    ctx.fillRect(gX, gY - h * 0.01, gW, Math.max(1, h * 0.012)); // chrome window top
 
-    // tail lights
-    ctx.fillStyle = spec.tail;
-    const tlY = bodyTop + (bodyBottom - bodyTop) * 0.28;
-    const tlH = (bodyBottom - bodyTop) * 0.22;
-    if (spec.roundTail) {
+    // ---- main body: a top-lit vertical ramp, rounded across with side AO -----
+    const bodyGrad = ctx.createLinearGradient(0, bodyTop, 0, bodyBottom);
+    bodyGrad.addColorStop(0, shadeHex(spec.body, 0.3));
+    bodyGrad.addColorStop(0.16, shadeHex(spec.body, 0.12));
+    bodyGrad.addColorStop(0.5, spec.body);
+    bodyGrad.addColorStop(0.82, spec.bodyDark);
+    bodyGrad.addColorStop(1, shadeHex(spec.bodyDark, -0.34));
+    ctx.fillStyle = bodyGrad;
+    roundRectPath(ctx, bx, bodyTop, bodyW, bodyH, rad);
+    ctx.fill();
+
+    ctx.save();
+    roundRectPath(ctx, bx, bodyTop, bodyW, bodyH, rad);
+    ctx.clip();
+    // curved-flank shading: darker at both edges → the boot reads as cylindrical
+    const flankL = ctx.createLinearGradient(bx, 0, bx + bodyW * 0.42, 0);
+    flankL.addColorStop(0, 'rgba(0,0,0,0.26)');
+    flankL.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = flankL;
+    ctx.fillRect(bx, bodyTop, bodyW * 0.42, bodyH);
+    const flankR = ctx.createLinearGradient(bx + bodyW * 0.58, 0, bx + bodyW, 0);
+    flankR.addColorStop(0, 'rgba(0,0,0,0)');
+    flankR.addColorStop(1, 'rgba(0,0,0,0.26)');
+    ctx.fillStyle = flankR;
+    ctx.fillRect(bx + bodyW * 0.58, bodyTop, bodyW * 0.42, bodyH);
+    // specular sheen across the top shoulder
+    const gloss = ctx.createLinearGradient(0, bodyTop, 0, bodyTop + bodyH * 0.26);
+    gloss.addColorStop(0, 'rgba(255,255,255,0)');
+    gloss.addColorStop(0.55, 'rgba(255,255,255,0.28)');
+    gloss.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = gloss;
+    ctx.fillRect(bx + bodyW * 0.06, bodyTop, bodyW * 0.88, bodyH * 0.26);
+    // boot shut-line
+    ctx.fillStyle = 'rgba(0,0,0,0.16)';
+    ctx.fillRect(bx + bodyW * 0.05, bodyTop + bodyH * 0.30, bodyW * 0.9, Math.max(1, h * 0.006));
+    ctx.restore();
+
+    // ---- box vans: rear doors, handles and a rubbing strip ------------------
+    if (box) {
+      ctx.strokeStyle = 'rgba(0,0,0,0.30)';
+      ctx.lineWidth = Math.max(1.5, w * 0.01);
+      ctx.beginPath(); // central door split
+      ctx.moveTo(cx, bodyTop + bodyH * 0.06);
+      ctx.lineTo(cx, bodyBottom - bodyH * 0.06);
+      ctx.stroke();
+      ctx.strokeStyle = 'rgba(255,255,255,0.14)';
       ctx.beginPath();
-      ctx.arc(bx + bodyW * 0.17, tlY + tlH / 2, tlH * 0.62, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.beginPath();
-      ctx.arc(bx + bodyW * 0.83, tlY + tlH / 2, tlH * 0.62, 0, Math.PI * 2);
-      ctx.fill();
-    } else {
-      roundRectPath(ctx, bx + bodyW * 0.07, tlY, bodyW * 0.24, tlH, 3);
-      ctx.fill();
-      roundRectPath(ctx, bx + bodyW * 0.69, tlY, bodyW * 0.24, tlH, 3);
-      ctx.fill();
+      ctx.moveTo(cx + 1.5, bodyTop + bodyH * 0.06);
+      ctx.lineTo(cx + 1.5, bodyBottom - bodyH * 0.06);
+      ctx.stroke();
+      ctx.fillStyle = shadeHex(spec.bodyDark, -0.2); // handles
+      ctx.fillRect(cx - bodyW * 0.16, bodyTop + bodyH * 0.5, bodyW * 0.08, h * 0.012);
+      ctx.fillRect(cx + bodyW * 0.08, bodyTop + bodyH * 0.5, bodyW * 0.08, h * 0.012);
     }
 
-    // bumper / trim strip
-    ctx.fillStyle = spec.trim;
-    ctx.fillRect(bx, bodyBottom - (bodyBottom - bodyTop) * 0.12, bodyW, (bodyBottom - bodyTop) * 0.12);
+    // ---- tail lights: recessed housing, lit lens, hot filament core ---------
+    const tlY = bodyTop + bodyH * 0.30;
+    const tlH = bodyH * 0.24;
+    const lensGrad = (y: number): CanvasGradient => {
+      const g = ctx.createLinearGradient(0, y, 0, y + tlH);
+      g.addColorStop(0, shadeHex(spec.tail, 0.4));
+      g.addColorStop(0.5, spec.tail);
+      g.addColorStop(1, shadeHex(spec.tail, -0.42));
+      return g;
+    };
+    if (spec.roundTail) {
+      for (const fxu of [0.17, 0.83]) {
+        const lcx = bx + bodyW * fxu;
+        const lcy = tlY + tlH / 2;
+        const rr = tlH * 0.62;
+        ctx.fillStyle = 'rgba(0,0,0,0.5)';
+        ctx.beginPath();
+        ctx.arc(lcx, lcy, rr * 1.2, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = lensGrad(lcy - rr);
+        ctx.beginPath();
+        ctx.arc(lcx, lcy, rr, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = shadeHex(spec.tail, 0.7);
+        ctx.beginPath();
+        ctx.arc(lcx - rr * 0.22, lcy - rr * 0.22, rr * 0.4, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    } else {
+      for (const fxu of [0.07, 0.69]) {
+        const lx = bx + bodyW * fxu;
+        const lw = bodyW * 0.24;
+        ctx.fillStyle = 'rgba(0,0,0,0.5)';
+        roundRectPath(ctx, lx - lw * 0.08, tlY - tlH * 0.12, lw * 1.16, tlH * 1.24, 3);
+        ctx.fill();
+        ctx.fillStyle = lensGrad(tlY);
+        roundRectPath(ctx, lx, tlY, lw, tlH, 2.5);
+        ctx.fill();
+        ctx.fillStyle = shadeHex(spec.tail, 0.7);
+        roundRectPath(ctx, lx + lw * 0.16, tlY + tlH * 0.24, lw * 0.68, tlH * 0.32, 1.5);
+        ctx.fill();
+      }
+    }
+    // emissive bloom off the lamps
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    for (const fxu of spec.roundTail ? [0.17, 0.83] : [0.19, 0.81]) {
+      const lcx = bx + bodyW * fxu;
+      const lcy = tlY + tlH * 0.5;
+      const glow = ctx.createRadialGradient(lcx, lcy, 0, lcx, lcy, tlH * 1.4);
+      glow.addColorStop(0, rgbaFromHex(spec.tail, 0.5));
+      glow.addColorStop(1, rgbaFromHex(spec.tail, 0));
+      ctx.fillStyle = glow;
+      ctx.fillRect(lcx - tlH * 1.4, lcy - tlH * 1.4, tlH * 2.8, tlH * 2.8);
+    }
+    ctx.restore();
+
+    // ---- number plate, then a chromed bumper with a bright top edge ---------
+    const bumpH = bodyH * 0.14;
+    const bumpY = bodyBottom - bumpH;
+    const plW = bodyW * 0.26;
+    const plH = bodyH * 0.15;
+    ctx.fillStyle = '#ece7d6';
+    roundRectPath(ctx, cx - plW / 2, bumpY - plH - h * 0.006, plW, plH, 2);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(40,44,60,0.85)';
+    ctx.fillRect(cx - plW * 0.36, bumpY - plH * 0.62 - h * 0.006, plW * 0.72, plH * 0.34);
+
+    const bumpGrad = ctx.createLinearGradient(0, bumpY, 0, bumpY + bumpH);
+    bumpGrad.addColorStop(0, shadeHex(spec.trim, 0.42));
+    bumpGrad.addColorStop(0.45, spec.trim);
+    bumpGrad.addColorStop(1, shadeHex(spec.trim, -0.4));
+    ctx.fillStyle = bumpGrad;
+    ctx.fillRect(bx, bumpY, bodyW, bumpH);
+    ctx.fillStyle = 'rgba(255,255,255,0.4)';
+    ctx.fillRect(bx, bumpY, bodyW, Math.max(1, h * 0.006));
 
     if (spec.spoiler) {
-      ctx.fillStyle = spec.bodyDark;
+      ctx.fillStyle = shadeHex(spec.bodyDark, -0.1);
       const spY = bodyTop - h * 0.07;
       ctx.fillRect(cx - bodyW * 0.46, spY, bodyW * 0.92, h * 0.035);
+      ctx.fillStyle = 'rgba(255,255,255,0.22)';
+      ctx.fillRect(cx - bodyW * 0.46, spY, bodyW * 0.92, Math.max(1, h * 0.008));
+      ctx.fillStyle = shadeHex(spec.bodyDark, -0.1);
       ctx.fillRect(cx - bodyW * 0.36, spY, w * 0.035, h * 0.07);
       ctx.fillRect(cx + bodyW * 0.33, spY, w * 0.035, h * 0.07);
     }
 
     if (spec.rust) {
-      ctx.fillStyle = 'rgba(92,52,26,0.55)';
+      ctx.fillStyle = 'rgba(92,52,26,0.5)';
       ctx.beginPath();
       ctx.arc(bx + bodyW * 0.26, bodyBottom - 6, 6, 0, Math.PI * 2);
       ctx.fill();
       ctx.beginPath();
       ctx.arc(bx + bodyW * 0.72, bodyTop + 9, 5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = 'rgba(52,30,14,0.4)';
+      ctx.beginPath();
+      ctx.arc(bx + bodyW * 0.5, bodyBottom - bumpH - 4, 4, 0, Math.PI * 2);
       ctx.fill();
     }
 
@@ -989,16 +1216,47 @@ function makeCarSprite(spec: CarSpec): SpriteImage {
     }
     if (spec.lightbar) {
       const lw = bodyW * 0.5;
+      const lbY = cabTop - h * 0.055;
+      ctx.fillStyle = '#20242c'; // black mounting bar
+      roundRectPath(ctx, cx - lw / 2 - w * 0.01, lbY - h * 0.012, lw + w * 0.02, h * 0.052, 2);
+      ctx.fill();
       ctx.fillStyle = '#e02030';
-      ctx.fillRect(cx - lw / 2, cabTop - h * 0.055, lw / 2, h * 0.04);
+      ctx.fillRect(cx - lw / 2, lbY, lw / 2, h * 0.04);
       ctx.fillStyle = '#2060e0';
-      ctx.fillRect(cx, cabTop - h * 0.055, lw / 2, h * 0.04);
+      ctx.fillRect(cx, lbY, lw / 2, h * 0.04);
+      ctx.save(); // twin glow, red left / blue right
+      ctx.globalCompositeOperation = 'lighter';
+      for (const [gx, col] of [[cx - lw * 0.25, '#ff3040'], [cx + lw * 0.25, '#4080ff']] as const) {
+        const gg = ctx.createRadialGradient(gx, lbY + h * 0.02, 0, gx, lbY + h * 0.02, lw * 0.5);
+        gg.addColorStop(0, rgbaFromHex(col, 0.6));
+        gg.addColorStop(1, rgbaFromHex(col, 0));
+        ctx.fillStyle = gg;
+        ctx.fillRect(gx - lw * 0.5, lbY - lw * 0.5, lw, lw);
+      }
+      ctx.restore();
     }
     if (spec.beacon) {
+      const byc = cabTop - h * 0.035;
+      ctx.fillStyle = shadeHex(spec.beacon, -0.35); // dome base
+      ctx.beginPath();
+      ctx.ellipse(cx, byc + h * 0.012, w * 0.05, h * 0.02, 0, 0, Math.PI * 2);
+      ctx.fill();
       ctx.fillStyle = spec.beacon;
       ctx.beginPath();
-      ctx.ellipse(cx, cabTop - h * 0.035, w * 0.045, h * 0.035, 0, 0, Math.PI * 2);
+      ctx.ellipse(cx, byc, w * 0.045, h * 0.035, 0, 0, Math.PI * 2);
       ctx.fill();
+      ctx.fillStyle = shadeHex(spec.beacon, 0.55); // glint
+      ctx.beginPath();
+      ctx.ellipse(cx - w * 0.012, byc - h * 0.008, w * 0.016, h * 0.012, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      const bg = ctx.createRadialGradient(cx, byc, 0, cx, byc, w * 0.12);
+      bg.addColorStop(0, rgbaFromHex(spec.beacon, 0.55));
+      bg.addColorStop(1, rgbaFromHex(spec.beacon, 0));
+      ctx.fillStyle = bg;
+      ctx.fillRect(cx - w * 0.12, byc - w * 0.12, w * 0.24, w * 0.24);
+      ctx.restore();
     }
     if (spec.taxiSign) {
       ctx.fillStyle = spec.taxiSign;
@@ -1014,6 +1272,11 @@ function makeCarSprite(spec: CarSpec): SpriteImage {
     ctx.lineWidth = Math.max(2, w * 0.014);
     roundRectPath(ctx, bx, bodyTop, bodyW, bodyBottom - bodyTop, w * 0.06);
     ctx.stroke();
+
+    // Bake the whole thing down to dithered pixel-art so it matches the PNG cars.
+    // cell ≈ 3 native px → ~50px-wide art; step 40 → ~6 shades a channel to dither
+    // between. Tuned to read as 32-bit at the sizes traffic is actually drawn.
+    pixelDither(ctx, w, h, 3, 40);
   });
 }
 
@@ -1345,6 +1608,18 @@ const ART_URLS: Record<string, string> = {
   'car-porsche': assetUrl('art/car-porsche.png'),
   'car-bentley': assetUrl('art/car-bentley.png'),
   'car-banger': assetUrl('art/car-banger.png'),
+  // Regional working traffic — gpt-image-1.5 sprites (dithered makeCarSprite is
+  // the fallback until these load / if the PNG is missing).
+  'car-camper': assetUrl('art/car-camper.png'),
+  'car-bus': assetUrl('art/car-bus.png'),
+  'car-plough': assetUrl('art/car-plough.png'),
+  'car-pickup': assetUrl('art/car-pickup.png'),
+  'car-buggy': assetUrl('art/car-buggy.png'),
+  'car-taxi': assetUrl('art/car-taxi.png'),
+  'car-police': assetUrl('art/car-police.png'),
+  'car-tractor': assetUrl('art/car-tractor.png'),
+  'car-jeep': assetUrl('art/car-jeep.png'),
+  'car-firetruck': assetUrl('art/car-firetruck.png'),
   'prop-palm': assetUrl('art/prop-palm.png'),
   'prop-coconut': assetUrl('art/prop-coconut.png'),
   'prop-cypress': assetUrl('art/prop-cypress.png'),

@@ -35,6 +35,14 @@ const SPRITE_STYLE =
   'Clean cel-shaded pixel-art arcade sprite, bold dark outlines, bright saturated Sega OutRun / Hang-On colours, ' +
   'transparent background, NO ground, NO drop shadow, NO text, subject centred and fully in frame.';
 
+// Traffic is "seen by a rider catching it up" — but the model sometimes takes
+// that literally and paints the pursuing bike's handlebars across the bottom of
+// the frame, which then bakes into the sprite as floating bars. Append this to
+// forbid it: we want ONLY the vehicle.
+const NO_BIKE =
+  ' IMPORTANT: show ONLY this one vehicle, centred and filling the frame — do NOT draw any pursuing motorbike, ' +
+  'scooter, handlebars, wing-mirrors, dashboard or rider anywhere in the image.';
+
 // name -> spec. ref: array of image paths (relative to ROOT) for edits; absent = generation.
 const ASSETS = [
   {
@@ -126,6 +134,70 @@ const ASSETS = [
     prompt:
       'Rear view of a wide, low, angular bright-yellow Italian supercar with a big rear wing, quad exhausts and slim ' +
       'red tail lights, seen by a rider catching it up from behind. ' + SPRITE_STYLE,
+  },
+  // Regional working traffic (rear view — we always catch cars up from behind).
+  // One vehicle belongs to each region: coaches and ploughs on the mountain,
+  // pickups and buggies in the canyon, cabs and squad cars in the city, and so on.
+  {
+    name: 'car-camper', model: 'gpt-image-1.5', size: '1024x1024',
+    prompt:
+      'Rear view of a retro cream-and-white VW-style camper van with a roof rack piled high with holiday luggage, ' +
+      'twin square tail lights lit, seen by a rider catching it up from behind. ' + SPRITE_STYLE + NO_BIKE,
+  },
+  {
+    name: 'car-bus', model: 'gpt-image-1.5', size: '1024x1024',
+    prompt:
+      'Rear view of a boxy blue-and-white alpine tour coach / minibus with a big rear window and tall red tail lights, ' +
+      'seen by a rider catching it up from behind. ' + SPRITE_STYLE + NO_BIKE,
+  },
+  {
+    name: 'car-plough', model: 'gpt-image-1.5', size: '1024x1024',
+    prompt:
+      'Rear view of a chunky orange municipal snow-plough truck, a flashing amber roof beacon, a steel snow-plough ' +
+      'blade angled across the front poking out at the sides, big knobbly tyres, seen by a rider catching it up from ' +
+      'behind. ' + SPRITE_STYLE + NO_BIKE,
+  },
+  {
+    name: 'car-pickup', model: 'gpt-image-1.5', size: '1024x1024',
+    prompt:
+      'Rear view of a dusty tan off-road pickup truck with an open flat load bed, fat knobbly off-road tyres and a ' +
+      'little rust, seen by a rider catching it up from behind. ' + SPRITE_STYLE + NO_BIKE,
+  },
+  {
+    name: 'car-buggy', model: 'gpt-image-1.5', size: '1024x1024',
+    prompt:
+      'Rear view of an open bright-red desert dune buggy with an exposed black roll cage, fat off-road tyres and amber ' +
+      'tail lights, seen by a rider catching it up from behind. ' + SPRITE_STYLE + NO_BIKE,
+  },
+  {
+    name: 'car-taxi', model: 'gpt-image-1.5', size: '1024x1024',
+    prompt:
+      'Rear view of a bright yellow city taxi cab with a lit black TAXI roof sign and red tail lights, seen by a rider ' +
+      'catching it up from behind. ' + SPRITE_STYLE + NO_BIKE,
+  },
+  {
+    name: 'car-police', model: 'gpt-image-1.5', size: '1024x1024',
+    prompt:
+      'Rear view of a white-and-black police patrol car with a red-and-blue roof light bar and red tail lights, seen ' +
+      'by a rider catching it up from behind. ' + SPRITE_STYLE + NO_BIKE,
+  },
+  {
+    name: 'car-tractor', model: 'gpt-image-1.5', size: '1024x1024',
+    prompt:
+      'Rear view of a small green farm tractor with huge chunky rear tyres, a vertical exhaust stack and a flashing ' +
+      'amber roof beacon, seen by a rider catching it up from behind. ' + SPRITE_STYLE + NO_BIKE,
+  },
+  {
+    name: 'car-jeep', model: 'gpt-image-1.5', size: '1024x1024',
+    prompt:
+      'Rear view of a rugged olive-green off-road 4x4 utility jeep with a spare wheel mounted on the tailgate and big ' +
+      'chunky tyres, seen by a rider catching it up from behind. ' + SPRITE_STYLE + NO_BIKE,
+  },
+  {
+    name: 'car-firetruck', model: 'gpt-image-1.5', size: '1024x1024',
+    prompt:
+      'Rear view of a red fire engine / fire truck with a roof ladder, chrome rear detailing, flashing amber warning ' +
+      'beacons and tall red tail lights, seen by a rider catching it up from behind. ' + SPRITE_STYLE + NO_BIKE,
   },
   {
     name: 'prop-palm', model: 'gpt-image-1.5', size: '1024x1024',
