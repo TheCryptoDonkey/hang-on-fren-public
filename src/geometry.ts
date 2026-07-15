@@ -28,7 +28,7 @@ export const SPRITE_WORLD_WIDTH: Record<string, number> = {
   // Prehistoric "traffic" — the dinosaurs charge AT the rider, the mammoth is a
   // slow shaggy roadblock. Widths tell the truth about their bulk.
   'dino-trex': 0.36,
-  'dino-raptor': 0.24,
+  'dino-raptor': 0.33, // bumped up from 0.24 — at distance it read as a pickup, worst on mobile
   mammoth: 0.42,
   // Pothole decal (drawn flat on the road; collision uses its own window).
   'hazard-hole': 0.3,
