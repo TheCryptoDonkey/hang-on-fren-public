@@ -10,6 +10,7 @@ import type { PickupKind } from './world.js';
 import { SpriteStore, loadSpriteInto, loadSpritesInto, buildSignVariants, buildBillboardVariants, brandPetrol } from './sprites.js';
 import { renderScene, drawTitleArt } from './render.js';
 import { spawnSmoke, updateSmoke, type Smoke } from './smoke.js';
+import { setPickupScale } from './geometry.js';
 import { riderSize } from './rider.js';
 import { drawHud, addPopup, updatePopups, type HudState, type Popup } from './hud.js';
 import { loadBoard, saveBoard, insertScore, qualifies, rankOf, topScore, type HighScore } from './highscore.js';
@@ -513,6 +514,9 @@ window.visualViewport?.addEventListener('scroll', resize);
 
 const isTouch = matchMedia('(pointer: coarse)').matches;
 document.body.classList.toggle('touch-device', isTouch);
+// Pickups draw a third bigger on phones — small screens, and they're the thing
+// you steer for. Purely visual: collection has its own (wider) window.
+setPickupScale(isTouch ? 1.35 : 1);
 
 type TouchControl = 'left' | 'right' | 'slow';
 type ActiveTouchControl = { action: TouchControl; button: HTMLButtonElement; seq: number };
@@ -715,8 +719,15 @@ document.addEventListener('visibilitychange', () => {
 });
 
 // Diagonal-based UI scale so text is legible in both portrait and landscape.
+// The diagonal alone under-sizes badly on phones: the buffer is dpr-doubled
+// but the glass is small, so the 15px labels tuned on a 720p desktop land at
+// ~8 CSS px. Floor the PERCEIVED scale on touch devices — the layouts are
+// u-spaced and width-capped, so they grow coherently rather than overflowing.
 function uiScale(): number {
-  return Math.hypot(W, H) / 1468;
+  const u = Math.hypot(W, H) / 1468;
+  if (!isTouch) return u;
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  return Math.max(u, 0.78 * dpr);
 }
 
 /** Haptic pulse on touch devices; silently no-ops where unsupported. */
@@ -2013,7 +2024,7 @@ function render(): void {
       rivalResultTime: state.rivalResultTime,
       popups: state.popups,
     };
-    drawHud(ctx, W, H, hud, { bottomInset: mobileHudBottomInset() });
+    drawHud(ctx, W, H, hud, { bottomInset: mobileHudBottomInset(), scale: uiScale() });
   }
 
   if (state.phase === 'playing' && state.paused) renderPaused();
@@ -2121,7 +2132,9 @@ function renderTitle(store: SpriteStore): void {
   // --- logo -----------------------------------------------------------------
   // Portrait drops the logo a touch to clear the top-right SUPPORT button.
   const logoY = H * (portrait ? 0.135 : 0.145);
-  const titleSize = Math.min((portrait ? 58 : 104) * u, W * (portrait ? 0.125 : 0.11));
+  // Also capped by height: on a landscape PHONE the touch-floored u would
+  // otherwise push the logo's cap line above the top of the frame.
+  const titleSize = Math.min((portrait ? 58 : 104) * u, W * (portrait ? 0.125 : 0.11), H * 0.16);
   ctx.font = `900 ${titleSize}px 'Trebuchet MS', sans-serif`;
   outlinedText('HANG ON, FREN', W / 2, logoY, '#ffd23f', u, 9);
   ctx.font = `700 ${(portrait ? 13 : 18) * u}px 'Trebuchet MS', sans-serif`;
@@ -2153,7 +2166,7 @@ function renderTitle(store: SpriteStore): void {
 
   // tour selector — tap the left half for GRAND, the right half for the WORLD tour
   ctx.font = `800 ${12 * u}px 'Trebuchet MS', sans-serif`;
-  outlinedText('TOUR   ·   ▲▼ / T · TAP', W / 2, tourLabelY, '#9fd0ff', u, 3);
+  outlinedText(isTouch ? 'TOUR   ·   TAP TO SWITCH' : 'TOUR   ·   ▲▼ / T · TAP', W / 2, tourLabelY, '#9fd0ff', u, 3);
   (['grand', 'world'] as const).forEach((tour, i) => {
     const x = cabX + cabW * (i === 0 ? 0.28 : 0.72);
     const sel = tour === selectedTour;
@@ -2176,7 +2189,7 @@ function renderTitle(store: SpriteStore): void {
   ctx.lineTo(cabX + cabW - 26 * u, dividerY);
   ctx.stroke();
   ctx.font = `800 ${12 * u}px 'Trebuchet MS', sans-serif`;
-  outlinedText('DIFFICULTY   ·   ◄ ► · TAP', W / 2, diffLabelY, '#9fd0ff', u, 3);
+  outlinedText(isTouch ? 'DIFFICULTY   ·   TAP TO PICK' : 'DIFFICULTY   ·   ◄ ► · TAP', W / 2, diffLabelY, '#9fd0ff', u, 3);
   MODES.forEach((m, i) => {
     const x = cabX + cabW * ((i * 2 + 1) / (MODES.length * 2));
     const sel = i === modeIndex;
@@ -2187,11 +2200,16 @@ function renderTitle(store: SpriteStore): void {
   outlinedText(MODES[modeIndex].tagline, W / 2, modeTagY, '#bdeddb', u, 4);
   // one compact control cue, tucked into the cabinet footer
   ctx.font = `700 ${11 * u}px 'Trebuchet MS', sans-serif`;
-  outlinedText('◄ ► STEER · GRAB FUEL FOR TIME · ROSES = TURBO · FLICK THE BARS TO DRIFT', W / 2, hintY, 'rgba(159,208,255,0.85)', u, 3);
+  outlinedText(
+    isTouch
+      ? 'FUEL = TIME · ROSES = TURBO · FLICK TO DRIFT'
+      : '◄ ► STEER · GRAB FUEL FOR TIME · ROSES = TURBO · FLICK THE BARS TO DRIFT',
+    W / 2, hintY, 'rgba(159,208,255,0.85)', u, 3,
+  );
 
   // --- primary call to action: a steady pill so it always reads on the art ---
   const ctaY = cabY + cabH + 46 * u;
-  const cta = 'PRESS ENTER / TAP TO RIDE';
+  const cta = isTouch ? 'TAP TO RIDE' : 'PRESS ENTER / TAP TO RIDE';
   const ctaSize = (portrait ? 24 : 30) * u;
   ctx.font = `900 ${ctaSize}px 'Trebuchet MS', sans-serif`;
   const ctaW = ctx.measureText(cta).width + 48 * u;
@@ -2215,10 +2233,19 @@ function renderTitle(store: SpriteStore): void {
   }
 
   // --- leaderboard: alternates local best riders / global gamestr board -----
+  // Show only as many rows as actually fit above the bottom edge (a landscape
+  // phone runs out of height), and drop the board entirely rather than draw a
+  // panel that runs off the frame.
   const showGlobal = state.globalBoard.length > 0 && Math.floor(state.time / 6) % 2 === 1;
-  const rows = (showGlobal ? state.globalBoard : board).slice(0, 5);
-  const lbW = portrait ? W * 0.9 : W * 0.44;
-  drawLeaderboard(showGlobal ? 'TOP FRENS · GAMESTR' : 'BEST RIDERS', rows, (W - lbW) / 2, cabY + cabH + 104 * u, lbW, u);
+  const lbY = cabY + cabH + 104 * u;
+  // (clamped at 0 — a negative fit would flow through slice() as "all but the
+  // last row" and draw the panel half off the frame anyway)
+  const lbRowsFit = Math.max(0, Math.floor((H - lbY - 16 * u - 42 * u) / (26 * u)));
+  const rows = (showGlobal ? state.globalBoard : board).slice(0, Math.min(5, lbRowsFit));
+  if (rows.length > 0) {
+    const lbW = portrait ? W * 0.9 : W * 0.44;
+    drawLeaderboard(showGlobal ? 'TOP FRENS · GAMESTR' : 'BEST RIDERS', rows, (W - lbW) / 2, lbY, lbW, u);
+  }
 }
 
 function renderPaused(): void {
@@ -2411,7 +2438,7 @@ function renderGameOver(_store: SpriteStore): void {
     if (blink) {
       ctx.font = `800 ${26 * u}px 'Trebuchet MS', sans-serif`;
       ctx.fillStyle = '#ffffff';
-      ctx.fillText('PRESS ENTER / TAP TO CONTINUE', W / 2, H * 0.64);
+      ctx.fillText(isTouch ? 'TAP TO CONTINUE' : 'PRESS ENTER / TAP TO CONTINUE', W / 2, H * 0.64);
     }
   }
 }

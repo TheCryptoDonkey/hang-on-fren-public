@@ -535,7 +535,7 @@ export function renderScene(scene: Scene): void {
         clipped = false;
       }
     }
-    renderSegment(ctx, width, height, seg, n / ROAD.drawDistance, palette, lamps, terrain);
+    renderSegment(ctx, width, height, seg, n / ROAD.drawDistance, palette, lamps, terrain, scene.time);
   }
   if (clipped) ctx.restore();
 
@@ -1343,6 +1343,130 @@ function shade(hex: string, amount: number): string {
   return `rgb(${c(r)},${c(g)},${c(b)})`;
 }
 
+// --- 32-bit ground material --------------------------------------------------
+// Deterministic pixel specks that give each biome's ground its MATERIAL — tufts
+// on grass, grain on sand, glints on snow and salt, leaf-fall in the autumn
+// woods, embers in the ash — plus animated surf where a shoulder drops to the
+// sea. Everything is seeded off the segment index (no per-frame RNG → nothing
+// shimmers), positioned in road-widths so projection scales it for free, and
+// LOD-gated so only segments tall enough on screen to read pay for any fills.
+
+/** Specks per side for a segment band `h` px tall — the LOD knob. */
+function speckCount(h: number): number {
+  return h < 2 ? 0 : Math.min(16, Math.ceil(h / 3.5));
+}
+
+/** One deterministic ground speck on the verge (or the open flat beyond it). */
+function drawGroundSpeck(
+  ctx: CanvasRenderingContext2D,
+  seg: Segment,
+  palette: Palette,
+  side: -1 | 1,
+  k: number,
+  oMax: number,
+  time: number,
+): void {
+  const p1 = seg.p1.screen;
+  const p2 = seg.p2.screen;
+  const seed = seg.index * 7.31 + side * 137.7 + k * 51.3;
+  const t = hash(seed);
+  const w = lerp(p1.w, p2.w, t);
+  const y = lerp(p1.y, p2.y, t);
+  // Quadratic bias pulls the scatter toward the road: up close the far end of
+  // the verge is off-screen, so an even spread leaves the shoulder you actually
+  // look at bare while most specks land past the frame edge.
+  const spread = hash(seed + 1.7);
+  const o = 1.16 + (oMax - 1.16) * spread * spread;
+  const x = lerp(p1.x, p2.x, t) + side * o * w;
+  const px = Math.max(1, Math.round(w * 0.024)); // chunky pixel, bigger nearby
+  const v = hash(seed + 3.9); // per-speck variety channel
+  switch (palette.ground) {
+    case 'grass': { // short tufts, the odd bright blade
+      if (v > 0.72) {
+        ctx.fillStyle = shade(palette.grassLight, 0.2);
+        ctx.fillRect(x, y - px, px, px);
+      } else {
+        ctx.fillStyle = shade(palette.grassDark, -0.26);
+        ctx.fillRect(x, y - px * 2, px, px * 2);
+      }
+      break;
+    }
+    case 'sand': { // wind-speckled grain with the occasional pebble
+      if (v > 0.86) {
+        ctx.fillStyle = shade(palette.grassDark, -0.35);
+        ctx.fillRect(x, y - px, px + 1, px + 1); // pebble
+      } else {
+        ctx.fillStyle = v > 0.45 ? shade(palette.grassLight, 0.22) : shade(palette.grassDark, -0.2);
+        ctx.fillRect(x, y, px, px);
+      }
+      break;
+    }
+    case 'snow':
+    case 'salt': { // sparkle that twinkles, over soft blue/lilac shadow pits
+      if (v > 0.6) {
+        ctx.globalAlpha = 0.35 + 0.65 * Math.abs(Math.sin(time * 2.1 + v * 31));
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(x, y, px, px);
+        ctx.globalAlpha = 1;
+      } else {
+        ctx.fillStyle = shade(palette.grassDark, -0.14);
+        ctx.fillRect(x, y, px + 1, px);
+      }
+      break;
+    }
+    case 'leaves': { // fallen-leaf litter in rust and gold
+      const c = v > 0.66 ? shade(palette.grassLight, 0.22)
+        : v > 0.33 ? shade(palette.grassDark, -0.34)
+          : mix(palette.grassDark, palette.rumbleDark, 0.6);
+      ctx.fillStyle = c;
+      ctx.fillRect(x, y, px + 1, px); // leaves lie flat — wider than tall
+      break;
+    }
+    case 'ash': { // charred grit, the odd ember breathing in the dark
+      if (v > 0.82) {
+        ctx.globalAlpha = 0.35 + 0.65 * Math.abs(Math.sin(time * 1.7 + v * 43));
+        ctx.fillStyle = '#ff8a3c';
+        ctx.fillRect(x, y, px, px);
+        ctx.globalAlpha = 1;
+      } else {
+        ctx.fillStyle = v > 0.5 ? shade(palette.grassLight, 0.5) : shade(palette.grassDark, -0.35);
+        ctx.fillRect(x, y, px, px);
+      }
+      break;
+    }
+    case 'asphalt': { // sparse pale aggregate in the dark expressway shoulder
+      if (v > 0.55) return;
+      ctx.globalAlpha = 0.55;
+      ctx.fillStyle = shade(palette.grassLight, 0.4);
+      ctx.fillRect(x, y, px, px);
+      ctx.globalAlpha = 1;
+      break;
+    }
+  }
+}
+
+/** Tarmac grain on near segments — a light dusting, not a gravel road. */
+function drawRoadGrain(ctx: CanvasRenderingContext2D, seg: Segment, palette: Palette): void {
+  const p1 = seg.p1.screen;
+  const p2 = seg.p2.screen;
+  const h = p1.y - p2.y;
+  if (h < 4) return;
+  const road = seg.color === 'dark' ? palette.roadDark : palette.roadLight;
+  const n = Math.min(8, Math.ceil(h / 6));
+  ctx.globalAlpha = 0.45;
+  for (let k = 0; k < n; k += 1) {
+    const seed = seg.index * 11.17 + k * 29.3;
+    const t = hash(seed);
+    const w = lerp(p1.w, p2.w, t);
+    const x = lerp(p1.x, p2.x, t) + (hash(seed + 2.3) * 2 - 1) * w * 0.92;
+    const y = lerp(p1.y, p2.y, t);
+    const px = Math.max(1, Math.round(w * 0.011));
+    ctx.fillStyle = hash(seed + 5.1) > 0.5 ? shade(road, 0.16) : shade(road, -0.18);
+    ctx.fillRect(x, y, px, px);
+  }
+  ctx.globalAlpha = 1;
+}
+
 /** The colour of the ground BEYOND the verge on one side, banded like the road. */
 function sideColor(kind: SideKind, terrain: Terrain, palette: Palette, dark: boolean): string {
   switch (kind) {
@@ -1366,6 +1490,7 @@ function renderSides(
   seg: Segment,
   palette: Palette,
   terrain: Terrain,
+  time: number,
 ): void {
   const p1 = seg.p1.screen;
   const p2 = seg.p2.screen;
@@ -1394,6 +1519,52 @@ function renderSides(
   lip(l1, l2, terrain.left);
   lip(r1, r2, terrain.right);
 
+  // Material over the flat paint beyond the lip: rolling surf on the water,
+  // mottled rock on a canyon floor or open rock shoulder. Same LOD gate as the
+  // verge specks — far bands are a couple of pixels tall and stay flat colour.
+  const h = p1.y - p2.y;
+  if (h < 2) return;
+  const detail = (lip1: number, lip2: number, side: -1 | 1, kind: SideKind): void => {
+    if (kind === 'flat') return; // handled by the verge speck pass (same ground)
+    // Water gets a denser pass than rock — waves are the whole point of it.
+    const n = kind === 'sea' ? Math.min(12, Math.ceil(h / 2.5)) : speckCount(h);
+    const seaLite = shade(palette.sea, 0.3);
+    const base = kind === 'sea' ? palette.sea : kind === 'drop' ? terrain.dropColor : terrain.cliffLight;
+    for (let k = 0; k < n; k += 1) {
+      const seed = seg.index * 5.77 + side * 91.3 + k * 37.1;
+      const t = hash(seed);
+      const w = lerp(p1.w, p2.w, t);
+      const y = lerp(p1.y, p2.y, t);
+      const lipX = lerp(lip1, lip2, t);
+      const edge = side < 0 ? edgeL : edgeR;
+      // Concentrate the action in the water the eye actually reads — the first
+      // few road-widths off the lip; past that fog and flat colour take over.
+      const span = Math.min(Math.abs(edge - lipX), w * 8);
+      if (span < 2) continue;
+      if (kind === 'sea') {
+        // Surf dashes rolling TOWARD the shore, brightest as they arrive.
+        const roll = (hash(seed + 2.9) + time * (0.10 + 0.14 * hash(seed + 8.3))) % 1;
+        const off = (1 - roll) * span;
+        const len = Math.min(span, Math.max(2, w * (0.4 + 0.7 * hash(seed + 4.2))));
+        const th = Math.max(1, Math.round(h * 0.18));
+        ctx.globalAlpha = 0.25 + 0.5 * roll;
+        ctx.fillStyle = roll > 0.75 ? '#ffffff' : seaLite;
+        ctx.fillRect(side < 0 ? lipX - off - len : lipX + off, y, len, th);
+        ctx.globalAlpha = 1;
+      } else {
+        // Static mottling: darker pocks over the drop / rock shoulder.
+        const off = hash(seed + 2.9) * span;
+        const px = Math.max(1, Math.round(w * 0.024));
+        ctx.globalAlpha = 0.5;
+        ctx.fillStyle = hash(seed + 4.2) > 0.6 ? shade(base, 0.16) : shade(base, -0.2);
+        ctx.fillRect(lipX + side * off, y, px + 1, px);
+        ctx.globalAlpha = 1;
+      }
+    }
+  };
+  detail(l1, l2, -1, terrain.left);
+  detail(r1, r2, 1, terrain.right);
+
   // (The old `cliff` rock/retaining wall — a flat two-tone vertical face rising
   // from the verge — has been removed. It read as a flat grey slab that clashed
   // with the pixel-art and, worse, buried the painted horizon backdrop behind a
@@ -1401,7 +1572,7 @@ function renderSides(
   // valley art shows through where the wall used to stand.)
 }
 
-function renderSegment(ctx: CanvasRenderingContext2D, width: number, height: number, seg: Segment, fogT: number, palette: Palette, lamps: Lamp[], terrain: Terrain): void {
+function renderSegment(ctx: CanvasRenderingContext2D, width: number, height: number, seg: Segment, fogT: number, palette: Palette, lamps: Lamp[], terrain: Terrain, time: number): void {
   const p1 = seg.p1.screen;
   const p2 = seg.p2.screen;
   const dark = seg.color === 'dark';
@@ -1417,7 +1588,17 @@ function renderSegment(ctx: CanvasRenderingContext2D, width: number, height: num
   // verge with rock / sea / canyon (but a tunnel bore fills its own walls).
   ctx.fillStyle = grass;
   ctx.fillRect(bleedX, p2.y, bleedW, p1.y - p2.y + 1);
-  if (seg.overhead?.kind !== 'tunnel') renderSides(ctx, width, seg, palette, terrain);
+  if (seg.overhead?.kind !== 'tunnel') {
+    renderSides(ctx, width, seg, palette, terrain, time);
+    // Verge material: specks between the rumble strip and the lip, spilling
+    // on across the open ground where a side stays flat.
+    const specks = speckCount(p1.y - p2.y);
+    for (const side of [-1, 1] as const) {
+      const beyond = (side < 0 ? terrain.left : terrain.right) === 'flat';
+      const oMax = beyond ? VERGE + 2.4 : VERGE - 0.15;
+      for (let k = 0; k < specks; k += 1) drawGroundSpeck(ctx, seg, palette, side, k, oMax, time);
+    }
+  }
 
   const r1 = rumbleWidth(p1.w);
   const r2 = rumbleWidth(p2.w);
@@ -1436,6 +1617,7 @@ function renderSegment(ctx: CanvasRenderingContext2D, width: number, height: num
       polygon(ctx, lx1 - l1, p1.y, lx1 + l1, p1.y, lx2 + l2, p2.y, lx2 - l2, p2.y, palette.lane);
     }
   }
+  drawRoadGrain(ctx, seg, palette);
 
   const fog = 1 / Math.exp((fogT * fogT * ROAD.fogDensity));
   // Posts sit on the tarmac (so the fog washes over them like everything else)

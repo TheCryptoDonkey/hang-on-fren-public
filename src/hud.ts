@@ -42,6 +42,9 @@ export interface HudState {
 
 export interface HudOptions {
   bottomInset?: number;
+  /** UI scale override (main.ts uiScale() — floored on touch devices so the
+   *  labels stay readable on phones). Defaults to the raw diagonal scale. */
+  scale?: number;
 }
 
 const PANEL = 'rgba(8, 26, 36, 0.72)';
@@ -64,7 +67,7 @@ function pill(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h:
 
 export function drawHud(ctx: CanvasRenderingContext2D, w: number, h: number, s: HudState, options: HudOptions = {}): void {
   // Diagonal-based scale so the HUD stays legible in portrait and landscape.
-  const u = Math.hypot(w, h) / 1468;
+  const u = options.scale ?? Math.hypot(w, h) / 1468;
   const bottomInset = options.bottomInset ?? 0;
   ctx.textBaseline = 'alphabetic';
 

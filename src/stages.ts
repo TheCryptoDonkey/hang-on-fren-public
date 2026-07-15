@@ -16,6 +16,11 @@
 
 import { clamp, easeInOut } from './util.js';
 
+/** What MATERIAL the verge slab is made of — drives the pixel detail the
+ *  renderer scatters over it (tufts on grass, grain on sand, glints on snow…),
+ *  so sand reads as sand rather than a repaint of the same flat lawn. */
+export type GroundKind = 'grass' | 'sand' | 'snow' | 'salt' | 'leaves' | 'ash' | 'asphalt';
+
 export interface Palette {
   skyTop: string;
   skyHorizon: string;
@@ -25,6 +30,7 @@ export interface Palette {
   /** The roadside verge slab (grass / sand / snow / dust… per biome). */
   grassLight: string;
   grassDark: string;
+  ground: GroundKind;
   roadLight: string;
   roadDark: string;
   rumbleLight: string;
@@ -127,7 +133,7 @@ export function roseRichAt(distanceM: number): boolean {
 const RIVIERA: Palette = {
   skyTop: '#2aa8e0', skyHorizon: '#bfeaf6', sea: '#1f6fae',
   hillsFar: '#7fa9c8', hillsNear: '#5c8f6a',
-  grassLight: '#7cc36a', grassDark: '#71b860',
+  grassLight: '#7cc36a', grassDark: '#71b860', ground: 'grass',
   roadLight: '#8b909a', roadDark: '#83888f',
   rumbleLight: '#f4f4f4', rumbleDark: '#d24b4b', lane: '#f5f2e8',
   offRoadLight: '#c9a86a', offRoadDark: '#bf9e60', fog: '#cfeaf0',
@@ -138,7 +144,7 @@ const RIVIERA: Palette = {
 const BEACH: Palette = {
   skyTop: '#3fc0e8', skyHorizon: '#dcf7f2', sea: '#12b3c4',
   hillsFar: '#8fd8d0', hillsNear: '#e0c98a',
-  grassLight: '#efd9a3', grassDark: '#e6cd90',
+  grassLight: '#efd9a3', grassDark: '#e6cd90', ground: 'sand',
   roadLight: '#9a9a94', roadDark: '#90908a',
   rumbleLight: '#fff6e0', rumbleDark: '#ff7a4d', lane: '#fff3d8',
   offRoadLight: '#e8cf94', offRoadDark: '#dcc078', fog: '#e0f7f0',
@@ -149,7 +155,7 @@ const BEACH: Palette = {
 const ALPINE: Palette = {
   skyTop: '#5f93c8', skyHorizon: '#d6e6f2', sea: '#5f86a8',
   hillsFar: '#9fb2c8', hillsNear: '#8fa8bf',
-  grassLight: '#eef4fb', grassDark: '#dce6f0',
+  grassLight: '#eef4fb', grassDark: '#dce6f0', ground: 'snow',
   roadLight: '#8f96a0', roadDark: '#868d97',
   rumbleLight: '#ffffff', rumbleDark: '#8fa3b8', lane: '#eef4fb',
   offRoadLight: '#e2ecf5', offRoadDark: '#cdd8e4', fog: '#e6eef6',
@@ -160,7 +166,7 @@ const ALPINE: Palette = {
 const DESERT: Palette = {
   skyTop: '#57b4dd', skyHorizon: '#f0d9a0', sea: '#c98f5a',
   hillsFar: '#c98f5a', hillsNear: '#b0713e',
-  grassLight: '#e6b878', grassDark: '#dcac6c',
+  grassLight: '#e6b878', grassDark: '#dcac6c', ground: 'sand',
   roadLight: '#9a938a', roadDark: '#918a82',
   rumbleLight: '#fff0d0', rumbleDark: '#c2502a', lane: '#fff0d0',
   offRoadLight: '#d8a860', offRoadDark: '#cc9a52', fog: '#f0dcb0',
@@ -171,7 +177,7 @@ const DESERT: Palette = {
 const CITY: Palette = {
   skyTop: '#0b1030', skyHorizon: '#3a2a5a', sea: '#141a3a',
   hillsFar: '#2a2050', hillsNear: '#3a2a5a',
-  grassLight: '#2f3550', grassDark: '#272c44',
+  grassLight: '#2f3550', grassDark: '#272c44', ground: 'asphalt',
   roadLight: '#3a3f4a', roadDark: '#33383f',
   rumbleLight: '#ffd76b', rumbleDark: '#ff4d6d', lane: '#ffe9a8',
   offRoadLight: '#2a2f40', offRoadDark: '#232838', fog: '#2a2440',
@@ -182,7 +188,7 @@ const CITY: Palette = {
 const VALLEY: Palette = {
   skyTop: '#7ac8ea', skyHorizon: '#e6f2ee', sea: '#5fa9c8',
   hillsFar: '#9fd0e0', hillsNear: '#7bbf7a',
-  grassLight: '#8fd07a', grassDark: '#83c66e',
+  grassLight: '#8fd07a', grassDark: '#83c66e', ground: 'grass',
   roadLight: '#8b909a', roadDark: '#83888f',
   rumbleLight: '#ffffff', rumbleDark: '#e86a9a', lane: '#fef0f5',
   offRoadLight: '#8fc47a', offRoadDark: '#83b96e', fog: '#e8f2ee',
@@ -193,7 +199,7 @@ const VALLEY: Palette = {
 const AUTUMN: Palette = {
   skyTop: '#6fb3d8', skyHorizon: '#f0e2c0', sea: '#5a86a0',
   hillsFar: '#c99a5a', hillsNear: '#b5702f',
-  grassLight: '#d9a24e', grassDark: '#cf9644',
+  grassLight: '#d9a24e', grassDark: '#cf9644', ground: 'leaves',
   roadLight: '#8f8a82', roadDark: '#87827a',
   rumbleLight: '#fff0d0', rumbleDark: '#c2502a', lane: '#ffeccd',
   offRoadLight: '#cf9040', offRoadDark: '#c38638', fog: '#f0e0c0',
@@ -204,7 +210,7 @@ const AUTUMN: Palette = {
 const SALT: Palette = {
   skyTop: '#8fbfe0', skyHorizon: '#eaf2f6', sea: '#bfe0e6',
   hillsFar: '#c8d4dc', hillsNear: '#b0c0c8',
-  grassLight: '#e6dfe8', grassDark: '#dcd4de',
+  grassLight: '#e6dfe8', grassDark: '#dcd4de', ground: 'salt',
   roadLight: '#9a9aa2', roadDark: '#92929a',
   rumbleLight: '#ffffff', rumbleDark: '#c98fb0', lane: '#f4eef6',
   offRoadLight: '#ded6e0', offRoadDark: '#d2cad4', fog: '#eef2f4',
@@ -215,7 +221,7 @@ const SALT: Palette = {
 const VOLCANO: Palette = {
   skyTop: '#3a1420', skyHorizon: '#8a3a2a', sea: '#c8401a',
   hillsFar: '#5a2a30', hillsNear: '#3a1c1e',
-  grassLight: '#4a2e2e', grassDark: '#3e2626',
+  grassLight: '#4a2e2e', grassDark: '#3e2626', ground: 'ash',
   roadLight: '#2e2a2c', roadDark: '#282428',
   rumbleLight: '#ffb44d', rumbleDark: '#e5401a', lane: '#ff9d4d',
   offRoadLight: '#3a2626', offRoadDark: '#301e1e', fog: '#5a2a24',
@@ -226,7 +232,7 @@ const VOLCANO: Palette = {
 const FINALE: Palette = {
   skyTop: '#3aa0e0', skyHorizon: '#ffe6b0', sea: '#1f7fbe',
   hillsFar: '#8fb0c8', hillsNear: '#5c9f6a',
-  grassLight: '#8fd07a', grassDark: '#83c66e',
+  grassLight: '#8fd07a', grassDark: '#83c66e', ground: 'grass',
   roadLight: '#8b909a', roadDark: '#83888f',
   rumbleLight: '#ffffff', rumbleDark: '#ffb43c', lane: '#fff6e0',
   offRoadLight: '#c9a86a', offRoadDark: '#bf9e60', fog: '#ffe8c0',
@@ -244,7 +250,7 @@ const KEYFRAMES: readonly Palette[] = [
 const MANCHESTER: Palette = {
   skyTop: '#7a8fa6', skyHorizon: '#d9d2c0', sea: '#4a6a62',
   hillsFar: '#8a8a92', hillsNear: '#7a5444',
-  grassLight: '#6f8f62', grassDark: '#648457',
+  grassLight: '#6f8f62', grassDark: '#648457', ground: 'grass',
   roadLight: '#8a8580', roadDark: '#827d78',
   rumbleLight: '#e8e0d0', rumbleDark: '#a03a2a', lane: '#e8e4d8',
   offRoadLight: '#9a8a72', offRoadDark: '#8f7f68', fog: '#cfc9ba',
@@ -256,7 +262,7 @@ const MANCHESTER: Palette = {
 const PRAGUE: Palette = {
   skyTop: '#4a90c8', skyHorizon: '#f2ddb0', sea: '#3a6f9e',
   hillsFar: '#b08a5a', hillsNear: '#8f5a3a',
-  grassLight: '#84b06a', grassDark: '#79a55f',
+  grassLight: '#84b06a', grassDark: '#79a55f', ground: 'grass',
   roadLight: '#8f8a84', roadDark: '#87827c',
   rumbleLight: '#f4ead0', rumbleDark: '#b8552e', lane: '#f2ecd8',
   offRoadLight: '#c0a06a', offRoadDark: '#b4945e', fog: '#ecdfc0',
@@ -268,7 +274,7 @@ const PRAGUE: Palette = {
 const MALLORCA: Palette = {
   skyTop: '#2f9fd8', skyHorizon: '#cfeef2', sea: '#1a7fb4',
   hillsFar: '#b0b8a0', hillsNear: '#8a9a6a',
-  grassLight: '#a8b874', grassDark: '#9dad69',
+  grassLight: '#a8b874', grassDark: '#9dad69', ground: 'grass',
   roadLight: '#948f88', roadDark: '#8c8780',
   rumbleLight: '#fdf6e4', rumbleDark: '#c98f3c', lane: '#fbf3dc',
   offRoadLight: '#d4b878', offRoadDark: '#c8ac6c', fog: '#dff0ea',
@@ -280,7 +286,7 @@ const MALLORCA: Palette = {
 const TAJ: Palette = {
   skyTop: '#d87a9a', skyHorizon: '#ffe0d0', sea: '#7ab8c8',
   hillsFar: '#cfa0b4', hillsNear: '#9a6a7e',
-  grassLight: '#7cb86a', grassDark: '#71ad60',
+  grassLight: '#7cb86a', grassDark: '#71ad60', ground: 'grass',
   roadLight: '#9a959e', roadDark: '#928d96',
   rumbleLight: '#ffffff', rumbleDark: '#e5344e', lane: '#fff0f4',
   offRoadLight: '#c98a94', offRoadDark: '#bd7e88', fog: '#f6dfe2',
@@ -532,6 +538,7 @@ function mixPalette(a: Palette, b: Palette, t: number): Palette {
     hillsNear: mixHex(a.hillsNear, b.hillsNear, t),
     grassLight: mixHex(a.grassLight, b.grassLight, t),
     grassDark: mixHex(a.grassDark, b.grassDark, t),
+    ground: t < 0.5 ? a.ground : b.ground,
     roadLight: mixHex(a.roadLight, b.roadLight, t),
     roadDark: mixHex(a.roadDark, b.roadDark, t),
     rumbleLight: mixHex(a.rumbleLight, b.rumbleLight, t),

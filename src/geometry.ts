@@ -81,6 +81,18 @@ export const SPRITE_WORLD_WIDTH: Record<string, number> = {
 
 export const DEFAULT_SPRITE_WIDTH = 0.3;
 
+// Phone screens are small and the tokens are the thing you steer FOR — on
+// touch devices they get a size boost so they read at distance. Collection
+// uses its own fixed lateral window (world.ts PICKUP_GAP = 0.5, far wider
+// than any drawn token even boosted), so this changes what you can SEE, not
+// what you can catch.
+let pickupScale = 1;
+
+/** Set by main.ts at boot: 1 on pointer devices, >1 on touch. */
+export function setPickupScale(scale: number): void {
+  pickupScale = scale;
+}
+
 /**
  * Composited variants (sign-N in-jokes, billboard-N memes) share their base
  * prop's footprint — they're the same structure with different faces.
@@ -93,7 +105,9 @@ function baseSprite(sprite: string): string {
 
 /** Drawn width of a sprite in road-offset units (full road spans -1..1 → width 2). */
 export function spriteWorldWidth(sprite: string): number {
-  return SPRITE_WORLD_WIDTH[baseSprite(sprite)] ?? DEFAULT_SPRITE_WIDTH;
+  const base = SPRITE_WORLD_WIDTH[baseSprite(sprite)] ?? DEFAULT_SPRITE_WIDTH;
+  if (sprite === 'rose' || sprite.startsWith('pickup-')) return base * pickupScale;
+  return base;
 }
 
 // Solid roadside footprints in road-offset units. These are intentionally not
