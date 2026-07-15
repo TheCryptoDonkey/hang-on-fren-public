@@ -29,6 +29,32 @@
       <button class="mobile-control-button" type="button" data-touch-control="right" aria-label="Steer right">→</button>
     </div>
   </div>
+
+  <!-- Value-for-value support: a tap-to-tip button on the title / game-over
+       screens opens a copyable Lightning address, a scannable QR and links out
+       to Geyser / Ko-fi. Optional, and separate from gameplay score. -->
+  <button id="support-btn" type="button" aria-label="Support the developer">♥&nbsp;SUPPORT</button>
+  <div id="donate-overlay" hidden role="dialog" aria-modal="true" aria-label="Support Hang On, Fren">
+    <div class="donate-card" role="document">
+      <button id="donate-close" type="button" aria-label="Close">✕</button>
+      <h2>VALUE FOR VALUE</h2>
+      <p class="donate-sub">Enjoyed the ride, fren? Toss a few sats.</p>
+      <div class="donate-qr">
+        <img src="%BASE_URL%qr-lightning.svg" alt="Lightning address QR code" width="200" height="200" />
+      </div>
+      <button id="donate-copy" class="donate-addr" type="button" aria-label="Copy Lightning address">
+        <span class="donate-addr-text">profusemeat89@walletofsatoshi.com</span>
+        <span class="donate-copy-label">TAP TO COPY</span>
+      </button>
+      <a class="donate-link donate-link--ln" href="lightning:profusemeat89@walletofsatoshi.com">⚡ Open in Lightning wallet</a>
+      <div class="donate-links-row">
+        <a class="donate-link" href="https://geyser.fund/project/forgesworn?hero=geyserannually1" target="_blank" rel="noopener">Geyser</a>
+        <a class="donate-link" href="https://ko-fi.com/brays" target="_blank" rel="noopener">Ko-fi</a>
+      </div>
+      <p class="donate-foot">Optional — and separate from your score.</p>
+    </div>
+  </div>
+
   <script type="module" src="/src/main.ts"></script>
 </body>
 </html>

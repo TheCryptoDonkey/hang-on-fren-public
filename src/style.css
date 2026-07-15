@@ -119,3 +119,189 @@ body.touch-device[data-phase="playing"] .mobile-control-cluster {
 .mobile-control-button--slow:active {
   background: rgba(255, 93, 120, 0.3);
 }
+
+/* ---- value-for-value support -------------------------------------------- */
+/* A tap-to-tip button surfaced on the title + game-over screens (never during
+ * play), and the modal it opens: copyable Lightning address, scannable QR and
+ * links out to Geyser / Ko-fi. Optional; separate from the score. */
+#support-btn {
+  position: fixed;
+  z-index: 30;
+  display: none;
+  align-items: center;
+  gap: 6px;
+  border: 2px solid rgba(255, 215, 110, 0.85);
+  border-radius: 999px;
+  background: rgba(9, 22, 34, 0.86);
+  color: #ffd23f;
+  font-family: inherit;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  backdrop-filter: blur(3px);
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.4);
+}
+#support-btn:active { transform: scale(0.96); }
+
+/* title: unobtrusive, tucked top-right */
+body[data-phase="title"] #support-btn {
+  display: inline-flex;
+  top: max(12px, env(safe-area-inset-top));
+  right: max(12px, env(safe-area-inset-right));
+  bottom: auto;
+  left: auto;
+  transform: none;
+  padding: 9px 16px;
+  font-size: clamp(13px, 3.4vmin, 16px);
+}
+
+/* game over: the "after playing" moment — big, centred, gently pulsing */
+body[data-phase="gameover"] #support-btn,
+body[data-phase="victory"] #support-btn {
+  display: inline-flex;
+  left: 50%;
+  bottom: max(20px, env(safe-area-inset-bottom));
+  top: auto;
+  right: auto;
+  transform: translateX(-50%);
+  padding: 14px 28px;
+  font-size: clamp(16px, 4.4vmin, 22px);
+  animation: supportPulse 1.7s ease-in-out infinite;
+}
+
+/* hide it while the high-score name keyboard owns the lower screen, and when
+ * the modal itself is open */
+body[data-naming="1"] #support-btn,
+body.donate-open #support-btn { display: none; }
+
+@keyframes supportPulse {
+  0%, 100% { box-shadow: 0 4px 18px rgba(0, 0, 0, 0.4), 0 0 0 0 rgba(255, 210, 63, 0.5); }
+  50% { box-shadow: 0 4px 18px rgba(0, 0, 0, 0.4), 0 0 0 10px rgba(255, 210, 63, 0); }
+}
+
+#donate-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: max(16px, env(safe-area-inset-top)) 16px max(16px, env(safe-area-inset-bottom));
+  background: rgba(4, 10, 16, 0.82);
+  backdrop-filter: blur(5px);
+  overflow-y: auto;
+}
+#donate-overlay[hidden] { display: none; }
+
+.donate-card {
+  position: relative;
+  width: min(420px, 100%);
+  max-height: 100%;
+  overflow-y: auto;
+  border: 2px solid rgba(255, 215, 110, 0.55);
+  border-radius: 22px;
+  background: linear-gradient(180deg, rgba(14, 32, 46, 0.98), rgba(7, 18, 28, 0.98));
+  padding: 26px 22px 22px;
+  text-align: center;
+  color: #eaf6ef;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.6);
+}
+
+.donate-card h2 {
+  margin: 0;
+  color: #ffd23f;
+  font-size: clamp(24px, 6vmin, 30px);
+  font-weight: 900;
+  letter-spacing: 0.04em;
+}
+.donate-sub {
+  margin: 6px 0 18px;
+  color: #bfe9ff;
+  font-size: clamp(14px, 3.6vmin, 16px);
+}
+
+.donate-qr {
+  width: min(220px, 62vw);
+  margin: 0 auto 18px;
+  padding: 12px;
+  background: #ffffff;
+  border-radius: 14px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+}
+.donate-qr img { display: block; width: 100%; height: auto; image-rendering: pixelated; }
+
+.donate-addr {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  width: 100%;
+  margin: 0 0 14px;
+  padding: 11px 14px;
+  border: 1px solid rgba(147, 197, 253, 0.5);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #eaf6ef;
+  font-family: inherit;
+  cursor: pointer;
+  -webkit-user-select: text;
+  user-select: text;
+}
+.donate-addr:active { background: rgba(255, 255, 255, 0.12); }
+.donate-addr-text {
+  font-size: clamp(13px, 3.6vmin, 16px);
+  font-weight: 700;
+  word-break: break-all;
+  color: #83ffcc;
+}
+.donate-copy-label {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  color: rgba(255, 215, 110, 0.9);
+}
+.donate-addr.is-copied .donate-copy-label { color: #83ffcc; }
+
+.donate-link {
+  display: block;
+  width: 100%;
+  padding: 12px 14px;
+  border-radius: 12px;
+  font-weight: 800;
+  font-size: clamp(14px, 3.8vmin, 16px);
+  text-decoration: none;
+  color: #eaf6ef;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  background: rgba(255, 255, 255, 0.05);
+}
+.donate-link:active { transform: scale(0.98); }
+.donate-link--ln {
+  margin-bottom: 12px;
+  color: #0a1a12;
+  background: linear-gradient(180deg, #ffe27a, #ffcc33);
+  border-color: transparent;
+}
+.donate-links-row { display: flex; gap: 12px; }
+.donate-links-row .donate-link { margin: 0; }
+
+.donate-foot {
+  margin: 16px 0 0;
+  color: #9fc1ba;
+  font-size: 12px;
+}
+
+#donate-close {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  width: 34px;
+  height: 34px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.1);
+  color: #eaf6ef;
+  font-size: 18px;
+  font-family: inherit;
+  cursor: pointer;
+}
+#donate-close:active { background: rgba(255, 255, 255, 0.2); }

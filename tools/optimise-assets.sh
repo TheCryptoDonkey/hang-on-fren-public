@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+# Regenerate the shipped game assets from the full-resolution originals.
+#
+#   art-originals/   full-res source, kept in-repo (music WAVs are committed;
+#                    art PNGs are gitignored local retention — regenerable here)
+#   public/          the compressed sprites / backdrops / music that ship
+#
+# Sprites -> WebP (alpha preserved), backdrops -> WebP, music -> 112k AAC from
+# the lossless WAVs. Deterministic and safe to re-run.
+#
+# Requires: cwebp, ffmpeg. Run from the repo root:  bash tools/optimise-assets.sh
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+ART_SRC=art-originals/art
+PICK_SRC=art-originals/pickups/600b
+WAV_SRC=art-originals/music
+ART_OUT=public/art
+PICK_OUT=public/pickups/600b
+MUSIC_OUT=public/music
+
+mkdir -p "$ART_OUT" "$PICK_OUT" "$MUSIC_OUT"
+
+# webp <srcImg> <outWebp> <longEdge> <quality>
+webp() { cwebp -quiet -q "$4" -resize "$3" 0 "$1" -o "$2"; }
+
+# 1. Square sprites (1024) -> 512px WebP. Cars, hero, scooter, props, pickups.
+#    Skip the orphan sources the game never loads (title-art.png is superseded by
+#    title-art-orig; prop-finish.png by prop-finish-decorated).
+for f in "$ART_SRC"/car-*.png "$ART_SRC"/hero-*.png "$ART_SRC"/scooter-*.png \
+         "$ART_SRC"/prop-*.png "$ART_SRC"/pickup-petrol.png "$ART_SRC"/pickup-shield.png \
+         "$ART_SRC"/billboard-rose.png; do
+  [ -f "$f" ] || continue
+  name=$(basename "$f" .png)
+  [ "$name" = "prop-finish" ] && continue          # orphan source
+  case "$name" in
+    prop-gate|prop-finish-decorated) webp "$f" "$ART_OUT/$name.webp" 820 88 ;;
+    finish-line-girls)               webp "$f" "$ART_OUT/$name.webp" 1100 90 ;;
+    *)                               webp "$f" "$ART_OUT/$name.webp" 512 86 ;;
+  esac
+done
+[ -f "$ART_SRC/finish-line-girls.png" ] && webp "$ART_SRC/finish-line-girls.png" "$ART_OUT/finish-line-girls.webp" 1100 90
+
+# 2. Pickup tokens (600b set), excluding the unused cake-piece-4.
+for f in "$PICK_SRC"/*.png; do
+  name=$(basename "$f" .png)
+  [ "$name" = "cake-piece-4" ] && continue
+  webp "$f" "$PICK_OUT/$name.webp" 512 88
+done
+
+# 3. Opaque backdrops -> WebP. Horizons stay wide; the title art is full-screen.
+for f in "$ART_SRC"/horizon-*.jpg; do
+  [ -f "$f" ] || continue
+  webp "$f" "$ART_OUT/$(basename "$f" .jpg).webp" 1280 80
+done
+[ -f "$ART_SRC/title-art-orig.png" ] && webp "$ART_SRC/title-art-orig.png" "$ART_OUT/title-art-orig.webp" 1440 82
+
+# 4. Music -> 112 kbps AAC, straight from the lossless WAV masters (single
+#    generation). Filenames differ from the WAVs, so map them explicitly.
+#    the-descent has no WAV master and keeps its existing shipped m4a.
+declare -a MUSIC_MAP=(
+  "Amalfi Coast — Coastal Velocity.wav|amalfi-coast-coastal-velocity.m4a"
+  "Old Mallorca — Tramuntana Motion.wav|old-mallorca-tramuntana-motion.m4a"
+  "Old Manchester — Loose Gears.wav|old-manchester-loose-gears.m4a"
+  "Old Prague — Allegretto Circuit.wav|old-prague-allegretto.m4a"
+  "Taj Mahal — Roses at Dawn.wav|taj-mahal-roses-at-dawn.m4a"
+)
+for pair in "${MUSIC_MAP[@]}"; do
+  wav="$WAV_SRC/${pair%%|*}"; out="$MUSIC_OUT/${pair##*|}"
+  [ -f "$wav" ] || { echo "warn: missing WAV $wav"; continue; }
+  ffmpeg -y -loglevel error -i "$wav" -c:a aac -b:a 112k -movflags +faststart "$out"
+done
+
+echo "optimise-assets: done — public/art $(du -sh "$ART_OUT" | cut -f1), music $(du -sh "$MUSIC_OUT" | cut -f1)"

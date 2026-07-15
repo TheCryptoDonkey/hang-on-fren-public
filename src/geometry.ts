@@ -72,6 +72,9 @@ export const SPRITE_WORLD_WIDTH: Record<string, number> = {
   // road-spanning gate / finish arches (wider than the tarmac so posts sit off it)
   'prop-gate': 2.7,
   'prop-finish': 2.7,
+  // The flag-marshal cast waiting at the finish line — a road-hugging group you
+  // ride up to, so the payoff is visible all the way down the run-in.
+  'finish-line-girls': 0.8,
   'prop-chevron-left': 0.62,
   'prop-chevron-right': 0.62,
 };

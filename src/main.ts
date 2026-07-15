@@ -12,7 +12,7 @@ import { renderScene, drawTitleArt } from './render.js';
 import { spawnSmoke, updateSmoke, type Smoke } from './smoke.js';
 import { riderSize } from './rider.js';
 import { drawHud, addPopup, updatePopups, type HudState, type Popup } from './hud.js';
-import { loadBoard, saveBoard, insertScore, qualifies, topScore, type HighScore } from './highscore.js';
+import { loadBoard, saveBoard, insertScore, qualifies, rankOf, topScore, type HighScore } from './highscore.js';
 import { unlockAudio, updateEngine, updateRumble, updateScreech, updateTurbo, updateTraffic, silenceTraffic, updateEcho, playSfx, playPassBy, playVoiceClip, preloadVoiceClip, resetGearbox, currentGear, toggleMuted, isMuted } from './audio.js';
 import { initMusic, preloadMusic, startMusic, currentMusicUrl } from './music.js';
 import { paletteAt, stageAt, stageIndexAt, sceneryKitAt, terrainAt, timeOfDayAt, marketPhaseAt, setActiveTour, getActiveTour, levelCount, finishDistanceM, roseRichAt, CHECKPOINT_BONUS, STAGE_M, TOUR_TITLES, type TourId } from './stages.js';
@@ -599,7 +599,68 @@ function nameEntryLayout(): ReturnType<typeof nameLayout> {
 
 function syncDomState(): void {
   document.body.dataset.phase = state.phase;
+  // While the high-score keyboard owns the lower screen, keep the floating
+  // SUPPORT button out of the way (CSS hides it on data-naming).
+  document.body.dataset.naming = state.phase === 'gameover' && state.qualifies ? '1' : '';
 }
+
+// ---- value-for-value support modal -----------------------------------------
+// A floating SUPPORT button (title + game-over) opens a modal with a copyable
+// Lightning address, a scannable QR and links to Geyser / Ko-fi. All optional,
+// and wholly separate from gameplay/score.
+const supportBtn = document.getElementById('support-btn');
+const donateOverlay = document.getElementById('donate-overlay');
+const donateClose = document.getElementById('donate-close');
+const donateCopy = document.getElementById('donate-copy');
+const LIGHTNING_ADDRESS = 'profusemeat89@walletofsatoshi.com';
+
+function openDonate(): void {
+  if (!donateOverlay) return;
+  donateOverlay.hidden = false;
+  document.body.classList.add('donate-open');
+}
+function closeDonate(): void {
+  if (!donateOverlay) return;
+  donateOverlay.hidden = true;
+  document.body.classList.remove('donate-open');
+}
+
+async function copyLightningAddress(): Promise<void> {
+  let ok = false;
+  try {
+    await navigator.clipboard.writeText(LIGHTNING_ADDRESS);
+    ok = true;
+  } catch {
+    // Fallback for browsers without async clipboard (older iOS Safari).
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = LIGHTNING_ADDRESS;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      ok = document.execCommand('copy');
+      document.body.removeChild(ta);
+    } catch {
+      ok = false;
+    }
+  }
+  const label = donateCopy?.querySelector('.donate-copy-label');
+  if (label) {
+    donateCopy?.classList.add('is-copied');
+    label.textContent = ok ? 'COPIED!' : 'COPY FAILED — LONG-PRESS TO SELECT';
+    setTimeout(() => {
+      donateCopy?.classList.remove('is-copied');
+      label.textContent = 'TAP TO COPY';
+    }, 1800);
+  }
+}
+
+supportBtn?.addEventListener('click', openDonate);
+donateClose?.addEventListener('click', closeDonate);
+donateCopy?.addEventListener('click', () => { void copyLightningAddress(); });
+// Backdrop tap closes; taps inside the card do not.
+donateOverlay?.addEventListener('click', e => { if (e.target === donateOverlay) closeDonate(); });
 
 for (const button of touchControlButtons) {
   button.addEventListener('pointerdown', e => {
@@ -672,6 +733,12 @@ function vibrate(pattern: number | number[]): void {
 
 function onKeyDown(e: KeyboardEvent): void {
   const k = e.key.toLowerCase();
+  // While the support modal is open it owns the keyboard: Escape/Enter close it,
+  // and nothing leaks through to start a run behind it.
+  if (donateOverlay && !donateOverlay.hidden) {
+    if (k === 'escape' || k === 'enter') closeDonate();
+    return;
+  }
   if (['arrowleft', 'arrowright', 'arrowup', 'arrowdown', ' '].includes(k)) e.preventDefault();
   keyboard.press(e.code);
 
@@ -742,10 +809,16 @@ function canvasPoint(clientX: number, clientY: number): { x: number; y: number }
 }
 
 // Vertical bands of the title-screen tour selector, difficulty selector and
-// the identity (guest/nostr) row (fractions of H).
-const TOUR_ROW_Y = 0.465;
-const MODE_ROW_Y = 0.57;
-const IDENTITY_ROW_Y = 0.775;
+// the identity (guest/nostr) row (fractions of H). Render + tap-zones share
+// these so a tap always lands on what the rider sees.
+// Title-screen menu geometry, published by renderTitle each frame so the tap
+// zones land exactly on the rows the rider sees. Kept in device pixels (u-scaled,
+// so tight in both orientations) rather than fixed H-fractions.
+let titleMenuX = 0;
+let titleMenuW = 0;
+let titleTourY = 0;
+let titleModeY = 0;
+let titleIdentY = 0;
 
 function pointerAction(clientX: number, clientY: number): void {
   // Tap advances title; during play it is handled by steering zones.
@@ -754,14 +827,13 @@ function pointerAction(clientX: number, clientY: number): void {
     // mode; the identity row toggles guest/nostr; anywhere else starts the run.
     const { x, y } = canvasPoint(clientX, clientY);
     const u = uiScale();
-    const tourMid = H * TOUR_ROW_Y;
-    if (y > tourMid - 26 * u && y < tourMid + 16 * u) {
+    if (y > titleTourY - 30 * u && y < titleTourY + 22 * u) {
       selectTour(x < W / 2 ? 'grand' : 'world');
       return;
     }
-    const rowMid = H * MODE_ROW_Y;
-    if (y > rowMid - 36 * u && y < rowMid + 20 * u) {
-      const picked = clamp(Math.floor((x / W) * MODES.length), 0, MODES.length - 1);
+    if (y > titleModeY - 30 * u && y < titleModeY + 22 * u) {
+      const frac = titleMenuW > 0 ? (x - titleMenuX) / titleMenuW : x / W;
+      const picked = clamp(Math.floor(frac * MODES.length), 0, MODES.length - 1);
       if (picked !== modeIndex) {
         modeIndex = picked;
         saveModeIndex(modeIndex);
@@ -769,8 +841,7 @@ function pointerAction(clientX: number, clientY: number): void {
       }
       return;
     }
-    const identMid = H * IDENTITY_ROW_Y;
-    if (y > identMid - 18 * u && y < identMid + 12 * u) {
+    if (y > titleIdentY - 18 * u && y < titleIdentY + 14 * u) {
       toggleIdentity();
       return;
     }
@@ -1814,6 +1885,10 @@ function update(dt: number): void {
     // the way down the run-in instead of having it appear at the last second.
     if (ahead > 0 && ahead <= FINISH_LOOKAHEAD_M) {
       addMarker(world, player, track, 'prop-finish', ahead, 'finish');
+      // The finish cast stands a few metres in front of the tape so the rider
+      // rides straight up to the girls — the reward is on the road the whole
+      // run-in, not just an abstract line, then the GOAL tableau takes over.
+      addMarker(world, player, track, 'finish-line-girls', Math.max(1, ahead - 12), 'finish');
       state.finishSpawned = true;
     }
   }
@@ -1958,6 +2033,69 @@ function outlinedText(text: string, x: number, y: number, fill: string, u: numbe
   ctx.fillText(text, x, y);
 }
 
+// A soft rounded panel — groups the title menus and leaderboard so text reads
+// cleanly over the busy key art. Optional stroke for an arcade-cabinet edge.
+function panel(x: number, y: number, w: number, h: number, r: number, fill: string, stroke?: string, lw = 2): void {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+  ctx.fillStyle = fill;
+  ctx.fill();
+  if (stroke) {
+    ctx.strokeStyle = stroke;
+    ctx.lineWidth = lw;
+    ctx.stroke();
+  }
+}
+
+// Arcade leaderboard rows inside a framed panel: gold/silver/bronze badges for
+// the podium, callsign left, score right. Shared by the local + gamestr boards.
+function drawLeaderboard(
+  title: string,
+  rows: readonly { name: string; score: number }[],
+  x: number, y: number, w: number, u: number,
+): void {
+  const rowH = 26 * u;
+  const headH = 30 * u;
+  const h = headH + rows.length * rowH + 12 * u;
+  panel(x, y, w, h, 14 * u, 'rgba(6,16,26,0.74)', 'rgba(255,215,110,0.5)', 1.5 * u);
+  ctx.textAlign = 'center';
+  ctx.font = `800 ${15 * u}px 'Trebuchet MS', sans-serif`;
+  outlinedText(title, x + w / 2, y + 21 * u, '#ffd76b', u, 4);
+  const medal = ['#ffd23f', '#cfd8e0', '#d99154'];
+  const padL = 20 * u;
+  const padR = w - 20 * u;
+  rows.forEach((e, i) => {
+    const ry = y + headH + i * rowH + 18 * u;
+    // rank badge
+    const bx = x + padL + 6 * u;
+    if (i < 3) {
+      ctx.beginPath();
+      ctx.arc(bx, ry - 5 * u, 9 * u, 0, Math.PI * 2);
+      ctx.fillStyle = medal[i];
+      ctx.fill();
+      ctx.fillStyle = '#0a1a12';
+      ctx.font = `900 ${12 * u}px 'Trebuchet MS', sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.fillText(String(i + 1), bx, ry - 0.5 * u);
+    } else {
+      ctx.textAlign = 'center';
+      ctx.font = `800 ${13 * u}px 'Trebuchet MS', sans-serif`;
+      outlinedText(String(i + 1), bx, ry, 'rgba(255,255,255,0.6)', u, 3);
+    }
+    ctx.textAlign = 'left';
+    ctx.font = `800 ${16 * u}px 'Trebuchet MS', sans-serif`;
+    outlinedText(e.name, x + padL + 24 * u, ry, '#ffffff', u, 4);
+    ctx.textAlign = 'right';
+    outlinedText(e.score.toLocaleString('en-GB'), x + padR, ry, '#8fe6c4', u, 4);
+  });
+  ctx.textAlign = 'center';
+}
+
 function renderTitle(store: SpriteStore): void {
   const art = store.get('title-art');
   if (art) drawTitleArt(ctx, W, H, art);
@@ -1968,101 +2106,119 @@ function renderTitle(store: SpriteStore): void {
   const u = uiScale();
   const portrait = H > W;
 
-  // Strong top + bottom scrims so text always reads over the bright art.
-  const top = ctx.createLinearGradient(0, 0, 0, H * 0.42);
-  top.addColorStop(0, 'rgba(6,19,28,0.82)');
-  top.addColorStop(1, 'rgba(6,19,28,0)');
-  ctx.fillStyle = top;
-  ctx.fillRect(0, 0, W, H * 0.42);
-  const bottom = ctx.createLinearGradient(0, H * 0.5, 0, H);
-  bottom.addColorStop(0, 'rgba(6,19,28,0)');
-  bottom.addColorStop(0.5, 'rgba(6,19,28,0.72)');
-  bottom.addColorStop(1, 'rgba(6,19,28,0.92)');
-  ctx.fillStyle = bottom;
-  ctx.fillRect(0, H * 0.5, W, H * 0.5);
+  // A single full-frame wash so the panels + logo pop off the busy key art —
+  // brighter behind the logo, deeper behind the leaderboard.
+  const wash = ctx.createLinearGradient(0, 0, 0, H);
+  wash.addColorStop(0, 'rgba(5,14,24,0.74)');
+  wash.addColorStop(0.30, 'rgba(5,14,24,0.28)');
+  wash.addColorStop(0.58, 'rgba(5,14,24,0.5)');
+  wash.addColorStop(1, 'rgba(5,14,24,0.93)');
+  ctx.fillStyle = wash;
+  ctx.fillRect(0, 0, W, H);
 
   ctx.textAlign = 'center';
-  const titleSize = Math.min(96 * u, W * 0.11);
+
+  // --- logo -----------------------------------------------------------------
+  // Portrait drops the logo a touch to clear the top-right SUPPORT button.
+  const logoY = H * (portrait ? 0.135 : 0.145);
+  const titleSize = Math.min((portrait ? 58 : 104) * u, W * (portrait ? 0.125 : 0.11));
   ctx.font = `900 ${titleSize}px 'Trebuchet MS', sans-serif`;
-  outlinedText('HANG ON, FREN', W / 2, H * (portrait ? 0.16 : 0.2), '#ffd76b', u, 8);
-  ctx.font = `700 ${24 * u}px 'Trebuchet MS', sans-serif`;
+  outlinedText('HANG ON, FREN', W / 2, logoY, '#ffd23f', u, 9);
+  ctx.font = `700 ${(portrait ? 13 : 18) * u}px 'Trebuchet MS', sans-serif`;
   outlinedText(
-    selectedTour === 'world'
-      ? 'Four historic conference stops — the 600B victory lap'
-      : 'Ten regions, one finish line — a Vespa road-tribute',
-    W / 2, H * (portrait ? 0.22 : 0.27), '#ffffff', u, 5,
-  );
-  ctx.font = `800 ${15 * u}px 'Trebuchet MS', sans-serif`;
-  outlinedText(
-    selectedTour === 'world'
-      ? 'MANCHESTER · PRAGUE · MALLORCA · TAJ MAHAL  ·  16.8 KM OF ROSES AHEAD'
-      : `OPENING FREN RIVAL SHOWDOWN  ·  ${(RIVAL_TOUR_FINISH_M / 1000).toFixed(1)} KM`,
-    W / 2, H * (portrait ? 0.265 : 0.315), '#8fe6c4', u, 4,
+    selectedTour === 'world' ? 'THE 600B VICTORY LAP' : 'AN ENDLESS RIVIERA VESPA ROAD-TRIBUTE',
+    W / 2, logoY + (portrait ? 24 : 34) * u, '#bfe9ff', u, 4,
   );
 
-  // --- tour selector ---
-  const tourY = H * TOUR_ROW_Y;
-  ctx.font = `700 ${13 * u}px 'Trebuchet MS', sans-serif`;
-  outlinedText('TOUR  ·  ▲▼ / T OR TAP TO CHANGE', W / 2, tourY - 26 * u, '#9fd0ff', u, 4);
+  // --- menu cabinet: tour + difficulty selectors ---------------------------
+  // Laid out in u-space from the cabinet top, so it stays tight whether the
+  // screen is wide or tall; tap anchors are published in pixels below.
+  const cabW = portrait ? W * 0.9 : W * 0.6;
+  const cabX = (W - cabW) / 2;
+  const cabY = H * (portrait ? 0.29 : 0.235);
+  const cabH = 244 * u;
+  const tourLabelY = cabY + 30 * u;
+  const tourY = cabY + 66 * u;
+  const tourDetailY = cabY + 92 * u;
+  const dividerY = cabY + 118 * u;
+  const diffLabelY = cabY + 136 * u;
+  const modeY = cabY + 172 * u;
+  const modeTagY = cabY + 197 * u;
+  const hintY = cabY + 226 * u;
+  titleMenuX = cabX;
+  titleMenuW = cabW;
+  titleTourY = tourY;
+  titleModeY = modeY;
+  panel(cabX, cabY, cabW, cabH, 20 * u, 'rgba(7,17,28,0.78)', 'rgba(255,215,110,0.4)', 1.5 * u);
+
+  // tour selector — tap the left half for GRAND, the right half for the WORLD tour
+  ctx.font = `800 ${12 * u}px 'Trebuchet MS', sans-serif`;
+  outlinedText('TOUR   ·   ▲▼ / T · TAP', W / 2, tourLabelY, '#9fd0ff', u, 3);
   (['grand', 'world'] as const).forEach((tour, i) => {
-    const x = W * ((i * 2 + 1) / 4);
+    const x = cabX + cabW * (i === 0 ? 0.28 : 0.72);
     const sel = tour === selectedTour;
-    ctx.font = `${sel ? 900 : 700} ${(sel ? 24 : 17) * u}px 'Trebuchet MS', sans-serif`;
-    outlinedText(TOUR_TITLES[tour], x, tourY, sel ? '#ffd76b' : 'rgba(255,255,255,0.55)', u, sel ? 5 : 4);
+    ctx.font = `${sel ? 900 : 700} ${(sel ? 22 : 15) * u}px 'Trebuchet MS', sans-serif`;
+    outlinedText(TOUR_TITLES[tour], x, tourY, sel ? '#ffd23f' : 'rgba(255,255,255,0.5)', u, sel ? 5 : 4);
   });
-
-  // --- difficulty selector ---
-  const rowY = H * MODE_ROW_Y;
   ctx.font = `700 ${13 * u}px 'Trebuchet MS', sans-serif`;
-  outlinedText('DIFFICULTY  ·  ◄ ► OR TAP TO CHANGE', W / 2, rowY - 32 * u, '#9fd0ff', u, 4);
-  MODES.forEach((m, i) => {
-    const x = W * ((i * 2 + 1) / (MODES.length * 2));
-    const sel = i === modeIndex;
-    ctx.font = `${sel ? 900 : 700} ${(sel ? 30 : 21) * u}px 'Trebuchet MS', sans-serif`;
-    outlinedText(m.label, x, rowY, sel ? '#ffd76b' : 'rgba(255,255,255,0.55)', u, sel ? 6 : 4);
-  });
-  ctx.font = `600 ${15 * u}px 'Trebuchet MS', sans-serif`;
-  outlinedText(MODES[modeIndex].tagline, W / 2, rowY + 24 * u, '#bdeddb', u, 4);
+  outlinedText(
+    selectedTour === 'world'
+      ? 'MANCHESTER · PRAGUE · MALLORCA · TAJ MAHAL'
+      : `FREN RIVAL SHOWDOWN · ${(RIVAL_TOUR_FINISH_M / 1000).toFixed(1)} KM`,
+    W / 2, tourDetailY, '#8fe6c4', u, 3,
+  );
 
+  // difficulty selector — tap across the row (left→right = CRUISE→DEGEN)
+  ctx.strokeStyle = 'rgba(255,255,255,0.14)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(cabX + 26 * u, dividerY);
+  ctx.lineTo(cabX + cabW - 26 * u, dividerY);
+  ctx.stroke();
+  ctx.font = `800 ${12 * u}px 'Trebuchet MS', sans-serif`;
+  outlinedText('DIFFICULTY   ·   ◄ ► · TAP', W / 2, diffLabelY, '#9fd0ff', u, 3);
+  MODES.forEach((m, i) => {
+    const x = cabX + cabW * ((i * 2 + 1) / (MODES.length * 2));
+    const sel = i === modeIndex;
+    ctx.font = `${sel ? 900 : 700} ${(sel ? 26 : 18) * u}px 'Trebuchet MS', sans-serif`;
+    outlinedText(m.label, x, modeY, sel ? '#ffd23f' : 'rgba(255,255,255,0.5)', u, sel ? 6 : 4);
+  });
+  ctx.font = `600 ${14 * u}px 'Trebuchet MS', sans-serif`;
+  outlinedText(MODES[modeIndex].tagline, W / 2, modeTagY, '#bdeddb', u, 4);
+  // one compact control cue, tucked into the cabinet footer
+  ctx.font = `700 ${11 * u}px 'Trebuchet MS', sans-serif`;
+  outlinedText('◄ ► STEER · GRAB FUEL FOR TIME · ROSES = TURBO · FLICK THE BARS TO DRIFT', W / 2, hintY, 'rgba(159,208,255,0.85)', u, 3);
+
+  // --- primary call to action: a steady pill so it always reads on the art ---
+  const ctaY = cabY + cabH + 46 * u;
+  const cta = 'PRESS ENTER / TAP TO RIDE';
+  const ctaSize = (portrait ? 24 : 30) * u;
+  ctx.font = `900 ${ctaSize}px 'Trebuchet MS', sans-serif`;
+  const ctaW = ctx.measureText(cta).width + 48 * u;
+  const ctaH = ctaSize + 22 * u;
+  panel(W / 2 - ctaW / 2, ctaY - ctaSize * 0.78 - 6 * u, ctaW, ctaH, ctaH / 2, 'rgba(7,17,28,0.82)', 'rgba(255,215,110,0.6)', 1.5 * u);
   const blink = Math.floor(state.time * 2) % 2 === 0;
-  if (blink) {
-    ctx.font = `800 ${30 * u}px 'Trebuchet MS', sans-serif`;
-    outlinedText('PRESS ENTER / TAP TO RIDE', W / 2, H * 0.67, '#ffffff', u, 6);
-  }
-  // The powerslide is the whole game and nobody will ever find it by accident —
-  // so it gets the headline line, and the housekeeping gets the small print.
-  ctx.font = `800 ${20 * u}px 'Trebuchet MS', sans-serif`;
-  outlinedText('DRIFT: FLICK THE BARS (HOLD ► TAP ◄ HOLD ►) OR BRAKE INTO A BEND   ·   HOLD IT   ·   STEER OUT TO CATCH IT', W / 2, H * 0.725, '#8fd0ff', u, 5);
-  ctx.font = `600 ${16 * u}px 'Trebuchet MS', sans-serif`;
-  outlinedText('◄ ► steer   ·   grab fuel for time   ·   roses = turbo   ·   don’t wipe out', W / 2, H * 0.762, '#bdeddb', u, 4);
+  outlinedText(cta, W / 2, ctaY, blink ? '#ffd23f' : '#ffffff', u, 6);
 
   // identity row: who signs your gamestr scores (tap / N to switch)
-  ctx.font = `700 ${14 * u}px 'Trebuchet MS', sans-serif`;
+  const identY = cabY + cabH + 84 * u;
+  titleIdentY = identY;
+  ctx.font = `700 ${13 * u}px 'Trebuchet MS', sans-serif`;
   if (state.titleNotice.text && state.time < state.titleNotice.until) {
-    outlinedText(state.titleNotice.text, W / 2, H * IDENTITY_ROW_Y, '#8fe6c4', u, 4);
+    outlinedText(state.titleNotice.text, W / 2, identY, '#8fe6c4', u, 4);
   } else {
     const id = getIdentity();
     const label = id.mode === 'nostr'
       ? `RIDING AS  NOSTR · ${id.name}   —   N / TAP FOR GUEST`
       : `RIDING AS  GUEST · ${id.name}   —   N / TAP FOR NOSTR`;
-    outlinedText(label, W / 2, H * IDENTITY_ROW_Y, '#9fd0ff', u, 4);
+    outlinedText(label, W / 2, identY, '#9fd0ff', u, 4);
   }
 
-  // score board — alternates between the local best riders and the global
-  // gamestr board (when the fetch has produced one).
+  // --- leaderboard: alternates local best riders / global gamestr board -----
   const showGlobal = state.globalBoard.length > 0 && Math.floor(state.time / 6) % 2 === 1;
-  ctx.font = `800 ${17 * u}px 'Trebuchet MS', sans-serif`;
-  outlinedText(showGlobal ? 'TOP FRENS — GAMESTR' : 'BEST RIDERS', W / 2, H * 0.81, '#ffd76b', u, 4);
-  ctx.font = `700 ${16 * u}px 'Trebuchet MS', sans-serif`;
-  if (showGlobal) {
-    state.globalBoard.slice(0, 5).forEach((e, i) => {
-      outlinedText(`${i + 1}.  ${e.name}   ${e.score.toLocaleString('en-GB')}`, W / 2, H * 0.85 + i * 22 * u, '#ffffff', u, 4);
-    });
-  } else {
-    board.slice(0, 5).forEach((e, i) => {
-      outlinedText(`${i + 1}.  ${e.name}   ${e.score.toLocaleString('en-GB')}`, W / 2, H * 0.85 + i * 22 * u, '#ffffff', u, 4);
-    });
-  }
+  const rows = (showGlobal ? state.globalBoard : board).slice(0, 5);
+  const lbW = portrait ? W * 0.9 : W * 0.44;
+  drawLeaderboard(showGlobal ? 'TOP FRENS · GAMESTR' : 'BEST RIDERS', rows, (W - lbW) / 2, cabY + cabH + 104 * u, lbW, u);
 }
 
 function renderPaused(): void {
@@ -2153,6 +2309,11 @@ function renderVictory(store: SpriteStore): void {
   );
 }
 
+function ordinal(n: number): string {
+  const suffix = n % 100 >= 11 && n % 100 <= 13 ? 'th' : ['th', 'st', 'nd', 'rd'][n % 10] ?? 'th';
+  return `${n}${suffix}`;
+}
+
 function renderGameOver(_store: SpriteStore): void {
   const s = state.summary;
   if (!s) return;
@@ -2180,16 +2341,24 @@ function renderGameOver(_store: SpriteStore): void {
   if (won) drawFireworks(ctx);
   ctx.textAlign = 'center';
 
+  // A new board placing gets top billing on the card — the callsign prompt below
+  // then banks it. rankOf is 0-based; +1 gives the human "Nth best" position.
+  const place = state.qualifies ? rankOf(board, s.score) + 1 : 0;
   if (won) {
     ctx.font = `900 ${72 * u}px 'Trebuchet MS', sans-serif`;
     outlinedText('FINISH!', W / 2, titleY, '#ffd76b', u, 8);
     ctx.font = `800 ${30 * u}px 'Trebuchet MS', sans-serif`;
-    outlinedText('YOU REACHED THE GOAL, FREN!', W / 2, subtitleY, '#8fe6c4', u, 6);
+    if (place > 0) outlinedText(`NEW HIGH SCORE · ${ordinal(place)} BEST!`, W / 2, subtitleY, '#ffd23f', u, 6);
+    else outlinedText('YOU REACHED THE GOAL, FREN!', W / 2, subtitleY, '#8fe6c4', u, 6);
   } else {
     ctx.font = `900 ${64 * u}px 'Trebuchet MS', sans-serif`;
     ctx.fillStyle = '#ff5d78';
     // The clock is the only way a run ends short (wipeouts cost time, never a life).
     ctx.fillText('OUT OF TIME', W / 2, titleY);
+    if (place > 0) {
+      ctx.font = `800 ${26 * u}px 'Trebuchet MS', sans-serif`;
+      outlinedText(`NEW HIGH SCORE · ${ordinal(place)} BEST!`, W / 2, subtitleY, '#ffd23f', u, 6);
+    }
   }
 
   ctx.font = `800 ${40 * u}px 'Trebuchet MS', sans-serif`;
@@ -2215,7 +2384,9 @@ function renderGameOver(_store: SpriteStore): void {
     W / 2,
     statsY,
   );
-  if (s.drifts > 0) {
+  // The drift flourish is a secondary line; with the callsign keyboard up the
+  // stack is already tight against it, so it only shows when not entering a name.
+  if (s.drifts > 0 && !entryLayout) {
     ctx.font = `700 ${Math.min(17 * u, W * 0.019)}px 'Trebuchet MS', sans-serif`;
     ctx.fillStyle = '#8fd0ff';
     ctx.fillText(
