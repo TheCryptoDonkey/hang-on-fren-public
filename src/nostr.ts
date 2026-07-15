@@ -17,6 +17,7 @@ import { bytesToHex, hexToBytes } from 'nostr-tools/utils';
 import { GAME_ID, GAME_PUBKEY, GAME_TITLE, SCORE_KIND, type RunSummary } from './scoring.js';
 import { assetUrl } from './asset-url.js';
 import { DEFAULT_READ_RELAYS, DEFAULT_WRITE_RELAYS } from './relays.js';
+import { consumeArcadeHandoff } from './arcade-handoff.js';
 
 const GUEST_KEY = 'hangonfren:guest:v1';
 const MODE_KEY = 'hangonfren:identity-mode:v1';
@@ -66,6 +67,7 @@ export interface SignedEvent {
 interface SignetSigner {
   capabilities?: { canSignEvents?: boolean };
   signEvent(event: Record<string, unknown>): Promise<unknown>;
+  close?(): Promise<void>;
 }
 
 interface SignetSession {
@@ -253,6 +255,12 @@ export async function connectNostr(): Promise<string | null> {
 /** Restore the persisted identity mode on boot (quietly resumes the Signet
  *  session, and consumes a redirect-mode callback if one is in the URL). */
 export async function restoreIdentity(): Promise<Identity> {
+  const arcadeSession = await consumeArcadeHandoff(GAME_ID);
+  if (arcadeSession) {
+    signetSession = arcadeSession;
+    saveIdentityMode('nostr');
+    return getIdentity();
+  }
   if (loadIdentityMode() === 'nostr') {
     if (await ensureSignetLoaded() && window.Signet) {
       try {
@@ -273,7 +281,8 @@ export function useGuestMode(): void {
   saveIdentityMode('guest');
   const session = signetSession;
   signetSession = null;
-  if (session && window.Signet) void window.Signet.logout(session).catch(() => undefined);
+  if (session && window.Signet) void window.Signet.logout(session).catch(() => session.signer.close?.());
+  else if (session) void session.signer.close?.().catch(() => undefined);
 }
 
 // ---- signing + publishing ----------------------------------------------------
