@@ -1001,6 +1001,10 @@ function drawBore(
     }
   }
 
+  // A bridge's FAR face gets its own piers (the portal draws the near pair) —
+  // legs at one end only left the deck floating when seen from an angle.
+  if (!tunnel && seg.index === overhead.end) drawBridgeLegs(ctx, p2, roof2, palette);
+
   // Ceiling: dark, with a slightly lifted rib down the centre where the strip
   // lights hang — gives the roof a spine to read the speed against.
   const roof = mix('#20242b', palette.fog, haze);
@@ -1075,6 +1079,45 @@ function drawLamps(ctx: CanvasRenderingContext2D, lamps: readonly Lamp[]): void 
 }
 
 /**
+ * A pair of concrete piers holding a bridge deck up: drawn from just above the
+ * deck underside (the overlap kills any rounding seam) down into a footing at
+ * the ground line. Called for BOTH faces of an overpass — a deck with legs
+ * only at its near face reads as a floating slab from any offset vantage.
+ */
+function drawBridgeLegs(
+  ctx: CanvasRenderingContext2D,
+  p: { x: number; y: number; w: number },
+  roof: number,
+  palette: Palette,
+): void {
+  const drop = p.y - roof;
+  if (p.w <= 0 || drop <= 0) return;
+  const legW = Math.max(3, p.w * 0.14);
+  const inset = p.w * 0.06;
+  const c = mix('#3f454d', palette.fog, 0.2);
+  const tile = groundPattern(ctx, 'rock', c);
+  for (const x of [p.x - p.w * WALL_X + inset, p.x + p.w * WALL_X - inset - legW]) {
+    ctx.fillStyle = c;
+    ctx.fillRect(x, roof - 2, legW, drop + 2);
+    // footing block where the pier meets the ground
+    const footH = Math.max(2, legW * 0.4);
+    const footPad = Math.max(1, legW * 0.18);
+    ctx.fillRect(x - footPad, p.y - footH, legW + footPad * 2, footH);
+    // concrete grain, then the lit edge over it
+    if (tile) {
+      const s = Math.max(0.5, p.w / 110);
+      tile.pat.setTransform(new DOMMatrix([s, 0, 0, s, x, roof]));
+      ctx.globalAlpha = 0.4;
+      ctx.fillStyle = tile.pat;
+      ctx.fillRect(x, roof - 2, legW, drop + 2);
+      ctx.globalAlpha = 1;
+    }
+    ctx.fillStyle = 'rgba(255,255,255,0.14)';
+    ctx.fillRect(x, roof - 2, Math.max(1, legW * 0.2), drop + 2);
+  }
+}
+
+/**
  * The mouth. A rock face across the whole frame with the bore's cross-section cut
  * out of it, so you drive INTO something rather than at a floating ceiling.
  *
@@ -1098,10 +1141,29 @@ function drawPortal(
   const face = mix('#4a5058', palette.fog, 0.25);
 
   if (overhead.kind === 'overpass') {
-    // A bridge, not a hillside: just the deck's front face and two legs. You can
-    // still see the sky and the land either side of it, which is the whole
+    // A bridge, not a hillside: the deck's front face on two proper piers. You
+    // can still see the sky and the land either side of it, which is the whole
     // difference between passing under a bridge and entering a tunnel.
+    drawBridgeLegs(ctx, p, roof, palette);
     polygon(ctx, l, roof, r, roof, r, deck, l, deck, face);
+    // Concrete texture over the face — the flat grey slab read as unfinished
+    // next to the textured world.
+    const tile = groundPattern(ctx, 'rock', face);
+    if (tile) {
+      const s = Math.max(0.75, p.w / 90);
+      tile.pat.setTransform(new DOMMatrix([s, 0, 0, s, l, deck]));
+      ctx.globalAlpha = 0.55;
+      ctx.fillStyle = tile.pat;
+      ctx.fillRect(l, deck, r - l, roof - deck);
+      ctx.globalAlpha = 1;
+    }
+    // Expansion joints — the vertical shadow lines that make a deck read as
+    // cast concrete sections rather than one extruded band.
+    ctx.fillStyle = 'rgba(0,0,0,0.18)';
+    const jointStep = Math.max(24, p.w * 0.55);
+    for (let jx = l + jointStep; jx < r - 4; jx += jointStep) {
+      ctx.fillRect(jx, deck, Math.max(1, p.w * 0.008), roof - deck);
+    }
     // Sun-caught top lip and a shadowed soffit, so the deck reads as a solid slab
     // with thickness rather than a flat grey band.
     const lip = Math.max(1, (roof - deck) * 0.16);
@@ -1109,13 +1171,6 @@ function drawPortal(
     ctx.fillRect(l, deck, r - l, lip);
     ctx.fillStyle = 'rgba(0,0,0,0.34)'; // shadow under the deck
     ctx.fillRect(l, roof - lip, r - l, lip);
-    const leg = Math.max(2, p.w * 0.09);
-    ctx.fillStyle = mix('#3f454d', palette.fog, 0.2);
-    ctx.fillRect(l - leg, roof, leg, p.y - roof);
-    ctx.fillRect(r, roof, leg, p.y - roof);
-    ctx.fillStyle = 'rgba(255,255,255,0.12)'; // lit outer edge of each leg
-    ctx.fillRect(l - leg, roof, Math.max(1, leg * 0.22), p.y - roof);
-    ctx.fillRect(r, roof, Math.max(1, leg * 0.22), p.y - roof);
     return;
   }
 
