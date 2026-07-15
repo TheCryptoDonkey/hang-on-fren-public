@@ -10,7 +10,7 @@ import { signedForward } from './world.js';
 import type { SpriteStore, SpriteImage } from './sprites.js';
 import {
   DEFAULT_PALETTE, DEFAULT_TERRAIN, resolveScenerySprite,
-  type Palette, type SceneryKit, type SideKind, type Terrain, type TimeOfDay,
+  type GroundKind, type Palette, type SceneryKit, type SideKind, type Terrain, type TimeOfDay,
 } from './stages.js';
 import { spriteWorldWidth } from './geometry.js';
 import { drawRider, riderSize } from './rider.js';
@@ -521,6 +521,9 @@ export function renderScene(scene: Scene): void {
   const aperture = findAperture(track, baseSegment.index, height);
   const lamps: Lamp[] = [];
   let clipped = false;
+  // Nearest-neighbour for the whole ground pass: the tile patterns MUST scale
+  // into hard square texels, not bilinear soup. (Sprites set their own flag.)
+  ctx.imageSmoothingEnabled = false;
   for (let i = drawn.length - 1; i >= 0; i -= 1) {
     const seg = drawn[i];
     const n = (seg.index - baseSegment.index + track.segments.length) % track.segments.length;
@@ -538,6 +541,7 @@ export function renderScene(scene: Scene): void {
     renderSegment(ctx, width, height, seg, n / ROAD.drawDistance, palette, lamps, terrain, scene.time);
   }
   if (clipped) ctx.restore();
+  ctx.imageSmoothingEnabled = true;
 
   // Cap the ceiling. The road pass culls the nearest segments — their tarmac
   // projects off the bottom of the screen, so they are skipped — and their
@@ -1343,128 +1347,181 @@ function shade(hex: string, amount: number): string {
   return `rgb(${c(r)},${c(g)},${c(b)})`;
 }
 
-// --- 32-bit ground material --------------------------------------------------
-// Deterministic pixel specks that give each biome's ground its MATERIAL — tufts
-// on grass, grain on sand, glints on snow and salt, leaf-fall in the autumn
-// woods, embers in the ash — plus animated surf where a shoulder drops to the
-// sea. Everything is seeded off the segment index (no per-frame RNG → nothing
-// shimmers), positioned in road-widths so projection scales it for free, and
-// LOD-gated so only segments tall enough on screen to read pay for any fills.
+// --- 32-bit ground texture ---------------------------------------------------
+// The ground is TEXTURED, not tinted: each material gets a hand-authored pixel
+// tile (painted live from the biome palette), drawn in perspective per segment
+// with nearest-neighbour sampling, so the texels swell into fat chunky pixels
+// as they rush the camera — the Mega Drive ground that flat fills never were.
+// Tiles are deterministic (hashed art, keyed off the palette colour) and the
+// vertical phase rides the segment index, so the texture STREAMS under the
+// bike with the road instead of sticking to the glass. Distant bands — where
+// a texel would be sub-pixel mush — stay flat colour under the fog.
 
-/** Specks per side for a segment band `h` px tall — the LOD knob. */
-function speckCount(h: number): number {
-  return h < 2 ? 0 : Math.min(16, Math.ceil(h / 3.5));
+const TILE = 48;
+/** Texture rows one road segment advances — ties the tile to world z. */
+const TILE_ROWS = 3;
+/** Ground texture LOD. The road band is narrow, so it can afford texture out
+ *  to where a texel is ~1px; the ground slab spans the whole frame width, so
+ *  it drops to flat colour earlier — right about where its texels stop being
+ *  distinguishable from the flat fill anyway. Keeps the pattern-fill area (the
+ *  expensive part on a software canvas) down to the rows that actually read. */
+function roadTextured(seg: Segment): boolean {
+  return seg.p1.screen.y - seg.p2.screen.y >= 3 && seg.p1.screen.w >= 48;
+}
+function slabTextured(seg: Segment): boolean {
+  return seg.p1.screen.y - seg.p2.screen.y >= 3 && seg.p1.screen.w >= 72;
 }
 
-/** One deterministic ground speck on the verge (or the open flat beyond it). */
-function drawGroundSpeck(
-  ctx: CanvasRenderingContext2D,
-  seg: Segment,
-  palette: Palette,
-  side: -1 | 1,
-  k: number,
-  oMax: number,
-  time: number,
-): void {
+/** Perspective transform mapping tile texels onto this segment's ground band:
+ *  texel width tracks the projected road width, and TILE_ROWS texture rows
+ *  span the band so the pattern scrolls with z and foreshortens with depth. */
+function groundMatrix(seg: Segment): DOMMatrix {
   const p1 = seg.p1.screen;
-  const p2 = seg.p2.screen;
-  const seed = seg.index * 7.31 + side * 137.7 + k * 51.3;
-  const t = hash(seed);
-  const w = lerp(p1.w, p2.w, t);
-  const y = lerp(p1.y, p2.y, t);
-  // Quadratic bias pulls the scatter toward the road: up close the far end of
-  // the verge is off-screen, so an even spread leaves the shoulder you actually
-  // look at bare while most specks land past the frame edge.
-  const spread = hash(seed + 1.7);
-  const o = 1.16 + (oMax - 1.16) * spread * spread;
-  const x = lerp(p1.x, p2.x, t) + side * o * w;
-  const px = Math.max(1, Math.round(w * 0.024)); // chunky pixel, bigger nearby
-  const v = hash(seed + 3.9); // per-speck variety channel
-  switch (palette.ground) {
-    case 'grass': { // short tufts, the odd bright blade
-      if (v > 0.72) {
-        ctx.fillStyle = shade(palette.grassLight, 0.2);
-        ctx.fillRect(x, y - px, px, px);
-      } else {
-        ctx.fillStyle = shade(palette.grassDark, -0.26);
-        ctx.fillRect(x, y - px * 2, px, px * 2);
+  const rowT = (p1.y - seg.p2.screen.y) / TILE_ROWS;
+  return new DOMMatrix([
+    Math.max(0.75, p1.w / TILE), 0,
+    0, -rowT,
+    p1.x, p1.y + ((seg.index * TILE_ROWS) % TILE) * rowT,
+  ]);
+}
+
+// Tinted tiles are cached per (material, colour). Palette transitions retint
+// every frame for ~a fifth of a leg, so the cache is bounded and just cleared
+// when it fills — rebuilding a 48px tile is trivia next to a frame.
+const tileCache = new Map<string, CanvasPattern | null>();
+
+type TileKind = GroundKind | 'rock' | 'tarmac';
+
+function groundPattern(ctx: CanvasRenderingContext2D, kind: TileKind, base: string, warm = ''): CanvasPattern | null {
+  const key = `${kind}|${base}|${warm}`;
+  let pat = tileCache.get(key);
+  if (pat === undefined) {
+    const cv = document.createElement('canvas');
+    cv.width = TILE;
+    cv.height = TILE;
+    const c = cv.getContext('2d');
+    if (c) {
+      paintTile(c, kind, base, warm);
+      pat = ctx.createPattern(cv, 'repeat');
+    } else {
+      pat = null;
+    }
+    if (tileCache.size > 160) tileCache.clear();
+    tileCache.set(key, pat);
+  }
+  return pat;
+}
+
+/** The pixel art itself — one 48x48 tile per material, built from the band's
+ *  base colour. All placement is hash()-driven, so the art is stable. */
+function paintTile(c: CanvasRenderingContext2D, kind: TileKind, base: string, warm: string): void {
+  c.fillStyle = base;
+  c.fillRect(0, 0, TILE, TILE);
+  const dot = (x: number, y: number, w: number, h: number, col: string): void => {
+    c.fillStyle = col;
+    c.fillRect(Math.round(x), Math.round(y), w, h);
+  };
+  const rx = (i: number): number => hash(i * 7.13 + 3.7) * TILE;
+  const ry = (i: number): number => hash(i * 3.71 + 9.1) * TILE;
+  const rv = (i: number): number => hash(i * 5.39 + 1.3);
+  switch (kind) {
+    case 'grass': {
+      const dk = shade(base, -0.14);
+      const dk2 = shade(base, -0.3);
+      const lt = shade(base, 0.16);
+      for (let i = 0; i < 130; i += 1) dot(rx(i), ry(i), 1, 1, rv(i) > 0.24 ? dk : lt);
+      for (let i = 200; i < 212; i += 1) { // tufts
+        const x = rx(i);
+        const y = ry(i);
+        dot(x, y, 1, 2, dk2);
+        dot(x + 1, y + 1, 1, 2, dk2);
+        if (rv(i) > 0.5) dot(x, y - 1, 1, 1, lt);
       }
       break;
     }
-    case 'sand': { // wind-speckled grain with the occasional pebble
-      if (v > 0.86) {
-        ctx.fillStyle = shade(palette.grassDark, -0.35);
-        ctx.fillRect(x, y - px, px + 1, px + 1); // pebble
-      } else {
-        ctx.fillStyle = v > 0.45 ? shade(palette.grassLight, 0.22) : shade(palette.grassDark, -0.2);
-        ctx.fillRect(x, y, px, px);
+    case 'sand': {
+      const dk = shade(base, -0.12);
+      const dk2 = shade(base, -0.28);
+      const lt = shade(base, 0.14);
+      // wind ripples: broken wavy lines that tile horizontally
+      for (let r = 0; r < 5; r += 1) {
+        const yBase = r * (TILE / 5) + 3;
+        for (let x = 0; x < TILE; x += 1) {
+          if (hash(r * 131 + x * 17.7) > 0.72) continue; // broken line
+          const y = yBase + Math.round(Math.sin(((x / TILE) * 4 + r * 0.7) * Math.PI) * 1.8);
+          dot(x, y, 1, 1, dk);
+        }
+      }
+      for (let i = 0; i < 46; i += 1) dot(rx(i), ry(i), 1, 1, rv(i) > 0.5 ? lt : dk);
+      for (let i = 300; i < 304; i += 1) { // pebbles
+        const x = rx(i);
+        const y = ry(i);
+        dot(x, y, 2, 2, dk2);
+        dot(x, y, 1, 1, lt);
       }
       break;
     }
     case 'snow':
-    case 'salt': { // sparkle that twinkles, over soft blue/lilac shadow pits
-      if (v > 0.6) {
-        ctx.globalAlpha = 0.35 + 0.65 * Math.abs(Math.sin(time * 2.1 + v * 31));
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(x, y, px, px);
-        ctx.globalAlpha = 1;
-      } else {
-        ctx.fillStyle = shade(palette.grassDark, -0.14);
-        ctx.fillRect(x, y, px + 1, px);
+    case 'salt': {
+      const sh = shade(base, -0.09);
+      const sh2 = shade(base, -0.18);
+      for (let i = 0; i < 48; i += 1) dot(rx(i), ry(i), rv(i) > 0.5 ? 2 : 1, 1, sh);
+      for (let i = 100; i < 116; i += 1) dot(rx(i), ry(i), 1, 1, sh2);
+      for (let i = 400; i < 412; i += 1) dot(rx(i), ry(i), 1, 1, '#ffffff');
+      for (let i = 500; i < 503; i += 1) { // sparkle crosses
+        const x = rx(i);
+        const y = ry(i);
+        dot(x, y, 1, 1, '#ffffff');
+        dot(x - 1, y, 3, 1, kind === 'salt' ? '#fff0f4' : '#f4faff');
+        dot(x, y - 1, 1, 3, kind === 'salt' ? '#fff0f4' : '#f4faff');
       }
       break;
     }
-    case 'leaves': { // fallen-leaf litter in rust and gold
-      const c = v > 0.66 ? shade(palette.grassLight, 0.22)
-        : v > 0.33 ? shade(palette.grassDark, -0.34)
-          : mix(palette.grassDark, palette.rumbleDark, 0.6);
-      ctx.fillStyle = c;
-      ctx.fillRect(x, y, px + 1, px); // leaves lie flat — wider than tall
+    case 'leaves': {
+      const c1 = shade(base, -0.26);
+      const c2 = shade(base, 0.2);
+      const c3 = warm ? mix(base, warm, 0.55) : shade(base, -0.4);
+      const twig = shade(base, -0.48);
+      for (let i = 0; i < 40; i += 1) {
+        const col = rv(i) > 0.62 ? c2 : rv(i) > 0.28 ? c1 : c3;
+        dot(rx(i), ry(i), 2, 1, col);
+      }
+      for (let i = 600; i < 607; i += 1) dot(rx(i), ry(i), rv(i) > 0.5 ? 2 : 1, 1, twig);
       break;
     }
-    case 'ash': { // charred grit, the odd ember breathing in the dark
-      if (v > 0.82) {
-        ctx.globalAlpha = 0.35 + 0.65 * Math.abs(Math.sin(time * 1.7 + v * 43));
-        ctx.fillStyle = '#ff8a3c';
-        ctx.fillRect(x, y, px, px);
-        ctx.globalAlpha = 1;
-      } else {
-        ctx.fillStyle = v > 0.5 ? shade(palette.grassLight, 0.5) : shade(palette.grassDark, -0.35);
-        ctx.fillRect(x, y, px, px);
+    case 'ash': {
+      const g1 = shade(base, -0.26);
+      const g2 = shade(base, 0.34);
+      for (let i = 0; i < 64; i += 1) dot(rx(i), ry(i), 1, 1, rv(i) > 0.72 ? g2 : g1);
+      for (let i = 700; i < 704; i += 1) { // embers caught in the grit
+        dot(rx(i), ry(i), 1, 1, '#ff8a3c');
+        if (rv(i) > 0.6) dot(rx(i) + 1, ry(i), 1, 1, '#ffb44d');
       }
       break;
     }
-    case 'asphalt': { // sparse pale aggregate in the dark expressway shoulder
-      if (v > 0.55) return;
-      ctx.globalAlpha = 0.55;
-      ctx.fillStyle = shade(palette.grassLight, 0.4);
-      ctx.fillRect(x, y, px, px);
-      ctx.globalAlpha = 1;
+    case 'asphalt': {
+      const lt = shade(base, 0.3);
+      const dk = shade(base, -0.2);
+      for (let i = 0; i < 40; i += 1) dot(rx(i), ry(i), 1, 1, rv(i) > 0.45 ? lt : dk);
+      break;
+    }
+    case 'rock': {
+      const dk = shade(base, -0.18);
+      const dk2 = shade(base, -0.36);
+      const lt = shade(base, 0.16);
+      for (let i = 0; i < 90; i += 1) dot(rx(i), ry(i), rv(i) > 0.7 ? 2 : 1, 1, rv(i) > 0.28 ? dk : lt);
+      for (let i = 800; i < 808; i += 1) dot(rx(i), ry(i), 1, 2, dk2); // crack pits
+      break;
+    }
+    case 'tarmac': {
+      const lt = shade(base, 0.09);
+      const dk = shade(base, -0.11);
+      const dk2 = shade(base, -0.26);
+      for (let i = 0; i < 76; i += 1) dot(rx(i), ry(i), 1, 1, rv(i) > 0.5 ? lt : dk);
+      for (let i = 900; i < 906; i += 1) dot(rx(i), ry(i), 1, 1, dk2);
       break;
     }
   }
-}
-
-/** Tarmac grain on near segments — a light dusting, not a gravel road. */
-function drawRoadGrain(ctx: CanvasRenderingContext2D, seg: Segment, palette: Palette): void {
-  const p1 = seg.p1.screen;
-  const p2 = seg.p2.screen;
-  const h = p1.y - p2.y;
-  if (h < 4) return;
-  const road = seg.color === 'dark' ? palette.roadDark : palette.roadLight;
-  const n = Math.min(8, Math.ceil(h / 6));
-  ctx.globalAlpha = 0.45;
-  for (let k = 0; k < n; k += 1) {
-    const seed = seg.index * 11.17 + k * 29.3;
-    const t = hash(seed);
-    const w = lerp(p1.w, p2.w, t);
-    const x = lerp(p1.x, p2.x, t) + (hash(seed + 2.3) * 2 - 1) * w * 0.92;
-    const y = lerp(p1.y, p2.y, t);
-    const px = Math.max(1, Math.round(w * 0.011));
-    ctx.fillStyle = hash(seed + 5.1) > 0.5 ? shade(road, 0.16) : shade(road, -0.18);
-    ctx.fillRect(x, y, px, px);
-  }
-  ctx.globalAlpha = 1;
 }
 
 /** The colour of the ground BEYOND the verge on one side, banded like the road. */
@@ -1504,9 +1561,31 @@ function renderSides(
   const r1 = p1.x + VERGE * p1.w;
   const r2 = p2.x + VERGE * p2.w;
 
-  // The ground beyond the lip on each side.
-  polygon(ctx, edgeL, p1.y, l1, p1.y, l2, p2.y, edgeL, p2.y, sideColor(terrain.left, terrain, palette, dark));
-  polygon(ctx, r1, p1.y, edgeR, p1.y, edgeR, p2.y, r2, p2.y, sideColor(terrain.right, terrain, palette, dark));
+  // The ground beyond the lip on each side. A `flat` side is the SAME ground
+  // as the verge, so it skips its fill and lets the textured slab run to the
+  // frame edge; sea / canyon / rock repaint over the texture past the lip.
+  const rockTextured = slabTextured(seg) && p1.w >= 90;
+  const fillSide = (kind: SideKind, x1: number, y1: number, x2: number, y2: number, x3: number, y3: number, x4: number, y4: number): void => {
+    if (kind === 'flat') return;
+    polygon(ctx, x1, y1, x2, y2, x3, y3, x4, y4, sideColor(kind, terrain, palette, dark));
+    if (kind === 'cliff' && rockTextured) {
+      // The open rock shoulder carries its own pixel mottle, in perspective.
+      const pat = groundPattern(ctx, 'rock', sideColor(kind, terrain, palette, dark));
+      if (pat) {
+        pat.setTransform(groundMatrix(seg));
+        ctx.fillStyle = pat;
+        ctx.beginPath();
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+        ctx.lineTo(x3, y3);
+        ctx.lineTo(x4, y4);
+        ctx.closePath();
+        ctx.fill();
+      }
+    }
+  };
+  fillSide(terrain.left, edgeL, p1.y, l1, p1.y, l2, p2.y, edgeL, p2.y);
+  fillSide(terrain.right, r1, p1.y, edgeR, p1.y, edgeR, p2.y, r2, p2.y);
 
   // A bright line of surf / rock lip where the ground gives way — what makes a
   // drop read as a DROP rather than a change of paint.
@@ -1519,17 +1598,16 @@ function renderSides(
   lip(l1, l2, terrain.left);
   lip(r1, r2, terrain.right);
 
-  // Material over the flat paint beyond the lip: rolling surf on the water,
-  // mottled rock on a canyon floor or open rock shoulder. Same LOD gate as the
-  // verge specks — far bands are a couple of pixels tall and stay flat colour.
+  // Animated material beyond the lip: rolling surf on the water, static pocks
+  // over a canyon floor. Far bands are a couple of pixels tall and stay flat.
   const h = p1.y - p2.y;
   if (h < 2) return;
   const detail = (lip1: number, lip2: number, side: -1 | 1, kind: SideKind): void => {
-    if (kind === 'flat') return; // handled by the verge speck pass (same ground)
+    if (kind !== 'sea' && kind !== 'drop') return; // flat/cliff use the tile pass
     // Water gets a denser pass than rock — waves are the whole point of it.
-    const n = kind === 'sea' ? Math.min(12, Math.ceil(h / 2.5)) : speckCount(h);
+    const n = kind === 'sea' ? Math.min(12, Math.ceil(h / 2.5)) : Math.min(16, Math.ceil(h / 3.5));
     const seaLite = shade(palette.sea, 0.3);
-    const base = kind === 'sea' ? palette.sea : kind === 'drop' ? terrain.dropColor : terrain.cliffLight;
+    const base = kind === 'sea' ? palette.sea : terrain.dropColor;
     for (let k = 0; k < n; k += 1) {
       const seed = seg.index * 5.77 + side * 91.3 + k * 37.1;
       const t = hash(seed);
@@ -1588,23 +1666,44 @@ function renderSegment(ctx: CanvasRenderingContext2D, width: number, height: num
   // verge with rock / sea / canyon (but a tunnel bore fills its own walls).
   ctx.fillStyle = grass;
   ctx.fillRect(bleedX, p2.y, bleedW, p1.y - p2.y + 1);
-  if (seg.overhead?.kind !== 'tunnel') {
-    renderSides(ctx, width, seg, palette, terrain, time);
-    // Verge material: specks between the rumble strip and the lip, spilling
-    // on across the open ground where a side stays flat.
-    const specks = speckCount(p1.y - p2.y);
-    for (const side of [-1, 1] as const) {
-      const beyond = (side < 0 ? terrain.left : terrain.right) === 'flat';
-      const oMax = beyond ? VERGE + 2.4 : VERGE - 0.15;
-      for (let k = 0; k < specks; k += 1) drawGroundSpeck(ctx, seg, palette, side, k, oMax, time);
+  if (slabTextured(seg) && seg.overhead?.kind !== 'tunnel') {
+    // The biome's pixel tile over the slab; the sides repaint whatever lies
+    // beyond a sea / canyon / rock lip on top of it. Laterally clamped to the
+    // rows' visible reach — on far rows the slab spans the whole frame but its
+    // texels are speckle-dust, so painting the periphery buys nothing.
+    const pat = groundPattern(ctx, palette.ground, grass, palette.rumbleDark);
+    if (pat) {
+      const reach = (VERGE + 8) * p1.w;
+      const x0 = Math.max(bleedX, p1.x - reach);
+      const x1 = Math.min(bleedX + bleedW, p1.x + reach);
+      pat.setTransform(groundMatrix(seg));
+      ctx.fillStyle = pat;
+      ctx.fillRect(x0, p2.y, x1 - x0, p1.y - p2.y + 1);
     }
   }
+  if (seg.overhead?.kind !== 'tunnel') renderSides(ctx, width, seg, palette, terrain, time);
 
   const r1 = rumbleWidth(p1.w);
   const r2 = rumbleWidth(p2.w);
   polygon(ctx, p1.x - p1.w - r1, p1.y, p1.x - p1.w, p1.y, p2.x - p2.w, p2.y, p2.x - p2.w - r2, p2.y, rumble);
   polygon(ctx, p1.x + p1.w + r1, p1.y, p1.x + p1.w, p1.y, p2.x + p2.w, p2.y, p2.x + p2.w + r2, p2.y, rumble);
   polygon(ctx, p1.x - p1.w, p1.y, p1.x + p1.w, p1.y, p2.x + p2.w, p2.y, p2.x - p2.w, p2.y, road);
+  if (roadTextured(seg)) {
+    // Asphalt wears the same chunky texels as the ground; lane paint goes on
+    // over the top so the markings stay crisp.
+    const pat = groundPattern(ctx, 'tarmac', road);
+    if (pat) {
+      pat.setTransform(groundMatrix(seg));
+      ctx.fillStyle = pat;
+      ctx.beginPath();
+      ctx.moveTo(p1.x - p1.w, p1.y);
+      ctx.lineTo(p1.x + p1.w, p1.y);
+      ctx.lineTo(p2.x + p2.w, p2.y);
+      ctx.lineTo(p2.x - p2.w, p2.y);
+      ctx.closePath();
+      ctx.fill();
+    }
+  }
 
   if (!dark) {
     const l1 = laneMarkerWidth(p1.w);
@@ -1617,7 +1716,6 @@ function renderSegment(ctx: CanvasRenderingContext2D, width: number, height: num
       polygon(ctx, lx1 - l1, p1.y, lx1 + l1, p1.y, lx2 + l2, p2.y, lx2 - l2, p2.y, palette.lane);
     }
   }
-  drawRoadGrain(ctx, seg, palette);
 
   const fog = 1 / Math.exp((fogT * fogT * ROAD.fogDensity));
   // Posts sit on the tarmac (so the fog washes over them like everything else)
