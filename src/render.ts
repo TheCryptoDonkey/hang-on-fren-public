@@ -919,6 +919,34 @@ function apertureAt(
  * punched through it, and the interior shows through the hole rather than being
  * buried under the hillside.
  */
+/**
+ * One horizontal course of a receding tunnel wall, between height fractions
+ * t0..t1 (0 = ceiling, 1 = road). The vertical edges stay put; only the band's
+ * top and bottom slide down each edge, so a stack of these paints a tiled wall
+ * in true perspective for free.
+ */
+function wallBand(
+  ctx: CanvasRenderingContext2D,
+  xNear: number,
+  xFar: number,
+  roofN: number,
+  floorN: number,
+  roofF: number,
+  floorF: number,
+  t0: number,
+  t1: number,
+  color: string,
+): void {
+  polygon(
+    ctx,
+    xNear, lerp(roofN, floorN, t0),
+    xFar, lerp(roofF, floorF, t0),
+    xFar, lerp(roofF, floorF, t1),
+    xNear, lerp(roofN, floorN, t1),
+    color,
+  );
+}
+
 function drawBore(
   ctx: CanvasRenderingContext2D,
   h: number,
@@ -937,18 +965,49 @@ function drawBore(
   const r2 = p2.x + p2.w * WALL_X;
   const roof1 = upFrom(p1, ROOF_Y, h);
   const roof2 = upFrom(p2, ROOF_Y, h);
-
-  // Concrete, hazed toward the region's fog with depth so the bore recedes.
-  const wall = mix('#3a4048', palette.fog, (1 - fog) * 0.8);
-  const roof = mix('#20242b', palette.fog, (1 - fog) * 0.8);
   const tunnel = overhead.kind === 'tunnel';
+  const haze = (1 - fog) * 0.8;
 
+  // A road-tunnel wall reads in COURSES, not one flat grey: a shadow line under
+  // the ceiling, a grey upper wall, a lit ceramic dado, an amber service stripe,
+  // and a dark skirting kerb at the road. Each is hazed toward the region fog
+  // with depth so the bore recedes into its own gloom. This is what lifts the
+  // interior from "flat concrete box" to something with 32-bit surface.
   if (tunnel) {
-    polygon(ctx, l1, p1.y, l1, roof1, l2, roof2, l2, p2.y, wall);
-    polygon(ctx, r1, p1.y, r1, roof1, r2, roof2, r2, p2.y, wall);
+    const cShadow = mix('#191c22', palette.fog, haze);
+    const cUpper = mix('#39404a', palette.fog, haze);
+    const cLedge = mix('#5a626e', palette.fog, haze);
+    const cStripe = mix('#c98a2e', palette.fog, haze); // sodium-amber safety band
+    const cDado = mix('#9aa2ae', palette.fog, haze); // lit ceramic tiling
+    const cKerb = mix('#141117', palette.fog, haze);
+    // course boundaries, ceiling(0) -> road(1)
+    const courses: Array<[number, number, string]> = [
+      [0.0, 0.1, cShadow],
+      [0.1, 0.52, cUpper],
+      [0.52, 0.56, cLedge],
+      [0.56, 0.62, cStripe],
+      [0.62, 0.92, cDado],
+      [0.92, 1.0, cKerb],
+    ];
+    for (const [xn, xf] of [[l1, l2], [r1, r2]] as const) {
+      for (const [t0, t1, color] of courses) {
+        wallBand(ctx, xn, xf, roof1, p1.y, roof2, p2.y, t0, t1, color);
+      }
+    }
   }
-  polygon(ctx, l1, roof1, r1, roof1, r2, roof2, l2, roof2, roof);
 
+  // Ceiling: dark, with a slightly lifted rib down the centre where the strip
+  // lights hang — gives the roof a spine to read the speed against.
+  const roof = mix('#20242b', palette.fog, haze);
+  polygon(ctx, l1, roof1, r1, roof1, r2, roof2, l2, roof2, roof);
+  if (tunnel) {
+    const rib = mix('#2b303c', palette.fog, haze);
+    const c1 = (l1 + r1) / 2;
+    const c2 = (l2 + r2) / 2;
+    const rw1 = (r1 - l1) * 0.16;
+    const rw2 = (r2 - l2) * 0.16;
+    polygon(ctx, c1 - rw1, roof1, c1 + rw1, roof1, c2 + rw2, roof2, c2 - rw2, roof2, rib);
+  }
 }
 
 /**
@@ -1038,47 +1097,109 @@ function drawPortal(
     // still see the sky and the land either side of it, which is the whole
     // difference between passing under a bridge and entering a tunnel.
     polygon(ctx, l, roof, r, roof, r, deck, l, deck, face);
+    // Sun-caught top lip and a shadowed soffit, so the deck reads as a solid slab
+    // with thickness rather than a flat grey band.
+    const lip = Math.max(1, (roof - deck) * 0.16);
+    ctx.fillStyle = mix('#767d86', palette.fog, 0.2);
+    ctx.fillRect(l, deck, r - l, lip);
+    ctx.fillStyle = 'rgba(0,0,0,0.34)'; // shadow under the deck
+    ctx.fillRect(l, roof - lip, r - l, lip);
     const leg = Math.max(2, p.w * 0.09);
     ctx.fillStyle = mix('#3f454d', palette.fog, 0.2);
     ctx.fillRect(l - leg, roof, leg, p.y - roof);
     ctx.fillRect(r, roof, leg, p.y - roof);
+    ctx.fillStyle = 'rgba(255,255,255,0.12)'; // lit outer edge of each leg
+    ctx.fillRect(l - leg, roof, Math.max(1, leg * 0.22), p.y - roof);
+    ctx.fillRect(r, roof, Math.max(1, leg * 0.22), p.y - roof);
     return;
   }
 
-  // The hillside the tunnel is bored INTO. Deliberately a bounded shape — a
-  // buttress with a shoulder — and not a fill across the whole frame. Painting
-  // the entire canvas is what a hillside geometrically does, and it looks
-  // atrocious: the sea, the sky and the coast all vanish behind a featureless
-  // grey field, and the tunnel reads as a rendering fault rather than a place.
-  // Bounding it keeps the Amalfi backdrop visible around the shoulders, which is
-  // what makes the mouth look like something set INTO the world.
-  const hillW = p.w * 3.4;
-  const shoulder = upFrom(p, ROOF_Y * 1.5, h);
-  const crest = upFrom(p, ROOF_Y * 2.3, h);
+  // A BUILT concrete portal that FRAMES the mouth, sized off the opening itself —
+  // wing walls the width of half the mouth, a header beam above it, a coping cap.
+  // The old design was a full hillside sized off ROOF_Y and the canvas height; on
+  // a tall phone screen that mountain swallowed the entire coast — sky, sea and
+  // all — which is the "on mobile it's all wall" complaint. Tying every dimension
+  // to the on-screen opening makes the facade grow WITH the mouth (small and
+  // distant, then filling the frame as you plunge in) and, crucially, leaves the
+  // painted backdrop visible above and to the sides at every aspect ratio.
+  const mouthW = r - l;
+  const openH = Math.max(1, p.y - roof);
+  const wing = mouthW * 0.4; // wall each side of the opening
+  const headH = openH * 0.36; // header kept low so more sky/coast shows above it —
+                              // on a tall phone that top band IS the backdrop
+  const batter = wing * 0.18; // sides lean in toward the top → retaining-wall look
+  const oL = l - wing;
+  const oR = r + wing;
+  const topY = roof - headH;
+  const base = mix('#565d67', palette.fog, 0.22);
+
+  // Facade silhouette (battered trapezoid) with the bore's cross-section wound as
+  // a second sub-path: even-odd leaves the opening a genuine HOLE, so the interior
+  // already on the canvas survives.
+  const facade = new Path2D();
+  facade.moveTo(oL, p.y);
+  facade.lineTo(oL + batter, topY);
+  facade.lineTo(oR - batter, topY);
+  facade.lineTo(oR, p.y);
+  facade.closePath();
+  facade.moveTo(l, p.y);
+  facade.lineTo(l, roof);
+  facade.lineTo(r, roof);
+  facade.lineTo(r, p.y);
+  facade.closePath();
+  ctx.fillStyle = base;
+  ctx.fill(facade, 'evenodd');
+
+  // Surface detail, all clipped to the facade so it can't bleed onto sky or road.
   ctx.save();
+  ctx.clip(facade, 'evenodd');
+  // top-lit vertical ramp: bright coping, shadowed toward the road
+  const lit = ctx.createLinearGradient(0, topY, 0, p.y);
+  lit.addColorStop(0, 'rgba(255,255,255,0.14)');
+  lit.addColorStop(0.4, 'rgba(255,255,255,0)');
+  lit.addColorStop(1, 'rgba(0,0,0,0.28)');
+  ctx.fillStyle = lit;
+  ctx.fillRect(oL, topY, oR - oL, p.y - topY);
+  // horizontal block courses
+  ctx.strokeStyle = 'rgba(0,0,0,0.16)';
+  ctx.lineWidth = Math.max(1, openH * 0.012);
+  const course = Math.max(6, openH * 0.15);
+  for (let y = topY + course; y < p.y; y += course) {
+    ctx.beginPath();
+    ctx.moveTo(oL, y);
+    ctx.lineTo(oR, y);
+    ctx.stroke();
+  }
+  // vertical control joints down the wing walls
   ctx.beginPath();
-  ctx.moveTo(p.x - hillW, p.y);
-  ctx.lineTo(p.x - hillW, shoulder);
-  ctx.lineTo(p.x - hillW * 0.55, crest);
-  ctx.lineTo(p.x + hillW * 0.55, crest);
-  ctx.lineTo(p.x + hillW, shoulder);
-  ctx.lineTo(p.x + hillW, p.y);
-  ctx.closePath();
-  // The bore's cross-section, wound as a second sub-path: even-odd leaves it a
-  // genuine HOLE. The tunnel interior is already on the canvas underneath (every
-  // segment deeper in was drawn first) and has to survive being drawn over.
-  ctx.moveTo(l, p.y);
-  ctx.lineTo(l, roof);
-  ctx.lineTo(r, roof);
-  ctx.lineTo(r, p.y);
-  ctx.closePath();
-  ctx.fillStyle = face;
-  ctx.fill('evenodd');
+  ctx.moveTo(l - wing * 0.5, topY); ctx.lineTo(l - wing * 0.5, p.y);
+  ctx.moveTo(r + wing * 0.5, topY); ctx.lineTo(r + wing * 0.5, p.y);
+  ctx.stroke();
   ctx.restore();
 
-  // A lintel over the mouth so the portal reads as built, not bored.
-  ctx.fillStyle = mix('#2c3138', palette.fog, 0.2);
-  ctx.fillRect(l, deck, r - l, roof - deck);
+  // Recessed reveal: a dark inner shadow just outside the opening + a bright
+  // chamfer catching the light, so the mouth reads as a thick portal, not a
+  // sticker. Drawn as strokes hugging the opening edges (top and two jambs).
+  ctx.lineJoin = 'miter';
+  ctx.strokeStyle = 'rgba(0,0,0,0.55)';
+  ctx.lineWidth = Math.max(2, mouthW * 0.05);
+  ctx.beginPath();
+  ctx.moveTo(l, p.y); ctx.lineTo(l, roof); ctx.lineTo(r, roof); ctx.lineTo(r, p.y);
+  ctx.stroke();
+  ctx.strokeStyle = 'rgba(255,255,255,0.16)';
+  ctx.lineWidth = Math.max(1, mouthW * 0.02);
+  const inset = Math.max(1, mouthW * 0.03);
+  ctx.beginPath();
+  ctx.moveTo(l + inset, p.y); ctx.lineTo(l + inset, roof + inset); ctx.lineTo(r - inset, roof + inset); ctx.lineTo(r - inset, p.y);
+  ctx.stroke();
+
+  // Coping cap: a lipped beam across the top edge, lighter than the wall, with a
+  // shadow line under it — the portal's crown.
+  const cap = openH * 0.08;
+  ctx.fillStyle = mix('#6b727c', palette.fog, 0.2);
+  ctx.fillRect(oL + batter - wing * 0.12, topY - cap, oR - oL - 2 * batter + wing * 0.24, cap);
+  ctx.fillStyle = 'rgba(0,0,0,0.25)';
+  ctx.fillRect(oL + batter - wing * 0.12, topY, oR - oL - 2 * batter + wing * 0.24, Math.max(1, cap * 0.22));
 }
 
 // ---- sun glare and lens flare ----------------------------------------------
@@ -1242,7 +1363,6 @@ function sideColor(kind: SideKind, terrain: Terrain, palette: Palette, dark: boo
 function renderSides(
   ctx: CanvasRenderingContext2D,
   width: number,
-  height: number,
   seg: Segment,
   palette: Palette,
   terrain: Terrain,
@@ -1274,20 +1394,11 @@ function renderSides(
   lip(l1, l2, terrain.left);
   lip(r1, r2, terrain.right);
 
-  // Rock walls: a vertical face standing on the lip. Its screen x does not change
-  // with height (only the top edge lifts), so up close the wall simply fills that
-  // side of the frame — exactly as a cliff should.
-  const wall = (x1: number, x2: number, kind: SideKind): void => {
-    if (kind !== 'cliff') return;
-    const h = terrain.cliffHeight;
-    const t1 = upFrom(p1, h, height);
-    const t2 = upFrom(p2, h, height);
-    polygon(ctx, x1, p1.y, x1, t1, x2, t2, x2, p2.y, dark ? terrain.cliffDark : terrain.cliffLight);
-    const cap = Math.max(1, (p1.y - p2.y) * 0.5); // a lit top edge / silhouette
-    polygon(ctx, x1, t1, x1, t1 + cap, x2, t2 + cap * 0.5, x2, t2, rgba(shade(terrain.cliffLight, 0.28), 0.7));
-  };
-  wall(l1, l2, terrain.left);
-  wall(r1, r2, terrain.right);
+  // (The old `cliff` rock/retaining wall — a flat two-tone vertical face rising
+  // from the verge — has been removed. It read as a flat grey slab that clashed
+  // with the pixel-art and, worse, buried the painted horizon backdrop behind a
+  // featureless wall. A `cliff` side now stays open ground, so the coast / city /
+  // valley art shows through where the wall used to stand.)
 }
 
 function renderSegment(ctx: CanvasRenderingContext2D, width: number, height: number, seg: Segment, fogT: number, palette: Palette, lamps: Lamp[], terrain: Terrain): void {
@@ -1306,7 +1417,7 @@ function renderSegment(ctx: CanvasRenderingContext2D, width: number, height: num
   // verge with rock / sea / canyon (but a tunnel bore fills its own walls).
   ctx.fillStyle = grass;
   ctx.fillRect(bleedX, p2.y, bleedW, p1.y - p2.y + 1);
-  if (seg.overhead?.kind !== 'tunnel') renderSides(ctx, width, height, seg, palette, terrain);
+  if (seg.overhead?.kind !== 'tunnel') renderSides(ctx, width, seg, palette, terrain);
 
   const r1 = rumbleWidth(p1.w);
   const r2 = rumbleWidth(p2.w);

@@ -515,7 +515,12 @@ const isTouch = matchMedia('(pointer: coarse)').matches;
 document.body.classList.toggle('touch-device', isTouch);
 
 type TouchControl = 'left' | 'right' | 'slow';
-type ActiveTouchControl = { action: TouchControl; button: HTMLButtonElement };
+type ActiveTouchControl = { action: TouchControl; button: HTMLButtonElement; seq: number };
+// Monotonic press order, so when both steer buttons are held at once the one
+// pressed MOST RECENTLY wins. Without this, holding → and then pressing ← nets
+// to zero (right − left), so the ← button reads as dead while the bike keeps
+// drifting right — the "player stuck on the right, left button does nothing" bug.
+let touchControlSeq = 0;
 
 const mobileControls = document.getElementById('mobile-controls');
 const touchControlButtons = Array.from(document.querySelectorAll<HTMLButtonElement>('[data-touch-control]'));
@@ -539,7 +544,12 @@ function refreshTouchControlButtons(): void {
 function setActiveTouchControl(pointerId: number, button: HTMLButtonElement): void {
   const action = button.dataset.touchControl;
   if (!isTouchControl(action)) return;
-  activeTouchControls.set(pointerId, { action, button });
+  const existing = activeTouchControls.get(pointerId);
+  // Keep a stable seq while a pointer stays on the same button (pointermove
+  // re-fires); only re-stamp when it actually lands on a different control, so
+  // sliding a held thumb onto the other button makes THAT the latest.
+  const seq = existing && existing.action === action ? existing.seq : (touchControlSeq += 1);
+  activeTouchControls.set(pointerId, { action, button, seq });
   refreshTouchControlButtons();
 }
 
@@ -556,13 +566,18 @@ function clearTouchInput(): void {
 }
 
 function controlButtonSteer(): number {
-  let left = false;
-  let right = false;
+  // Latest-pressed steer button wins. Holding both no longer cancels to zero;
+  // pressing the opposite button always overrides the one you're still holding.
+  let bestSeq = -1;
+  let dir = 0;
   for (const active of activeTouchControls.values()) {
-    if (active.action === 'left') left = true;
-    if (active.action === 'right') right = true;
+    if (active.action !== 'left' && active.action !== 'right') continue;
+    if (active.seq > bestSeq) {
+      bestSeq = active.seq;
+      dir = active.action === 'left' ? -1 : 1;
+    }
   }
-  return (right ? 1 : 0) - (left ? 1 : 0);
+  return dir;
 }
 
 function isControlSlowActive(): boolean {
@@ -881,7 +896,11 @@ function pollPadMenu(): void {
 function readInput(): void {
   const buttonSteer = controlButtonSteer();
   const pad = readGamepad();
-  const steer = clamp(touchSteer + buttonSteer + pad.steer, -1, 1);
+  // The on-screen buttons are the deliberate control, so they win outright over
+  // the canvas tap-zones — otherwise a stray thumb resting in the right half of
+  // the screen would silently cancel a left-button press (and vice versa).
+  const touch = buttonSteer !== 0 ? buttonSteer : touchSteer;
+  const steer = clamp(touch + pad.steer, -1, 1);
   keyboard.applyTo(input);
   input.left = input.left || steer < 0;
   input.right = input.right || steer > 0;
