@@ -427,6 +427,7 @@ let tripSnap: HTMLCanvasElement | null = null;
 
 export function renderScene(scene: Scene): void {
   const { ctx, width, height, track, player, world, store } = scene;
+  groundArt = store; // ground tiles pull their generated textures from here
   const palette = scene.palette ?? DEFAULT_PALETTE;
   const terrain = scene.terrain ?? DEFAULT_TERRAIN;
   const camYaw = scene.camYaw ?? 0;
@@ -1358,8 +1359,6 @@ function shade(hex: string, amount: number): string {
 // a texel would be sub-pixel mush — stay flat colour under the fog.
 
 const TILE = 48;
-/** Texture rows one road segment advances — ties the tile to world z. */
-const TILE_ROWS = 3;
 /** Ground texture LOD. The road band is narrow, so it can afford texture out
  *  to where a texel is ~1px; the ground slab spans the whole frame width, so
  *  it drops to flat colour earlier — right about where its texels stop being
@@ -1372,44 +1371,118 @@ function slabTextured(seg: Segment): boolean {
   return seg.p1.screen.y - seg.p2.screen.y >= 3 && seg.p1.screen.w >= 72;
 }
 
+/** Per-material texture styling.
+ *  - `tint`: 'palette' swaps the art's hue for the band colour (luminosity
+ *    blend) so one texture serves every biome; 'natural' keeps the art's own
+ *    colours (autumn leaf reds, ember orange, wave blues) — used where the
+ *    material only appears under palettes it already matches.
+ *  - `texels`: how many texture pixels span half the road — the zoom. 48 is
+ *    fat chunky ground; the tarmac runs much finer or it reads as cobbles.
+ *  - `rows`: texture rows per segment (scales vertical texel to match).
+ *  - `strength`: how loudly the texture reads over the flat band colour. */
+const TILE_STYLE: Record<TileKind, { tint: 'palette' | 'natural'; texels: number; rows: number; strength: number }> = {
+  grass: { tint: 'palette', texels: 48, rows: 3, strength: 1 },
+  sand: { tint: 'palette', texels: 48, rows: 3, strength: 1 },
+  snow: { tint: 'palette', texels: 48, rows: 3, strength: 0.7 },
+  salt: { tint: 'palette', texels: 48, rows: 3, strength: 0.7 },
+  leaves: { tint: 'natural', texels: 48, rows: 3, strength: 1 },
+  ash: { tint: 'natural', texels: 48, rows: 3, strength: 1 },
+  asphalt: { tint: 'palette', texels: 64, rows: 4, strength: 0.8 },
+  rock: { tint: 'palette', texels: 56, rows: 3, strength: 0.9 },
+  tarmac: { tint: 'palette', texels: 128, rows: 8, strength: 0.28 },
+  water: { tint: 'natural', texels: 64, rows: 4, strength: 0.9 },
+};
+
 /** Perspective transform mapping tile texels onto this segment's ground band:
- *  texel width tracks the projected road width, and TILE_ROWS texture rows
- *  span the band so the pattern scrolls with z and foreshortens with depth. */
-function groundMatrix(seg: Segment): DOMMatrix {
+ *  texel width tracks the projected road width, and the material's row count
+ *  spans the band so the pattern scrolls with z and foreshortens with depth.
+ *  `texH` is the tile's pixel height (the generated art tiles are taller than
+ *  the procedural ones — same texel size, longer repeat). */
+function groundMatrix(seg: Segment, texH: number, kind: TileKind): DOMMatrix {
+  const style = TILE_STYLE[kind];
   const p1 = seg.p1.screen;
-  const rowT = (p1.y - seg.p2.screen.y) / TILE_ROWS;
+  const rowT = (p1.y - seg.p2.screen.y) / style.rows;
   return new DOMMatrix([
-    Math.max(0.75, p1.w / TILE), 0,
+    Math.max(0.35, p1.w / style.texels), 0,
     0, -rowT,
-    p1.x, p1.y + ((seg.index * TILE_ROWS) % TILE) * rowT,
+    p1.x, p1.y + ((seg.index * style.rows) % texH) * rowT,
   ]);
 }
 
 // Tinted tiles are cached per (material, colour). Palette transitions retint
 // every frame for ~a fifth of a leg, so the cache is bounded and just cleared
-// when it fills — rebuilding a 48px tile is trivia next to a frame.
-const tileCache = new Map<string, CanvasPattern | null>();
+// when it fills — rebuilding a tile is trivia next to a frame.
+const tileCache = new Map<string, GroundTile | null>();
 
-type TileKind = GroundKind | 'rock' | 'tarmac';
+type TileKind = GroundKind | 'rock' | 'tarmac' | 'water';
+interface GroundTile { pat: CanvasPattern; h: number }
 
-function groundPattern(ctx: CanvasRenderingContext2D, kind: TileKind, base: string, warm = ''): CanvasPattern | null {
-  const key = `${kind}|${base}|${warm}`;
-  let pat = tileCache.get(key);
-  if (pat === undefined) {
+/** The generated texture each material wears; set by renderScene each frame
+ *  (the store loads async — until a texture lands, the procedural tile runs). */
+let groundArt: SpriteStore | null = null;
+
+const ART_TEX: Record<TileKind, string> = {
+  grass: 'texture-grass',
+  sand: 'texture-sand',
+  snow: 'texture-snow',
+  salt: 'texture-snow', // the lilac tint does the salt
+  leaves: 'texture-leaves',
+  ash: 'texture-ash',
+  asphalt: 'texture-asphalt',
+  rock: 'texture-rock',
+  tarmac: 'texture-tarmac',
+  water: 'texture-water',
+};
+
+function groundPattern(ctx: CanvasRenderingContext2D, kind: TileKind, base: string, warm = '', dark = false): GroundTile | null {
+  const art = groundArt?.get(ART_TEX[kind]) ?? null;
+  const key = `${kind}|${base}|${warm}|${dark ? 'd' : 'l'}|${art ? 'a' : 'p'}`;
+  let tile = tileCache.get(key);
+  if (tile === undefined) {
     const cv = document.createElement('canvas');
-    cv.width = TILE;
-    cv.height = TILE;
+    cv.width = art ? art.w : TILE;
+    cv.height = art ? art.h : TILE;
     const c = cv.getContext('2d');
-    if (c) {
-      paintTile(c, kind, base, warm);
-      pat = ctx.createPattern(cv, 'repeat');
+    if (!c) {
+      tile = null;
     } else {
-      pat = null;
+      if (art) {
+        const style = TILE_STYLE[kind];
+        c.fillStyle = base;
+        c.fillRect(0, 0, cv.width, cv.height);
+        // 'palette' materials get a palette swap: keep the ART's luminance
+        // (the pixel art), take the band colour's hue — one texture serves
+        // every biome and still morphs through region transitions. 'natural'
+        // materials keep their own colours (leaf reds, ember orange).
+        c.globalCompositeOperation = style.tint === 'palette' ? 'luminosity' : 'source-over';
+        c.drawImage(art.canvas, 0, 0, cv.width, cv.height);
+        c.globalCompositeOperation = 'source-over';
+        if (style.strength < 1) {
+          // Pull the texture back toward the flat band colour — the tarmac
+          // wants a whisper of aggregate, not crazy paving.
+          c.globalAlpha = 1 - style.strength;
+          c.fillStyle = base;
+          c.fillRect(0, 0, cv.width, cv.height);
+          c.globalAlpha = 1;
+        }
+        if (dark) {
+          // The light/dark segment banding lives in the base colour's
+          // luminance, which the palette swap discards — put it back.
+          c.globalCompositeOperation = 'multiply';
+          c.fillStyle = 'rgba(14,16,26,0.12)';
+          c.fillRect(0, 0, cv.width, cv.height);
+          c.globalCompositeOperation = 'source-over';
+        }
+      } else {
+        paintTile(c, kind, base, warm);
+      }
+      const pat = ctx.createPattern(cv, 'repeat');
+      tile = pat ? { pat, h: cv.height } : null;
     }
     if (tileCache.size > 160) tileCache.clear();
-    tileCache.set(key, pat);
+    tileCache.set(key, tile);
   }
-  return pat;
+  return tile;
 }
 
 /** The pixel art itself — one 48x48 tile per material, built from the band's
@@ -1521,6 +1594,20 @@ function paintTile(c: CanvasRenderingContext2D, kind: TileKind, base: string, wa
       for (let i = 900; i < 906; i += 1) dot(rx(i), ry(i), 1, 1, dk2);
       break;
     }
+    case 'water': {
+      const lt = shade(base, 0.18);
+      const dk = shade(base, -0.12);
+      for (let r = 0; r < 6; r += 1) { // broken wave rows that tile sideways
+        const yBase = r * (TILE / 6) + 2;
+        for (let x = 0; x < TILE; x += 1) {
+          if (hash(r * 97 + x * 13.1) > 0.6) continue;
+          const y = yBase + Math.round(Math.sin(((x / TILE) * 3 + r * 1.3) * Math.PI) * 1.4);
+          dot(x, y, 1, 1, rv(r * 61 + x) > 0.85 ? '#ffffff' : lt);
+        }
+      }
+      for (let i = 0; i < 24; i += 1) dot(rx(i), ry(i), 1, 1, dk);
+      break;
+    }
   }
 }
 
@@ -1564,16 +1651,18 @@ function renderSides(
   // The ground beyond the lip on each side. A `flat` side is the SAME ground
   // as the verge, so it skips its fill and lets the textured slab run to the
   // frame edge; sea / canyon / rock repaint over the texture past the lip.
-  const rockTextured = slabTextured(seg) && p1.w >= 90;
+  const sideTextured = slabTextured(seg) && p1.w >= 90;
   const fillSide = (kind: SideKind, x1: number, y1: number, x2: number, y2: number, x3: number, y3: number, x4: number, y4: number): void => {
     if (kind === 'flat') return;
     polygon(ctx, x1, y1, x2, y2, x3, y3, x4, y4, sideColor(kind, terrain, palette, dark));
-    if (kind === 'cliff' && rockTextured) {
-      // The open rock shoulder carries its own pixel mottle, in perspective.
-      const pat = groundPattern(ctx, 'rock', sideColor(kind, terrain, palette, dark));
-      if (pat) {
-        pat.setTransform(groundMatrix(seg));
-        ctx.fillStyle = pat;
+    // Rock mottle over an open cliff shoulder; the water texture over the sea
+    // (the animated surf rolls over the top of it).
+    const tex: TileKind | null = kind === 'cliff' ? 'rock' : kind === 'sea' ? 'water' : null;
+    if (tex && sideTextured) {
+      const tile = groundPattern(ctx, tex, sideColor(kind, terrain, palette, dark), '', dark);
+      if (tile) {
+        tile.pat.setTransform(groundMatrix(seg, tile.h, tex));
+        ctx.fillStyle = tile.pat;
         ctx.beginPath();
         ctx.moveTo(x1, y1);
         ctx.lineTo(x2, y2);
@@ -1671,13 +1760,13 @@ function renderSegment(ctx: CanvasRenderingContext2D, width: number, height: num
     // beyond a sea / canyon / rock lip on top of it. Laterally clamped to the
     // rows' visible reach — on far rows the slab spans the whole frame but its
     // texels are speckle-dust, so painting the periphery buys nothing.
-    const pat = groundPattern(ctx, palette.ground, grass, palette.rumbleDark);
-    if (pat) {
+    const tile = groundPattern(ctx, palette.ground, grass, palette.rumbleDark, dark);
+    if (tile) {
       const reach = (VERGE + 8) * p1.w;
       const x0 = Math.max(bleedX, p1.x - reach);
       const x1 = Math.min(bleedX + bleedW, p1.x + reach);
-      pat.setTransform(groundMatrix(seg));
-      ctx.fillStyle = pat;
+      tile.pat.setTransform(groundMatrix(seg, tile.h, palette.ground));
+      ctx.fillStyle = tile.pat;
       ctx.fillRect(x0, p2.y, x1 - x0, p1.y - p2.y + 1);
     }
   }
@@ -1691,10 +1780,10 @@ function renderSegment(ctx: CanvasRenderingContext2D, width: number, height: num
   if (roadTextured(seg)) {
     // Asphalt wears the same chunky texels as the ground; lane paint goes on
     // over the top so the markings stay crisp.
-    const pat = groundPattern(ctx, 'tarmac', road);
-    if (pat) {
-      pat.setTransform(groundMatrix(seg));
-      ctx.fillStyle = pat;
+    const tile = groundPattern(ctx, 'tarmac', road, '', dark);
+    if (tile) {
+      tile.pat.setTransform(groundMatrix(seg, tile.h, 'tarmac'));
+      ctx.fillStyle = tile.pat;
       ctx.beginPath();
       ctx.moveTo(p1.x - p1.w, p1.y);
       ctx.lineTo(p1.x + p1.w, p1.y);

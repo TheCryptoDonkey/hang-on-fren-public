@@ -1658,6 +1658,17 @@ const ART_URLS: Record<string, string> = {
   // cake. Text is composited in code so the meme stays perfectly legible.
   'billboard-donkey-cake-art': assetUrl('art/billboard-donkey-cake.webp'),
   rose: assetUrl('pickups/600b/rose.webp'),
+  // Ground material textures (gen-textures.mjs → optimise-assets bake). The
+  // renderer tints these to the biome palette, so each material ships once.
+  'texture-grass': assetUrl('art/texture-grass.webp'),
+  'texture-sand': assetUrl('art/texture-sand.webp'),
+  'texture-snow': assetUrl('art/texture-snow.webp'),
+  'texture-leaves': assetUrl('art/texture-leaves.webp'),
+  'texture-ash': assetUrl('art/texture-ash.webp'),
+  'texture-asphalt': assetUrl('art/texture-asphalt.webp'),
+  'texture-rock': assetUrl('art/texture-rock.webp'),
+  'texture-tarmac': assetUrl('art/texture-tarmac.webp'),
+  'texture-water': assetUrl('art/texture-water.webp'),
   'pickup-petrol': assetUrl('art/pickup-petrol.webp'),
   'pickup-shield': assetUrl('art/pickup-shield.webp'),
   'pickup-cake': assetUrl('pickups/600b/cake-piece-1.webp'),

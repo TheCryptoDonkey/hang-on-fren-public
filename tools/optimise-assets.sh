@@ -41,6 +41,36 @@ for f in "$ART_SRC"/car-*.png "$ART_SRC"/hero-*.png "$ART_SRC"/scooter-*.png \
 done
 [ -f "$ART_SRC/finish-line-girls.png" ] && webp "$ART_SRC/finish-line-girls.png" "$ART_OUT/finish-line-girls.webp" 1100 90
 
+# 1b. Ground textures (gen-textures.mjs): trim the border, pixel-downscale,
+#     quantise back to a small palette, then 2x2 MIRROR-BAKE so the final tile
+#     is seamless by construction (the model's edges never wrap perfectly).
+#     Requires python3 + Pillow.
+for f in "$ART_SRC"/texture-*.png; do
+  [ -f "$f" ] || continue
+  name=$(basename "$f" .png)
+  tmp=$(mktemp -t "$name").png
+  python3 - "$f" "$tmp" <<'PY'
+import sys
+from PIL import Image, ImageOps
+src, out = sys.argv[1], sys.argv[2]
+im = Image.open(src).convert('RGB')
+w, h = im.size
+b = round(w * 0.03)
+im = im.crop((b, b, w - b, h - b))          # trim border artefacts
+im = im.resize((128, 128), Image.BOX)       # pixel-downscale
+im = ImageOps.autocontrast(im, cutoff=1)    # the downscale averages fine grain flat — stretch it back
+im = im.quantize(colors=24).convert('RGB')  # re-crisp to a small palette
+tile = Image.new('RGB', (256, 256))
+tile.paste(im, (0, 0))
+tile.paste(im.transpose(Image.FLIP_LEFT_RIGHT), (128, 0))
+tile.paste(im.transpose(Image.FLIP_TOP_BOTTOM), (0, 128))
+tile.paste(im.transpose(Image.ROTATE_180), (128, 128))
+tile.save(out)
+PY
+  cwebp -quiet -q 90 "$tmp" -o "$ART_OUT/$name.webp"
+  rm -f "$tmp"
+done
+
 # 2. Pickup tokens (600b set), excluding the unused cake-piece-4.
 for f in "$PICK_SRC"/*.png; do
   name=$(basename "$f" .png)
