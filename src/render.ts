@@ -117,6 +117,37 @@ function glowSprite(key: string, colour: string, stops: ReadonlyArray<readonly [
   return cv;
 }
 
+// Rainbow pickup halo. Its own tiny cache (24 pre-baked hue discs) rather than
+// the shared glowCache, so cycling the hue every frame can't thrash it — and
+// because rgba() above only speaks hex, whereas these need hsl. A soft filled
+// glow (bright centre, fading out): the pickup covers the middle, the colour
+// spills out around it as a halo.
+const RAINBOW_STEPS = 24;
+const rainbowCache: (HTMLCanvasElement | null)[] = [];
+function rainbowGlow(step: number): HTMLCanvasElement | null {
+  const s = ((step % RAINBOW_STEPS) + RAINBOW_STEPS) % RAINBOW_STEPS;
+  let cv = rainbowCache[s];
+  if (cv === undefined) {
+    cv = document.createElement('canvas');
+    cv.width = 64;
+    cv.height = 64;
+    const c = cv.getContext('2d');
+    if (!c) {
+      cv = null;
+    } else {
+      const hue = (s / RAINBOW_STEPS) * 360;
+      const g = c.createRadialGradient(32, 32, 4, 32, 32, 32);
+      g.addColorStop(0, `hsla(${hue},100%,62%,0.9)`);
+      g.addColorStop(0.5, `hsla(${hue},95%,58%,0.62)`);
+      g.addColorStop(1, `hsla(${hue},95%,58%,0)`);
+      c.fillStyle = g;
+      c.fillRect(0, 0, 64, 64);
+    }
+    rainbowCache[s] = cv;
+  }
+  return cv ?? null;
+}
+
 function drawClouds(
   ctx: CanvasRenderingContext2D,
   w: number,
@@ -472,6 +503,8 @@ interface EntityDraw {
   sprite: string;
   bobY: number;
   fwd: number;
+  seed: number; // stable per-entity value (its world z) — decorrelates the pickup
+  //               glow WITHOUT tying its animation rate to how fast you approach.
 }
 
 export interface Scene {
@@ -679,7 +712,7 @@ export function renderScene(scene: Scene): void {
     const frac = clamp((wrap(z, track.length) - seg.index * ROAD.segmentLength) / ROAD.segmentLength, 0, 1);
     const scale = lerp(p1.scale, p2.scale, frac);
     if (scale <= 0) return;
-    entities.push({ sx: lerp(p1.x, p2.x, frac), sy: lerp(p1.y, p2.y, frac), scale, clip: seg.clip, offset, sprite, bobY, fwd });
+    entities.push({ sx: lerp(p1.x, p2.x, frac), sy: lerp(p1.y, p2.y, frac), scale, clip: seg.clip, offset, sprite, bobY, fwd, seed: z });
   };
 
   // Potholes lie IN the road surface, so they go down before any entity: a
@@ -749,11 +782,11 @@ export function renderScene(scene: Scene): void {
     for (const item of seg.scenery) {
       const sprite = resolveScenerySprite(item.name, scene.scenery, seg.index + (item.offset > 0 ? 0.5 : 0));
       if (!sprite) continue;
-      entities.push({ sx: p1.x, sy: p1.y, scale: p1.scale, clip: seg.clip, offset: item.offset, sprite, bobY: 0, fwd: n * ROAD.segmentLength });
+      entities.push({ sx: p1.x, sy: p1.y, scale: p1.scale, clip: seg.clip, offset: item.offset, sprite, bobY: 0, fwd: n * ROAD.segmentLength, seed: seg.index * ROAD.segmentLength });
     }
   }
   entities.sort((a, b) => b.fwd - a.fwd);
-  for (const e of entities) drawEntity(ctx, width, store, e);
+  for (const e of entities) drawEntity(ctx, width, store, e, scene.time);
 
   // Rider. Held at a fixed screen HEIGHT (RIDER_SCREEN_FRAC is shared with
   // road.ts's RIDER_FWD, so collision happens exactly where the bike is drawn),
@@ -2235,7 +2268,7 @@ function needsContactShadow(sprite: string): boolean {
     || sprite === 'rose' || sprite.startsWith('dino-') || sprite === 'mammoth';
 }
 
-function drawEntity(ctx: CanvasRenderingContext2D, width: number, store: SpriteStore, e: EntityDraw): void {
+function drawEntity(ctx: CanvasRenderingContext2D, width: number, store: SpriteStore, e: EntityDraw, time: number): void {
   const sprite = store.get(e.sprite);
   if (!sprite) return;
   if (e.scale <= 0) return;
@@ -2250,6 +2283,30 @@ function drawEntity(ctx: CanvasRenderingContext2D, width: number, store: SpriteS
   ctx.beginPath();
   ctx.rect(0, 0, width, Math.max(0, e.clip));
   ctx.clip();
+  // Rainbow halo behind every pickup: cycles hue over time and pulses, so the
+  // pills/treats shimmer and can never be mistaken for a beast or a hazard (the
+  // charging raptor used to read as a pickup on a small screen). A per-pickup
+  // phase (from its road position) staggers the colours so they aren't in unison.
+  if (e.sprite.startsWith('pickup-')) {
+    // Phase from the pickup's FIXED world position (seed), not its shrinking
+    // distance-ahead — otherwise the animation rate scaled with your speed and
+    // strobed at pace. Only the pure `time` terms below animate, always slowly.
+    const phase = e.seed * 0.02 + e.offset * 7;
+    // Each pickup gets a FIXED hue (a static rainbow spread across the field —
+    // no cycling, so nothing ever flashes) and only a whisper of a pulse on a
+    // very long ~80s sine. Effectively a steady, gentle glow.
+    const glow = rainbowGlow(Math.floor(phase));
+    if (glow) {
+      const gw = destW * 1.7;
+      const gh = destH * 1.7;
+      // source-over (not additive): over the bright daytime road an additive
+      // glow desaturates to white and loses the rainbow. A plain saturated aura
+      // keeps its hue on any backdrop.
+      ctx.globalAlpha = 0.6 + 0.05 * Math.sin(time * 0.08 + phase);
+      ctx.drawImage(glow, destX + destW / 2 - gw / 2, destY + destH / 2 - gh / 2, gw, gh);
+      ctx.globalAlpha = 1;
+    }
+  }
   // Purpose-built chevrons use hard pixel clusters; bilinear filtering turns
   // them back into the flat blurry boards they replaced.
   ctx.imageSmoothingEnabled = !e.sprite.startsWith('prop-chevron-');
