@@ -479,6 +479,17 @@ let touchBrake = false;
 
 let W = 1280;
 let H = 720;
+/** Actual backing pixels per CSS pixel after the budget cap (≤ dpr). The UI
+ *  scale floor reads this — perceived text size is css px, not device px. */
+let renderScale = 1;
+/**
+ * Hard ceiling on the drawing buffer, in pixels. Canvas2D rasterises every
+ * one of them ~twice a frame; a Retina Mac window is 3200×1800 = 5.8M px and
+ * that IS the slowdown. ~2.3M keeps full-HD-class sharpness; past the cap we
+ * render smaller and let the browser upscale — with `image-rendering:
+ * pixelated`, which on this art reads as MORE chunky-authentic, not less.
+ */
+const MAX_BACKING_PX = 2_300_000;
 /**
  * Size the DRAWING BUFFER to match the canvas element's actual laid-out size.
  *
@@ -498,12 +509,16 @@ function resize(): void {
   // for a frame right after attach / an orientation change).
   const cssW = rect.width || window.innerWidth;
   const cssH = rect.height || window.innerHeight;
-  const nw = Math.max(1, Math.round(cssW * dpr));
-  const nh = Math.max(1, Math.round(cssH * dpr));
+  const budget = Math.min(1, Math.sqrt(MAX_BACKING_PX / Math.max(1, cssW * cssH * dpr * dpr)));
+  const scale = dpr * budget;
+  const nw = Math.max(1, Math.round(cssW * scale));
+  const nh = Math.max(1, Math.round(cssH * scale));
   if (canvas.width !== nw || canvas.height !== nh) {
     canvas.width = nw;
     canvas.height = nh;
+    canvas.style.imageRendering = budget < 0.999 ? 'pixelated' : '';
   }
+  renderScale = scale;
   W = nw;
   H = nh;
 }
@@ -726,8 +741,9 @@ document.addEventListener('visibilitychange', () => {
 function uiScale(): number {
   const u = Math.hypot(W, H) / 1468;
   if (!isTouch) return u;
-  const dpr = Math.min(2, window.devicePixelRatio || 1);
-  return Math.max(u, 0.78 * dpr);
+  // renderScale, not devicePixelRatio: the buffer may be budget-capped below
+  // the display density, and perceived text size is buffer px ÷ renderScale.
+  return Math.max(u, 0.78 * renderScale);
 }
 
 /** Haptic pulse on touch devices; silently no-ops where unsupported. */
@@ -1896,10 +1912,10 @@ function update(dt: number): void {
     // the way down the run-in instead of having it appear at the last second.
     if (ahead > 0 && ahead <= FINISH_LOOKAHEAD_M) {
       addMarker(world, player, track, 'prop-finish', ahead, 'finish');
-      // The finish cast stands a few metres in front of the tape so the rider
-      // rides straight up to the girls — the reward is on the road the whole
-      // run-in, not just an abstract line, then the GOAL tableau takes over.
-      addMarker(world, player, track, 'finish-line-girls', Math.max(1, ahead - 12), 'finish');
+      // The finish cast stands BEYOND the tape, waving the rider home — the
+      // sim freezes the instant the line is crossed, so they are greeted, not
+      // run over (standing in front of the tape, the bike drove through them).
+      addMarker(world, player, track, 'finish-line-girls', ahead + 14, 'finish');
       state.finishSpawned = true;
     }
   }
@@ -1993,7 +2009,7 @@ function render(): void {
   // effect ever snaps on or off mid-frame.
   const wobble = clamp(Math.min(state.beerWobble / 1.5, (BEER_WOBBLE_TIME - state.beerWobble) / 0.6), 0, 1);
   const trip = clamp(Math.min(state.shroom / 1.2, (SHROOM_TIME - state.shroom) / 0.4), 0, 1);
-  renderScene({ ctx, width: W, height: H, track, player, world, store, time: state.time, wipeout: state.wipeout, boost: state.boost > 0 ? state.boost / ROSE_BOOST_TIME : 0, sling: state.slingshot > 0 ? state.slingshot / SLING_TIME_MAX : 0, draft: state.draftCharge, wobble, trip, palette: paletteAt(score.distance), scenery: sceneryKitAt(score.distance), terrain: terrainAt(score.distance), timeOfDay: timeOfDayAt(score.distance), camYaw: state.camYaw, camRoll: state.camRoll, camLag: camLag(), smoke: state.smoke, enclosure: state.enclosure });
+  renderScene({ ctx, width: W, height: H, track, player, world, store, time: state.time, wipeout: state.wipeout, boost: state.boost > 0 ? state.boost / ROSE_BOOST_TIME : 0, sling: state.slingshot > 0 ? state.slingshot / SLING_TIME_MAX : 0, draft: state.draftCharge, wobble, trip, palette: paletteAt(score.distance), scenery: sceneryKitAt(score.distance), terrain: terrainAt(score.distance), timeOfDay: timeOfDayAt(score.distance), camYaw: state.camYaw, camRoll: state.camRoll, camLag: camLag(), smoke: state.smoke, enclosure: state.enclosure, hideRider: state.outcome === 'finish' && (state.phase === 'victory' || state.phase === 'gameover') });
   if (state.phase === 'playing') drawSparks(ctx);
 
   // The game-over card carries the score/stats itself — drawing the live HUD

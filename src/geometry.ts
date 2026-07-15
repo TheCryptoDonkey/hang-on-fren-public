@@ -150,6 +150,7 @@ const SCENERY_HIT_HALF_WIDTH: Record<string, number | null> = {
   // Marker arches are driven through and handled separately as non-colliding.
   'prop-gate': null,
   'prop-finish': null,
+  'finish-line-girls': null, // the welcome party is not a crash hazard
   // Warning boards sit just beyond the verge and are guidance, not hazards.
   'prop-chevron-left': null,
   'prop-chevron-right': null,

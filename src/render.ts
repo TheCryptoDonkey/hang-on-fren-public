@@ -420,6 +420,9 @@ export interface Scene {
   smoke?: Smoke[]; // tyre-smoke puffs, drawn under the rider
   enclosure?: number; // 0..1 how deep under a tunnel/bridge the bike is
   terrain?: Terrain; // what the ground does either side of the verge (cliff/sea/drop)
+  /** Drop the rider (and their flame/streaks) from the frame — the victory
+   *  tableau shows the finish cast, not the back of the scooter. */
+  hideRider?: boolean;
 }
 
 // Offscreen frame snapshot reused by the trip kaleidoscope (no per-frame alloc).
@@ -525,6 +528,9 @@ export function renderScene(scene: Scene): void {
   // Nearest-neighbour for the whole ground pass: the tile patterns MUST scale
   // into hard square texels, not bilinear soup. (Sprites set their own flag.)
   ctx.imageSmoothingEnabled = false;
+  // Resolve the frame's ground patterns once — the per-band loop below runs
+  // hundreds of times and must never touch the tile cache or allocate.
+  const groundTiles = resolveGroundTiles(ctx, palette, terrain);
   for (let i = drawn.length - 1; i >= 0; i -= 1) {
     const seg = drawn[i];
     const n = (seg.index - baseSegment.index + track.segments.length) % track.segments.length;
@@ -539,7 +545,7 @@ export function renderScene(scene: Scene): void {
         clipped = false;
       }
     }
-    renderSegment(ctx, width, height, seg, n / ROAD.drawDistance, palette, lamps, terrain, scene.time);
+    renderSegment(ctx, width, height, seg, n / ROAD.drawDistance, palette, lamps, terrain, scene.time, groundTiles);
   }
   if (clipped) ctx.restore();
   ctx.imageSmoothingEnabled = true;
@@ -635,28 +641,30 @@ export function renderScene(scene: Scene): void {
   // Tyre smoke pours out from behind the bike, so it goes down before the rider.
   if (scene.smoke) drawSmoke(ctx, scene.smoke);
 
-  // Turbo exhaust flame — also under the rider so it licks out from the rear wheel.
-  if (scene.boost > 0 && scene.wipeout === 0) {
-    drawBoostFlame(ctx, riderX, riderY, size, scene.time, scene.boost);
-  }
-  drawRider(ctx, store, {
-    x: riderX,
-    y: riderY,
-    size,
-    lean: player.lean,
-    yaw: player.yaw,
-    bob: Math.sin(scene.time * 26) * speedPct * 2.5,
-    wipeout: scene.wipeout,
-    spin: player.z * 0.03,
-    speed: speedPct,
-    time: scene.time,
-  });
+  if (!scene.hideRider) {
+    // Turbo exhaust flame — under the rider so it licks out from the rear wheel.
+    if (scene.boost > 0 && scene.wipeout === 0) {
+      drawBoostFlame(ctx, riderX, riderY, size, scene.time, scene.boost);
+    }
+    drawRider(ctx, store, {
+      x: riderX,
+      y: riderY,
+      size,
+      lean: player.lean,
+      yaw: player.yaw,
+      bob: Math.sin(scene.time * 26) * speedPct * 2.5,
+      wipeout: scene.wipeout,
+      spin: player.z * 0.03,
+      speed: speedPct,
+      time: scene.time,
+    });
 
-  // Speed rush: streaks raked out of the vanishing point. Always in turbo or a
-  // slingshot, and building as a draft charges so the wake FEELS like something.
-  const streak = Math.max(speedPct, scene.boost, scene.sling ?? 0, (scene.draft ?? 0) * 0.8);
-  if (streak > 0.5 && scene.wipeout === 0) {
-    drawSpeedStreaks(ctx, width, height, width / 2 + xPan, horizon, streak, scene.time);
+    // Speed rush: streaks raked out of the vanishing point. Always in turbo or a
+    // slingshot, and building as a draft charges so the wake FEELS like something.
+    const streak = Math.max(speedPct, scene.boost, scene.sling ?? 0, (scene.draft ?? 0) * 0.8);
+    if (streak > 0.5 && scene.wipeout === 0) {
+      drawSpeedStreaks(ctx, width, height, width / 2 + xPan, horizon, streak, scene.time);
+    }
   }
 
   ctx.restore(); // end bank + off-road shake transform
@@ -1414,15 +1422,46 @@ function shade(hex: string, amount: number): string {
 // a texel would be sub-pixel mush — stay flat colour under the fog.
 
 const TILE = 48;
-/** How loudly this band's texture draws: 1 up close, easing to 0 out where
- *  the texels drop sub-pixel and the distance fog owns the frame. A hard LOD
- *  cutover drew a visible seam across the world (flat band before the
- *  horizon); a fade is invisible — and skipping the fills that would land at
- *  alpha 0 keeps the pattern-pass cost bounded (hundreds of 2px far bands
- *  each paying fill overhead added ~50% frame time in software rendering). */
-function bandTexAlpha(seg: Segment): number {
-  if (seg.p1.screen.y - seg.p2.screen.y < 1) return 0;
-  return clamp((seg.p1.screen.w - 22) / 38, 0, 1);
+/** The texture pass covers EVERY visible band, right to the horizon — a fade
+ *  or cutover reads as a seam across the world, worst on portrait phones
+ *  where the horizon sits high and you can see furthest. What keeps full
+ *  coverage affordable is that the hot loop does no cache lookups or matrix
+ *  allocation at all: the frame's tiles are resolved once (GroundTiles) and
+ *  one DOMMatrix is reused for every fill. Only sub-pixel bands skip. */
+function bandTextured(seg: Segment): boolean {
+  return seg.p1.screen.y - seg.p2.screen.y >= 1;
+}
+
+/** The frame's resolved ground patterns, indexed [light, dark] — looked up
+ *  once per frame in renderScene so renderSegment never touches the cache. */
+interface GroundTiles {
+  ground: GroundKind;
+  slab: readonly [GroundTile | null, GroundTile | null];
+  tarmac: readonly [GroundTile | null, GroundTile | null];
+  rock: readonly [GroundTile | null, GroundTile | null];
+  water: readonly [GroundTile | null, GroundTile | null];
+}
+
+function resolveGroundTiles(ctx: CanvasRenderingContext2D, palette: Palette, terrain: Terrain): GroundTiles {
+  return {
+    ground: palette.ground,
+    slab: [
+      groundPattern(ctx, palette.ground, palette.grassLight, palette.rumbleDark, false),
+      groundPattern(ctx, palette.ground, palette.grassDark, palette.rumbleDark, true),
+    ],
+    tarmac: [
+      groundPattern(ctx, 'tarmac', palette.roadLight, '', false),
+      groundPattern(ctx, 'tarmac', palette.roadDark, '', true),
+    ],
+    rock: [
+      groundPattern(ctx, 'rock', terrain.cliffLight, '', false),
+      groundPattern(ctx, 'rock', terrain.cliffDark, '', true),
+    ],
+    water: [
+      groundPattern(ctx, 'water', palette.sea, '', false),
+      groundPattern(ctx, 'water', shade(palette.sea, -0.08), '', true),
+    ],
+  };
 }
 
 /** Per-material texture styling.
@@ -1451,16 +1490,20 @@ const TILE_STYLE: Record<TileKind, { tint: 'palette' | 'natural'; texels: number
  *  texel width tracks the projected road width, and the material's row count
  *  spans the band so the pattern scrolls with z and foreshortens with depth.
  *  `texH` is the tile's pixel height (the generated art tiles are taller than
- *  the procedural ones — same texel size, longer repeat). */
+ *  the procedural ones — same texel size, longer repeat). One shared matrix,
+ *  mutated per call — setTransform copies it, and this runs for every band. */
+const PAT_MAT = new DOMMatrix();
 function groundMatrix(seg: Segment, texH: number, kind: TileKind): DOMMatrix {
   const style = TILE_STYLE[kind];
   const p1 = seg.p1.screen;
   const rowT = (p1.y - seg.p2.screen.y) / style.rows;
-  return new DOMMatrix([
-    Math.max(0.35, p1.w / style.texels), 0,
-    0, -rowT,
-    p1.x, p1.y + ((seg.index * style.rows) % texH) * rowT,
-  ]);
+  PAT_MAT.a = Math.max(0.35, p1.w / style.texels);
+  PAT_MAT.b = 0;
+  PAT_MAT.c = 0;
+  PAT_MAT.d = -rowT;
+  PAT_MAT.e = p1.x;
+  PAT_MAT.f = p1.y + ((seg.index * style.rows) % texH) * rowT;
+  return PAT_MAT;
 }
 
 // Tinted tiles are cached per (material, colour). Palette transitions retint
@@ -1689,6 +1732,7 @@ function renderSides(
   palette: Palette,
   terrain: Terrain,
   time: number,
+  tiles: GroundTiles,
 ): void {
   const p1 = seg.p1.screen;
   const p2 = seg.p2.screen;
@@ -1705,18 +1749,17 @@ function renderSides(
   // The ground beyond the lip on each side. A `flat` side is the SAME ground
   // as the verge, so it skips its fill and lets the textured slab run to the
   // frame edge; sea / canyon / rock repaint over the texture past the lip.
-  const sideTexA = bandTexAlpha(seg);
+  const sideTextured = bandTextured(seg);
   const fillSide = (kind: SideKind, x1: number, y1: number, x2: number, y2: number, x3: number, y3: number, x4: number, y4: number): void => {
     if (kind === 'flat') return;
     polygon(ctx, x1, y1, x2, y2, x3, y3, x4, y4, sideColor(kind, terrain, palette, dark));
     // Rock mottle over an open cliff shoulder; the water texture over the sea
     // (the animated surf rolls over the top of it).
-    const tex: TileKind | null = kind === 'cliff' ? 'rock' : kind === 'sea' ? 'water' : null;
-    if (tex && sideTexA > 0) {
-      const tile = groundPattern(ctx, tex, sideColor(kind, terrain, palette, dark), '', dark);
+    const tex: 'rock' | 'water' | null = kind === 'cliff' ? 'rock' : kind === 'sea' ? 'water' : null;
+    if (tex && sideTextured) {
+      const tile = tiles[tex][dark ? 1 : 0];
       if (tile) {
         tile.pat.setTransform(groundMatrix(seg, tile.h, tex));
-        ctx.globalAlpha = sideTexA;
         ctx.fillStyle = tile.pat;
         ctx.beginPath();
         ctx.moveTo(x1, y1);
@@ -1725,7 +1768,6 @@ function renderSides(
         ctx.lineTo(x4, y4);
         ctx.closePath();
         ctx.fill();
-        ctx.globalAlpha = 1;
       }
     }
   };
@@ -1795,7 +1837,7 @@ function renderSides(
   // valley art shows through where the wall used to stand.)
 }
 
-function renderSegment(ctx: CanvasRenderingContext2D, width: number, height: number, seg: Segment, fogT: number, palette: Palette, lamps: Lamp[], terrain: Terrain, time: number): void {
+function renderSegment(ctx: CanvasRenderingContext2D, width: number, height: number, seg: Segment, fogT: number, palette: Palette, lamps: Lamp[], terrain: Terrain, time: number, tiles: GroundTiles): void {
   const p1 = seg.p1.screen;
   const p2 = seg.p2.screen;
   const dark = seg.color === 'dark';
@@ -1811,33 +1853,30 @@ function renderSegment(ctx: CanvasRenderingContext2D, width: number, height: num
   // verge with rock / sea / canyon (but a tunnel bore fills its own walls).
   ctx.fillStyle = grass;
   ctx.fillRect(bleedX, p2.y, bleedW, p1.y - p2.y + 1);
-  const texA = bandTexAlpha(seg);
-  if (texA > 0 && seg.overhead?.kind !== 'tunnel') {
+  const textured = bandTextured(seg);
+  if (textured && seg.overhead?.kind !== 'tunnel') {
     // The biome's pixel tile over the full slab; the sides repaint whatever
     // lies beyond a sea / canyon / rock lip on top of it.
-    const tile = groundPattern(ctx, palette.ground, grass, palette.rumbleDark, dark);
+    const tile = tiles.slab[dark ? 1 : 0];
     if (tile) {
-      tile.pat.setTransform(groundMatrix(seg, tile.h, palette.ground));
-      ctx.globalAlpha = texA;
+      tile.pat.setTransform(groundMatrix(seg, tile.h, tiles.ground));
       ctx.fillStyle = tile.pat;
       ctx.fillRect(bleedX, p2.y, bleedW, p1.y - p2.y + 1);
-      ctx.globalAlpha = 1;
     }
   }
-  if (seg.overhead?.kind !== 'tunnel') renderSides(ctx, width, seg, palette, terrain, time);
+  if (seg.overhead?.kind !== 'tunnel') renderSides(ctx, width, seg, palette, terrain, time, tiles);
 
   const r1 = rumbleWidth(p1.w);
   const r2 = rumbleWidth(p2.w);
   polygon(ctx, p1.x - p1.w - r1, p1.y, p1.x - p1.w, p1.y, p2.x - p2.w, p2.y, p2.x - p2.w - r2, p2.y, rumble);
   polygon(ctx, p1.x + p1.w + r1, p1.y, p1.x + p1.w, p1.y, p2.x + p2.w, p2.y, p2.x + p2.w + r2, p2.y, rumble);
   polygon(ctx, p1.x - p1.w, p1.y, p1.x + p1.w, p1.y, p2.x + p2.w, p2.y, p2.x - p2.w, p2.y, road);
-  if (texA > 0) {
+  if (textured) {
     // Asphalt wears the same chunky texels as the ground; lane paint goes on
     // over the top so the markings stay crisp.
-    const tile = groundPattern(ctx, 'tarmac', road, '', dark);
+    const tile = tiles.tarmac[dark ? 1 : 0];
     if (tile) {
       tile.pat.setTransform(groundMatrix(seg, tile.h, 'tarmac'));
-      ctx.globalAlpha = texA;
       ctx.fillStyle = tile.pat;
       ctx.beginPath();
       ctx.moveTo(p1.x - p1.w, p1.y);
@@ -1846,7 +1885,6 @@ function renderSegment(ctx: CanvasRenderingContext2D, width: number, height: num
       ctx.lineTo(p2.x - p2.w, p2.y);
       ctx.closePath();
       ctx.fill();
-      ctx.globalAlpha = 1;
     }
   }
 
