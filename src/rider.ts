@@ -21,6 +21,10 @@ export interface RiderVisual {
   spin: number; // accumulated wheel rotation in radians
   speed: number; // 0..1, drives motion blur + wind
   time: number; // seconds, drives the hair flutter
+  /** Sprite family prefix: 'hero' (default) or 'caveman' (the secret level).
+   *  A set with a native `-lean-right` frame uses it un-mirrored — mirroring
+   *  the two-seater log car would swap the caveman and the monkey. */
+  set?: string;
 }
 
 /** On-screen height of the bike. Shared with the smoke, which scales off it. */
@@ -51,17 +55,38 @@ export function drawRider(ctx: CanvasRenderingContext2D, store: SpriteStore, v: 
   ctx.fill();
   ctx.restore();
 
+  const set = v.set ?? 'hero';
+  // Two-frame wheel animation: a set that ships a '-2' variant flips between
+  // the frames at a speed-scaled cadence, so the stone wheels read as turning.
+  // Sets without one (the hero Vespa has its wheel-blur instead) just get
+  // frame 1 — the lookup misses and falls straight through.
+  const flip = v.wipeout === 0 && v.speed > 0.05 && Math.floor(v.time * (5 + v.speed * 9)) % 2 === 1;
+  const frame = (name: string): SpriteImage | null =>
+    (flip ? store.get(`${name}-2`) : null) ?? store.get(name);
+  // Every set's canonical lean frame VISUALLY leans right and mirrors for a
+  // left lean. The hero's is (confusingly) NAMED 'hero-lean-left'; newer sets
+  // name it what it is.
+  const leanFrame = set === 'hero' ? 'hero-lean-left' : `${set}-lean-right`;
+
   let sprite: SpriteImage | null;
   let mirror = false;
+  let stagedWipeout = false;
   if (v.wipeout > 0) {
-    sprite = store.get('hero-wipeout') ?? store.get('hero-straight');
+    // Multi-frame tumble where the set provides one (the log car): the ART
+    // carries the crash animation, so the code rotation is eased right back —
+    // decided by whether the set ships staged frames AT ALL, so the roll rate
+    // never jumps mid-crash as the frames turn over. Frames turn over EARLY
+    // (0.28 / 0.6) — the impact should read as a flipbook, not a slideshow.
+    stagedWipeout = store.get(`${set}-wipeout-2`) !== null;
+    const wf = !stagedWipeout ? '' : v.wipeout < 0.28 ? '' : v.wipeout < 0.6 ? '-2' : '-3';
+    sprite = (wf ? store.get(`${set}-wipeout${wf}`) : null) ?? store.get(`${set}-wipeout`) ?? store.get(`${set}-straight`);
   } else if (v.lean > LEAN_DEADZONE) {
-    sprite = store.get('hero-lean-left') ?? store.get('hero-straight'); // canonical leans right
+    sprite = frame(leanFrame) ?? store.get(`${set}-straight`);
   } else if (v.lean < -LEAN_DEADZONE) {
-    sprite = store.get('hero-lean-left') ?? store.get('hero-straight');
-    mirror = true; // flip -> leans left
+    sprite = frame(leanFrame) ?? store.get(`${set}-straight`);
+    mirror = true; // flip the visually-right canonical frame -> leans left
   } else {
-    sprite = store.get('hero-straight');
+    sprite = frame(`${set}-straight`);
   }
 
   if (!sprite) {
@@ -76,7 +101,15 @@ export function drawRider(ctx: CanvasRenderingContext2D, store: SpriteStore, v: 
   ctx.translate(cx, baseY);
   ctx.imageSmoothingEnabled = true;
   if (v.wipeout > 0) {
-    ctx.rotate(v.wipeout * Math.PI * 1.6);
+    // A staged (multi-frame) wipeout animates in the art — only a gentle
+    // residual roll on top, plus a decaying impact BOUNCE so the sprite is in
+    // motion even while a frame is held; single-frame sets keep the full spin.
+    if (stagedWipeout) {
+      ctx.rotate(v.wipeout * Math.PI * 0.3);
+      ctx.translate(0, -Math.abs(Math.sin(v.wipeout * Math.PI * 3)) * (1 - v.wipeout) * h * 0.1);
+    } else {
+      ctx.rotate(v.wipeout * Math.PI * 1.6);
+    }
     if (mirror) ctx.scale(-1, 1);
     ctx.drawImage(sprite.canvas, -w / 2, -h, w, h);
   } else {

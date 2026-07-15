@@ -40,6 +40,19 @@ describe('claim-rules', () => {
     expect(parseClaim(validClaim({ roses: -1 }), NOW).ok).toBe(false);
   });
 
+  it('accepts the known tours (and their absence), rejects invented ones', () => {
+    expect(parseClaim(validClaim(), NOW).ok).toBe(true); // older clients omit tour
+    expect(parseClaim(validClaim({ tour: 'grand' }), NOW).ok).toBe(true);
+    expect(parseClaim(validClaim({ tour: 'world' }), NOW).ok).toBe(true);
+    expect(parseClaim(validClaim({ tour: 'stone', level: 1, distance_m: 4000, score: 9000 }), NOW).ok).toBe(true);
+    expect(parseClaim(validClaim({ tour: 'moon' as ClaimInput['tour'] }), NOW)).toMatchObject({ ok: false, error: 'invalid_payload' });
+  });
+
+  it('refuses a stone claim beyond its single level', () => {
+    // The secret trip is one leg — there is no stone level 2 to score at.
+    expect(parseClaim(validClaim({ tour: 'stone', level: 2 }), NOW)).toMatchObject({ ok: false, error: 'invalid_level' });
+  });
+
   it('rejects stale, future and inverted run clocks', () => {
     expect(parseClaim(validClaim({ started_at: NOW - 14 * 60 * 1000, finished_at: NOW - 11 * 60 * 1000 }), NOW)).toMatchObject({ ok: false, error: 'stale_run' });
     expect(parseClaim(validClaim({ finished_at: NOW + 2 * 60 * 1000 }), NOW)).toMatchObject({ ok: false, error: 'invalid_run_clock' });

@@ -1,10 +1,13 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 import { buildTrack, createPlayer, ROAD, RIDER_FWD } from './road.js';
+import { setActiveTour } from './stages.js';
 import {
   createWorld,
   resetWorld,
   updateWorld,
   addPickup,
+  addPickupTrail,
+  addHazard,
   signedForward,
   draftAt,
   getRival,
@@ -426,5 +429,172 @@ describe('world', () => {
     resetWorld(b, pb, track);
     expect(a.pickups.map(p => p.z)).toEqual(b.pickups.map(p => p.z));
     expect(a.traffic.map(c => c.z)).toEqual(b.traffic.map(c => c.z));
+  });
+});
+
+describe('world: 600 BILLION BC (the secret prehistoric level)', () => {
+  afterEach(() => setActiveTour('grand'));
+
+  it('dinosaurs charge AT the rider; the mammoth lumbers ahead slower than any car', () => {
+    setActiveTour('stone');
+    const track = buildTrack();
+    const player = createPlayer();
+    // A dense, fully-ramped pool so every roster entry shows up in the sample.
+    const world = createWorld(7, { density: 3, speed: 1 });
+    resetWorld(world, player, track, { rival: false });
+    world.odometerM = 9000;
+    for (let i = 0; i < 60; i += 1) updateWorld(world, player, track, 1 / 60, true);
+    expect(world.traffic.length).toBeGreaterThan(20);
+    const bySprite = (s: string): number[] => world.traffic.filter(c => c.sprite === s).map(c => c.speed);
+    for (const s of bySprite('dino-trex')) expect(s).toBeLessThan(0);
+    for (const s of bySprite('dino-raptor')) expect(s).toBeLessThan(0);
+    for (const s of bySprite('mammoth')) {
+      expect(s).toBeGreaterThan(0);
+      expect(s).toBeLessThan(player.maxSpeed * 0.45);
+    }
+    // The full prehistoric cast is on the road.
+    expect(world.traffic.some(c => c.sprite.startsWith('dino-'))).toBe(true);
+  });
+
+  it('an oncoming dinosaur reaches the rider and registers a head-on crash', () => {
+    setActiveTour('stone');
+    const track = buildTrack();
+    const player = createPlayer();
+    player.speed = player.maxSpeed * 0.8;
+    const world = createWorld(11);
+    resetWorld(world, player, track, { rival: false });
+    world.traffic.length = 0;
+    world.traffic.push({
+      id: 999,
+      z: player.z + RIDER_FWD + ROAD.segmentLength * 6,
+      offset: player.x,
+      driftPhase: 0,
+      driftAmp: 0,
+      speed: -player.maxSpeed * 0.3, // charging the wrong way down the road
+      sprite: 'dino-trex',
+      prevFwd: RIDER_FWD + ROAD.segmentLength * 6,
+      prevLateral: 0,
+      role: 'traffic',
+    });
+    let crashed = false;
+    for (let i = 0; i < 240 && !crashed; i += 1) {
+      const events = updateWorld(world, player, track, 1 / 60, false);
+      crashed = events.some(e => e.type === 'crash');
+      player.z = (player.z + player.speed / 60) % track.length;
+    }
+    expect(crashed).toBe(true);
+  });
+
+  it('lays pill trails down one lane, nose to tail', () => {
+    setActiveTour('stone');
+    const track = buildTrack();
+    const player = createPlayer();
+    const world = createWorld(13);
+    resetWorld(world, player, track, { rival: false });
+    addPickupTrail(world, player, track, 'pill', 5);
+    expect(world.pickups.length).toBe(5);
+    const offsets = new Set(world.pickups.map(p => p.offset));
+    expect(offsets.size).toBe(1); // one lane
+    const gaps = world.pickups.slice(1).map((p, i) => p.z - world.pickups[i].z);
+    for (const g of gaps) expect(g).toBeCloseTo(ROAD.segmentLength * 5, 5);
+    for (const p of world.pickups) {
+      expect(p.kind).toBe('pill');
+      expect(signedForward(p.z, player.z, track.length)).toBeGreaterThan(0);
+    }
+  });
+
+  it('lays the pill trail AROUND a pothole-riddled lane — the pills are the route', () => {
+    setActiveTour('stone');
+    const track = buildTrack();
+    const player = createPlayer();
+    const world = createWorld(31);
+    resetWorld(world, player, track, { rival: false });
+    world.traffic.length = 0; // isolate the pothole influence
+    // Crater the CENTRE lane along the whole band trails can spawn into.
+    const from = ROAD.drawDistance * ROAD.segmentLength * 0.45;
+    const to = ROAD.drawDistance * ROAD.segmentLength * 0.95;
+    for (let z = from; z < to; z += ROAD.segmentLength * 3) {
+      world.hazards.push({ z: player.z + z, offset: 0, kind: 'hole' });
+    }
+    addPickupTrail(world, player, track, 'pill', 5);
+    // The trail refuses the cratered centre lane and lays down a side lane.
+    for (const p of world.pickups) expect(Math.abs(p.offset)).toBeGreaterThan(0.4);
+  });
+
+  it('never opens a pothole under a laid pill trail', () => {
+    setActiveTour('stone');
+    const track = buildTrack();
+    const player = createPlayer();
+    const world = createWorld(37);
+    resetWorld(world, player, track, { rival: false });
+    world.traffic.length = 0;
+    addPickupTrail(world, player, track, 'pill', 5);
+    for (let i = 0; i < 20; i += 1) addHazard(world, player, track);
+    for (const hole of world.hazards) {
+      const clash = world.pickups.some(p =>
+        Math.abs(signedForward(p.z, hole.z, track.length)) < ROAD.segmentLength * 5
+        && Math.abs(p.offset - hole.offset) < 0.4);
+      expect(clash).toBe(false);
+    }
+  });
+
+  it('a pothole under the wheels fires a hole event and consumes itself', () => {
+    setActiveTour('stone');
+    const track = buildTrack();
+    const player = createPlayer();
+    const world = createWorld(17);
+    resetWorld(world, player, track, { rival: false });
+    addHazard(world, player, track);
+    expect(world.hazards.length).toBe(1);
+    const hole = world.hazards[0];
+    hole.z = player.z + RIDER_FWD; // right where the bike is drawn
+    hole.offset = player.x;
+    const events = updateWorld(world, player, track, 1 / 60, false);
+    expect(events.some(e => e.type === 'hole')).toBe(true);
+    expect(world.hazards.length).toBe(0); // it claimed its wheel
+  });
+
+  it('a shielded/invulnerable rider rolls straight over a pothole', () => {
+    setActiveTour('stone');
+    const track = buildTrack();
+    const player = createPlayer();
+    const world = createWorld(19);
+    resetWorld(world, player, track, { rival: false });
+    addHazard(world, player, track);
+    const hole = world.hazards[0];
+    hole.z = player.z + RIDER_FWD;
+    hole.offset = player.x;
+    const events = updateWorld(world, player, track, 1 / 60, true);
+    expect(events.some(e => e.type === 'hole')).toBe(false);
+    expect(world.hazards.length).toBe(1); // still there once the grace ends
+  });
+
+  it('a near-missed pothole is culled once it drops behind', () => {
+    setActiveTour('stone');
+    const track = buildTrack();
+    const player = createPlayer();
+    const world = createWorld(23);
+    resetWorld(world, player, track, { rival: false });
+    addHazard(world, player, track);
+    const hole = world.hazards[0];
+    hole.z = player.z + RIDER_FWD;
+    hole.offset = player.x + 0.5; // dodged
+    let events = updateWorld(world, player, track, 1 / 60, false);
+    expect(events.some(e => e.type === 'hole')).toBe(false);
+    hole.z = player.z - ROAD.segmentLength * 20; // long gone
+    events = updateWorld(world, player, track, 1 / 60, false);
+    expect(world.hazards.length).toBe(0);
+  });
+
+  it('resetWorld clears the potholes with everything else', () => {
+    setActiveTour('stone');
+    const track = buildTrack();
+    const player = createPlayer();
+    const world = createWorld(29);
+    resetWorld(world, player, track, { rival: false });
+    addHazard(world, player, track);
+    expect(world.hazards.length).toBe(1);
+    resetWorld(world, player, track, { rival: false });
+    expect(world.hazards.length).toBe(0);
   });
 });

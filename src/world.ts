@@ -8,7 +8,7 @@
 
 import { ROAD, RIDER_FWD } from './road.js';
 import type { Player, Track } from './road.js';
-import { resolveScenerySprite, rosterAt, sceneryKitAt } from './stages.js';
+import { getActiveTour, resolveScenerySprite, rosterAt, sceneryKitAt } from './stages.js';
 import { sceneryHitHalfWidth, spriteWorldWidth } from './geometry.js';
 import { clamp, makeRng, randRange, pick, wrap } from './util.js';
 import { createRivalProgress, rivalGapM, updateRival, type RivalProgress } from './rival.js';
@@ -83,7 +83,11 @@ export type PickupKind =
   | 'fourtwenty'
   | 'shield'
   | 'beer'
-  | 'shroom';
+  | 'shroom'
+  // --- 600 BILLION BC (the secret prehistoric level) ---
+  | 'joint' // chill: clock pause + a mellow haze
+  | 'pill' // 600B orange pill — pure points, spawned in trails
+  | 'crystal'; // bitcoin timelock crystal — the stone age's petrol can
 
 export interface Pickup {
   z: number;
@@ -129,6 +133,24 @@ export interface Marker {
   kind: 'gate' | 'finish';
 }
 
+/**
+ * A hazard IN the road surface — the potholes of the secret prehistoric level's
+ * gravel road. Unlike traffic it never moves and unlike a pickup it hurts:
+ * dropping a stone wheel into one is a wipeout. Drawn flat on the tarmac by the
+ * renderer (a decal, not a billboard).
+ */
+export interface Hazard {
+  z: number;
+  offset: number;
+  kind: 'hole';
+}
+
+// Longitudinal / lateral catch window for a pothole, bracketing the bike's
+// drawn position like everything else. Laterally a touch TIGHTER than the
+// drawn crater (arcade fairness: a rim-graze is a scare, not a crash).
+const HOLE_Z = ROAD.segmentLength * 1.1;
+const HOLE_GAP = 0.16;
+
 /** Difficulty-mode multipliers applied to the traffic ramp (difficulty.ts). */
 export interface WorldMods {
   /** Traffic pool multiplier. */
@@ -141,15 +163,22 @@ export interface World {
   pickups: Pickup[];
   traffic: Car[];
   markers: Marker[];
+  /** Road-surface hazards (the prehistoric potholes); empty on the road tours. */
+  hazards: Hazard[];
   rng: () => number;
   odometerM: number;
   mods: WorldMods;
   /** Hands out Car.id. Monotonic, so a recycled car is a NEW car to the audio. */
   nextCarId: number;
+  /** Lane the last pill trail was laid in — successive trails prefer to stay
+   *  near it, so the guide line FLOWS across the road instead of zig-zagging. */
+  lastTrailOffset: number;
 }
 
 export type WorldEvent =
   | { type: 'pickup'; kind: PickupKind; offset: number }
+  /** A wheel dropped into a road hazard (pothole) — resolves like a crash. */
+  | { type: 'hole'; offset: number }
   /**
    * `side` is where the car went by relative to the bike (negative = down your
    * left), and `closing` is how much faster you took it, 0..1. Both exist so the
@@ -188,9 +217,15 @@ function difficulty(odometerM: number): Ramp {
   };
 }
 
+/** The stone age runs a SPARSER field than the road tours: an oncoming
+ *  dinosaur closes several times faster than a car is caught up, so a
+ *  car-parity headcount read as a wall of teeth. */
+const STONE_DENSITY = 0.6;
+
 /** The traffic pool size the world should hold right now. */
 function targetCars(world: World): number {
-  return Math.max(2, Math.round(difficulty(world.odometerM).carCount * world.mods.density));
+  const tourScale = getActiveTour() === 'stone' ? STONE_DENSITY : 1;
+  return Math.max(2, Math.round(difficulty(world.odometerM).carCount * world.mods.density * tourScale));
 }
 
 function regularCarCount(world: World): number {
@@ -242,6 +277,82 @@ export function addPickup(world: World, player: Player, track: Track, kind: Pick
 }
 
 /**
+ * A TRAIL of pickups down one lane — the 600 billion orange pills of the secret
+ * level. More than treasure, the trail is the ROUTE: each one is laid in the
+ * lane that will be safest when the rider actually gets there (no pothole on
+ * the line, fewest beasts — an oncoming one weighted hardest), with a gentle
+ * preference for staying near the previous trail so the guide line flows.
+ * Follow the pills and you are, near enough, on the racing line through it all.
+ */
+export function addPickupTrail(world: World, player: Player, track: Track, kind: PickupKind, count = 4, spacingSegs = 5): void {
+  const seg = ROAD.segmentLength;
+  const ahead = randRange(world.rng, ROAD.drawDistance * seg * 0.5, ROAD.drawDistance * seg * 0.7);
+  const z0 = wrap(player.z + ahead, track.length);
+  const span = count * spacingSegs * seg;
+  // Project every mover to the moment the rider reaches the trail, so lanes
+  // are judged against where the hazards will BE, not where they stand now —
+  // a guide line that leads into a charging trex is worse than none.
+  const eta = ahead / Math.max(player.maxSpeed * 0.6, player.speed);
+  let bestLane = 0;
+  let bestScore = Infinity;
+  for (const lane of LANE_OFFSETS) {
+    let score = randRange(world.rng, 0, 0.1); // tiny jitter breaks dead ties
+    for (const hole of world.hazards) {
+      const d = signedForward(hole.z, z0, track.length);
+      if (d > -seg * 2 && d < span + seg * 2 && Math.abs(hole.offset - lane) < 0.45) score += 10; // a pothole on the line disqualifies it
+    }
+    for (const car of world.traffic) {
+      const at = wrap(car.z + car.speed * eta, track.length);
+      const d = signedForward(at, z0, track.length);
+      if (d > -seg * 3 && d < span + seg * 3 && Math.abs(car.offset - lane) < 0.5) {
+        score += car.speed < 0 ? 4 : 1.5; // an oncoming beast is the thing being dodged
+      }
+    }
+    score += Math.abs(lane - world.lastTrailOffset) * 0.3; // flow, don't zig-zag
+    if (score < bestScore) {
+      bestScore = score;
+      bestLane = lane;
+    }
+  }
+  world.lastTrailOffset = bestLane;
+  const offset = bestLane + randRange(world.rng, -0.06, 0.06);
+  for (let k = 0; k < count; k += 1) {
+    world.pickups.push({
+      z: wrap(z0 + k * spacingSegs * seg, track.length),
+      offset,
+      bob: k * 0.7, // staggered bob so the trail ripples
+      taken: false,
+      kind,
+    });
+  }
+}
+
+/**
+ * Drop a pothole into the gravel ahead. Kept OFF the exact lane the emergency
+ * pickup logic uses (dead centre of a lane is allowed — dodging is the game),
+ * but always clear of other holes so a line through them exists.
+ */
+export function addHazard(world: World, player: Player, track: Track): void {
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const ahead = randRange(world.rng, ROAD.drawDistance * ROAD.segmentLength * 0.5, ROAD.drawDistance * ROAD.segmentLength * 0.85);
+    const z = wrap(player.z + ahead, track.length);
+    const offset = randRange(world.rng, -0.75, 0.75);
+    const clashes = world.hazards.some(h =>
+      Math.abs(signedForward(h.z, z, track.length)) < ROAD.segmentLength * 6 && Math.abs(h.offset - offset) < 0.5);
+    // Never open a crater under a laid pill trail: the pills are the promised
+    // safe line, and a hole on the line makes the guide a liar. This is a HARD
+    // guarantee — if no clean spot exists (a crowded, trail-laced road), the
+    // gravel gets a reprieve rather than the trail getting a trap.
+    const underTrail = world.pickups.some(p =>
+      Math.abs(signedForward(p.z, z, track.length)) < ROAD.segmentLength * 5 && Math.abs(p.offset - offset) < 0.4);
+    if (!clashes && !underTrail) {
+      world.hazards.push({ z, offset, kind: 'hole' });
+      return;
+    }
+  }
+}
+
+/**
  * Drop a road-spanning marker (checkpoint gate / finish gate) `aheadM` metres in
  * front of the rider so it scrolls in and they drive through it as the boundary
  * is crossed. 100 world units ≈ 1 metre (see the odometer).
@@ -250,12 +361,28 @@ export function addMarker(world: World, player: Player, track: Track, sprite: st
   world.markers.push({ z: wrap(player.z + aheadM * 100, track.length), sprite, kind });
 }
 
+// The prehistoric roster's movement: dinosaurs CHARGE AT the rider (negative =
+// oncoming, as a fraction of the player's top speed), the mammoth just lumbers
+// along ahead slower than any car. Anything not listed moves like normal
+// traffic. Negative speed works in the collision sweep for free — an oncoming
+// beast simply closes much faster, which is the whole point of it.
+const BEAST_SPEED: Record<string, number> = {
+  'dino-trex': -0.12, // a wall of teeth coming the other way
+  'dino-raptor': -0.22, // sprints at you — the fast dodge
+  mammoth: 0.34, // a slow shaggy roadblock you catch up
+};
+
 function spawnCarAhead(world: World, player: Player, track: Track): Car {
   const ramp = difficulty(world.odometerM);
   const ahead = randRange(world.rng, ROAD.drawDistance * ROAD.segmentLength * 0.4, ROAD.drawDistance * ROAD.segmentLength * 0.95);
   const jitter = randRange(world.rng, -0.35, 0.35) * ramp.trafficGap;
   const z = wrap(player.z + ahead + jitter, track.length);
   const lane = pick(world.rng, LANE_OFFSETS);
+  const sprite = pick(world.rng, rosterAt(world.odometerM));
+  const beast = BEAST_SPEED[sprite];
+  const speed = beast !== undefined
+    ? player.maxSpeed * beast * world.mods.speed * randRange(world.rng, 0.9, 1.1)
+    : player.maxSpeed * ramp.carSpeedMul * world.mods.speed * randRange(world.rng, 0.85, 1.05);
   return {
     // A recycled car is a NEW car — fresh id, so its engine voice starts over
     // rather than sliding continuously from the machine it replaced.
@@ -264,10 +391,14 @@ function spawnCarAhead(world: World, player: Player, track: Track): Car {
     offset: lane,
     driftPhase: world.rng() * Math.PI * 2,
     // Gentle, mostly lane-holding weave — a slow lane-change feel, not a swerve
-    // into you. Most cars barely drift; a few wander a little.
-    driftAmp: randRange(world.rng, 0, 0.14),
-    speed: player.maxSpeed * ramp.carSpeedMul * world.mods.speed * randRange(world.rng, 0.85, 1.05),
-    sprite: pick(world.rng, rosterAt(world.odometerM)),
+    // into you. Most cars barely drift; a few wander a little. A sprinting
+    // raptor weaves a touch harder (it hunts, it doesn't queue) — but every
+    // BEAST otherwise holds its line, so a committed dodge STAYS dodged.
+    driftAmp: sprite === 'dino-raptor'
+      ? randRange(world.rng, 0.06, 0.18)
+      : beast !== undefined ? randRange(world.rng, 0, 0.08) : randRange(world.rng, 0, 0.14),
+    speed,
+    sprite,
     prevFwd: signedForward(z, player.z, track.length),
     prevLateral: Infinity,
     role: 'traffic',
@@ -372,7 +503,7 @@ export function draftAt(world: World, player: Player, track: Track): number {
 }
 
 export function createWorld(seed = 0x1a2b3c, mods: WorldMods = { density: 1, speed: 1 }): World {
-  return { pickups: [], traffic: [], markers: [], rng: makeRng(seed), odometerM: 0, mods: { ...mods }, nextCarId: 1 };
+  return { pickups: [], traffic: [], markers: [], hazards: [], rng: makeRng(seed), odometerM: 0, mods: { ...mods }, nextCarId: 1, lastTrailOffset: 0 };
 }
 
 // ---- what you can HEAR of the traffic ---------------------------------------
@@ -445,6 +576,7 @@ export function resetWorld(world: World, player: Player, track: Track, opts: { r
   world.traffic = [];
   world.pickups = []; // pickups are added on the clock by main.ts, not pre-populated
   world.markers = []; // gates/finish are added by main.ts as boundaries approach
+  world.hazards = []; // potholes are added on the clock too (secret level only)
   const target = targetCars(world);
   for (let i = 0; i < target; i += 1) world.traffic.push(spawnCarAhead(world, player, track));
   if (opts.rival !== false) world.traffic.push(spawnRival(world, player, track));
@@ -576,6 +708,20 @@ export function updateWorld(
   // --- markers (gate / finish arches): static, non-colliding, cull once passed.
   for (let i = world.markers.length - 1; i >= 0; i -= 1) {
     if (signedForward(world.markers[i].z, player.z, track.length) < -RECYCLE_BEHIND) world.markers.splice(i, 1);
+  }
+
+  // --- road hazards (potholes): static, tested where the BIKE is drawn, like
+  // pickups. A hit consumes the hole (it claimed its wheel) so a respawning
+  // rider can't be swallowed twice by the same crater.
+  for (let i = world.hazards.length - 1; i >= 0; i -= 1) {
+    const hole = world.hazards[i];
+    const d = signedForward(hole.z, player.z, track.length);
+    if (!invuln && Math.abs(d - RIDER_FWD) < HOLE_Z && Math.abs(player.x - hole.offset) < HOLE_GAP) {
+      events.push({ type: 'hole', offset: hole.offset });
+      world.hazards.splice(i, 1);
+      continue;
+    }
+    if (d < -RECYCLE_BEHIND) world.hazards.splice(i, 1);
   }
 
   // Roadside objects: once well off the tarmac, hitting a solid trunk/post/rock

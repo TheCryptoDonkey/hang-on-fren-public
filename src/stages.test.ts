@@ -184,3 +184,62 @@ describe('stages: 600B world tour (the conference circuit)', () => {
     expect(marketPhaseAt(held(9))).toBe('NEW DAWN');
   });
 });
+
+describe('stages: 600 BILLION BC (the secret prehistoric level)', () => {
+  afterEach(() => setActiveTour('grand'));
+
+  it('is a single 4.2 km leg', () => {
+    setActiveTour('stone');
+    expect(levelCount()).toBe(1);
+    expect(finishDistanceM()).toBe(STAGE_M);
+    expect(stageAt(held(0)).name).toBe('THE STONED AGE');
+  });
+
+  it('clamps to its one leg rather than wrapping', () => {
+    setActiveTour('stone');
+    expect(stageIndexAt(held(0))).toBe(0);
+    expect(stageIndexAt(held(7))).toBe(0);
+    expect(stageAt(finishDistanceM() + 5000).name).toBe('THE STONED AGE');
+  });
+
+  it('fields dinosaurs and a mammoth instead of cars', () => {
+    setActiveTour('stone');
+    const roster = rosterAt(held(0));
+    expect(roster).toContain('dino-trex');
+    expect(roster).toContain('dino-raptor');
+    expect(roster).toContain('mammoth');
+  });
+
+  it('dresses the roadside in ferns, bones and a volcano', () => {
+    setActiveTour('stone');
+    const kit = sceneryKitAt(held(0));
+    expect(kit.trees).toContain('prop-fern');
+    expect(kit.accent).toBe('prop-bones');
+    expect(kit.landmark).toBe('prop-volcano');
+  });
+
+  it('holds the jurassic backdrop and palette to the finish line', () => {
+    setActiveTour('stone');
+    expect(timeOfDayAt(held(0))).toEqual({ a: 'jurassic', b: 'jurassic', t: 0 });
+    expect(paletteAt(held(0)).grassLight).not.toBe(DEFAULT_PALETTE.grassLight);
+    expect(paletteAt(finishDistanceM() - 1).grassLight).toBe(paletteAt(held(0)).grassLight);
+  });
+
+  it('subtitles the whole trip ONE BROKEN TIMELINE', () => {
+    setActiveTour('stone');
+    expect(marketPhaseAt(held(0))).toBe('ONE BROKEN TIMELINE');
+    expect(marketPhaseAt(finishDistanceM() - 1)).toBe('ONE BROKEN TIMELINE');
+  });
+
+  it('is never rose-rich (that belongs to the Taj)', () => {
+    setActiveTour('stone');
+    expect(roseRichAt(held(0))).toBe(false);
+  });
+
+  it('restores the grand tour untouched after switching back', () => {
+    setActiveTour('stone');
+    setActiveTour('grand');
+    expect(stageAt(held(0)).name).toBe('AMALFI COAST');
+    expect(paletteAt(held(0)).grassLight).toBe(DEFAULT_PALETTE.grassLight);
+  });
+});

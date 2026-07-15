@@ -536,6 +536,167 @@ const ASSETS = [
       'onion dome, pointed arch portal and four slender minarets, beds of bright red roses along the base, roadside ' +
       'building. ' + SPRITE_STYLE,
   },
+  // --- SECRET LEVEL: 600 BILLION BC (tap the title logo) ---------------------
+  // The Flintstones-style log car, seen from behind like the hero Vespa. The
+  // driver keeps DNI's likeness (ref'd off the shipped hero sprite) as a
+  // caveman; the monkey rides shotgun. Both lean frames are generated (no
+  // mirroring — mirroring would swap the two occupants side to side).
+  {
+    name: 'caveman-straight', model: 'gpt-image-1.5', size: '1024x1024', quality: 'high', ref: ['art-originals/art/hero-straight.png'],
+    prompt:
+      'Retro arcade racing-game sprite of a Flintstones-style PREHISTORIC LOG CAR seen from directly BEHIND (rear ' +
+      'view). The car is a hollowed tree-trunk body riding on four thick round grey STONE WHEELS, with a ragged ' +
+      'animal-hide canopy on two wooden poles. TWO occupants seen from behind: on the LEFT the SAME man as the ' +
+      'reference — long reddish-brown hair and full bushy beard — now a CAVEMAN in a spotted leopard-skin tunic; on ' +
+      'the RIGHT a cheeky brown MONKEY wearing a tiny bone necklace, its tail curling out of the car. Perfectly ' +
+      'UPRIGHT and CENTRED, riding straight ahead, the WHOLE vehicle visible including both stone wheels at the ' +
+      'bottom. ' + SPRITE_STYLE,
+  },
+  // The canonical lean frame VISUALLY leans right and is drawn as-is for a
+  // right lean, mirrored for a left lean (hero convention — rider.ts).
+  {
+    name: 'caveman-lean-right', model: 'gpt-image-1.5', size: '1024x1024', ref: ['art-originals/art/caveman-straight.png'],
+    prompt:
+      'The SAME rear-view prehistoric log car with the SAME two occupants IN THE SAME SEATS — the long-haired bearded ' +
+      'caveman stays on the LEFT seat, the monkey stays on the RIGHT seat (do NOT swap them) — now LEANING to the ' +
+      'RIGHT into a right-hand bend: car and both occupants tilted right, hair and fur blown to one side, weight into ' +
+      'the corner. Same likeness, same colours. ' + SPRITE_STYLE,
+  },
+  // Second animation frames: the SAME pose with the stone wheels visibly at a
+  // different rotation and the car mid-bounce — flipped with frame 1 at speed
+  // so the wheels read as turning.
+  {
+    name: 'caveman-straight-2', model: 'gpt-image-1.5', size: '1024x1024', ref: ['art-originals/art/caveman-straight.png'],
+    prompt:
+      'EXACTLY the same prehistoric log car, same rear view, same caveman on the left seat and monkey on the right ' +
+      'seat, same colours and same framing — but a SPLIT SECOND LATER: the round STONE WHEELS have visibly ROTATED ' +
+      '(their cracks and chips now at a different angle), the whole car sits a few pixels higher mid-bounce, and the ' +
+      'hair and fur are caught mid-flap in a slightly different position. Keep everything else identical. ' + SPRITE_STYLE,
+  },
+  {
+    name: 'caveman-wipeout', model: 'gpt-image-1.5', size: '1024x1024', ref: ['art-originals/art/caveman-straight.png'],
+    prompt:
+      'The SAME prehistoric log car crashing: comedic arcade wipeout, the log car tipping over, a stone wheel ' +
+      'bouncing free, the bearded caveman and the monkey tumbling through the air with limbs flailing, still clearly ' +
+      'recognisable. Rear/side view. ' + SPRITE_STYLE,
+  },
+  // Wipeout frames 2 and 3 continue the same crash so the tumble ANIMATES.
+  {
+    name: 'caveman-wipeout-2', model: 'gpt-image-1.5', size: '1024x1024', ref: ['art-originals/art/caveman-wipeout.png'],
+    prompt:
+      'The NEXT MOMENT of EXACTLY this same crash, same style and framing: the log car now fully on its side with ' +
+      'both stone wheels off the ground and one rolling away, the bearded caveman and the monkey higher in the air, ' +
+      'upside down, limbs flailing, dust starting to kick up. Same characters, same colours. ' + SPRITE_STYLE,
+  },
+  {
+    name: 'caveman-wipeout-3', model: 'gpt-image-1.5', size: '1024x1024', ref: ['art-originals/art/caveman-wipeout.png'],
+    prompt:
+      'The FINAL MOMENT of EXACTLY this same crash, same style and framing: the log car upside down on the ground ' +
+      'with a stone wheel still spinning in the air, a big comedic DUST CLOUD, and the bearded caveman and the ' +
+      'monkey sitting dazed on the ground with little stars circling their heads. Same characters, same colours. ' + SPRITE_STYLE,
+  },
+  // The secret level's GOAL tableau: drawn to the LEFT of the cavewomen cast —
+  // the log car side-on, both heroes stood beside it with a fat joint each.
+  // (The bitcoin rain is code-drawn.)
+  {
+    name: 'victory-cavemen', model: 'gpt-image-1.5', size: '1536x1024', quality: 'high', ref: ['art-originals/art/caveman-straight.png'],
+    prompt:
+      'SIDE-ON profile view of the SAME prehistoric log car, PARKED, drawn side view like a racing-game garage shot: ' +
+      'hollowed tree-trunk body, animal-hide canopy on poles, both round STONE WHEELS on the ground. STANDING on the ' +
+      'ground NEXT TO the car (outside it, full body, feet on the same baseline): the SAME long-haired bearded ' +
+      'caveman in his leopard-skin tunic and the SAME brown monkey with its bone necklace — EACH smoking their own ' +
+      'HUGE FAT hand-rolled JOINT with a glowing ember and a lazy curl of smoke, blissed-out victory grins, relaxed ' +
+      'celebratory poses. ' + SPRITE_STYLE,
+  },
+  // The secret level's own finish cast: amazon cave women instead of the
+  // Riviera flag marshals. Same composition and guardrails as the originals.
+  {
+    name: 'finish-line-cavewomen', model: 'gpt-image-1.5', size: '1536x1024', quality: 'high', ref: ['art-originals/art/finish-line-girls.png'],
+    prompt:
+      'Keep EXACTLY this composition, framing, baseline and pixel style, but replace the three women with three ' +
+      'glamorous AMAZON CAVE WOMEN, all clearly adult (age 25 or older): tall, strong and curvaceous bombshell ' +
+      'pin-ups with long wild hair, wearing stylish spotted leopard-fur and tiger-fur two-piece outfits with ' +
+      'tasteful opaque coverage, bone and tooth necklaces, fur boots, one holding a wooden spear and one waving the ' +
+      'SAME black-and-white checkered racing flag, all cheering the winner home. Confident, playful, non-explicit ' +
+      'pin-up energy, lively distinct poses, crisp hand-pixeled 32-bit racing-cabinet character art. Every character ' +
+      'must unmistakably be an adult; no nudity, no transparent fabric, no explicit sexual pose. ' + SPRITE_STYLE,
+  },
+  // Prehistoric "traffic": the chargers face the CAMERA (they run at the rider),
+  // the mammoth lumbers ahead and is caught up like normal traffic.
+  {
+    name: 'dino-trex', model: 'gpt-image-1.5', size: '1024x1024',
+    prompt:
+      'FRONT view of a big green-and-tan TYRANNOSAURUS REX charging STRAIGHT TOWARD the camera at full sprint, jaws ' +
+      'wide open showing teeth, tiny arms tucked, powerful legs mid-stride, head lowered and menacing. ' + SPRITE_STYLE + NO_BIKE,
+  },
+  {
+    name: 'dino-raptor', model: 'gpt-image-1.5', size: '1024x1024',
+    prompt:
+      'FRONT view of a sleek orange-and-teal striped VELOCIRAPTOR sprinting STRAIGHT TOWARD the camera, low and ' +
+      'fast, sickle claws raised, jaws open, tail streaming behind. ' + SPRITE_STYLE + NO_BIKE,
+  },
+  {
+    name: 'mammoth', model: 'gpt-image-1.5', size: '1024x1024',
+    prompt:
+      'REAR view of a huge WOOLLY MAMMOTH lumbering away down the road, shaggy reddish-brown fur, the tips of two ' +
+      'long curved white tusks visible either side of its head, small ropey tail, big round padded feet, as seen by ' +
+      'a driver catching it up from behind. ' + SPRITE_STYLE + NO_BIKE,
+  },
+  // Stone-age pickups.
+  {
+    name: 'pickup-joint', model: 'gpt-image-1.5', size: '1024x1024',
+    prompt:
+      'A single fat hand-rolled JOINT / spliff angled diagonally: slightly cone-shaped white rolling paper with a ' +
+      'twisted tip, a glowing orange EMBER at the lit end and one soft curl of pale smoke rising from it. ' + SPRITE_STYLE,
+  },
+  {
+    name: 'pickup-pill', model: 'gpt-image-1.5', size: '1024x1024',
+    prompt:
+      'A single glossy bright ORANGE two-part medicine capsule PILL, angled diagonally, with a clean specular ' +
+      'highlight sheen and a thin darker seam around its middle. ' + SPRITE_STYLE,
+  },
+  {
+    name: 'pickup-crystal', model: 'gpt-image-1.5', size: '1024x1024',
+    prompt:
+      'A jagged glowing AMBER-ORANGE CRYSTAL cluster power-up: translucent orange crystal shards rising from a small ' +
+      'rocky base, with a bold golden BITCOIN "B" currency symbol (₿) glowing in the heart of the tallest shard, and ' +
+      'a couple of tiny white sparkle glints. ' + SPRITE_STYLE,
+  },
+  // Stone-age roadside scenery.
+  {
+    name: 'prop-fern', model: 'gpt-image-1.5', size: '1024x1024',
+    prompt:
+      'A single giant PREHISTORIC TREE FERN: a thick shaggy fibrous brown trunk topped with a huge burst of long ' +
+      'arching bright-green fronds, full height, roadside decoration. ' + SPRITE_STYLE,
+  },
+  {
+    name: 'prop-bones', model: 'gpt-image-1.5', size: '1024x1024',
+    prompt:
+      'A weathered bleached-white DINOSAUR SKELETON: a big curved ribcage half-sunk in the ground with a long-toothed ' +
+      'dinosaur skull resting beside it and a few scattered vertebrae, roadside decoration. ' + SPRITE_STYLE,
+  },
+  {
+    name: 'prop-volcano', model: 'gpt-image-1.5', size: '1024x1024',
+    prompt:
+      'A rugged black-and-charcoal VOLCANO cone with glowing orange LAVA streaking down its flanks, an ember-lit ' +
+      'crater and a plume of grey smoke rising from the top, roadside landmark. ' + SPRITE_STYLE,
+  },
+  {
+    name: 'hazard-hole', model: 'gpt-image-1.5', size: '1024x1024',
+    prompt:
+      'A jagged dark POTHOLE crater in a gravel road seen from DIRECTLY ABOVE (top-down): a black broken hole with ' +
+      'cracked grey stone edges radiating hairline fracture lines and a few scattered pebbles around the rim. ' + SPRITE_STYLE,
+  },
+  {
+    name: 'horizon-jurassic', model: 'gpt-image-2', size: '1536x1024', background: 'opaque',
+    prompt:
+      'Wide panoramic arcade-game background illustration of a PREHISTORIC JURASSIC valley. A lush green fern jungle ' +
+      'and a steaming teal lagoon beneath a huge smoking VOLCANO streaked with glowing orange lava, distant ' +
+      'long-necked sauropod dinosaur silhouettes wading in the water, a couple of PTERODACTYLS gliding in a warm hazy ' +
+      'amber-and-teal sky, meeting along a single straight HORIZON LINE running horizontally across the VERTICAL ' +
+      'MIDDLE of the image. Flat, clean, bright saturated Sega OutRun style illustration. NO road, NO cars, NO ' +
+      'people, NO foreground objects, NO text, NO watermark, NO frame or border.',
+  },
   {
     name: 'title-art-orig', model: 'gpt-image-2', size: '1536x1024', background: 'opaque', ref: ['.art-ref/dni.jpeg'],
     prompt:

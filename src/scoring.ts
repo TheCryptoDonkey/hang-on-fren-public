@@ -224,6 +224,10 @@ export interface ScoreEventOptions {
   playerMode?: 'guest' | 'nostr';
   /** 1-based level/region reached (gamestr-wide `level` discovery tag). */
   level?: number;
+  /** Which tour the run rode. The secret stone tour is stamped as a `tour`
+   *  tag AND scores into its own addressable namespace (see scoreLevelKey),
+   *  so a prehistoric score never mixes with the road boards. */
+  tour?: string;
   /** Explicit play URL for the `r`/`source` tags — the claim server passes its
    *  configured public URL; the browser client derives it from `location`. */
   siteUrl?: string;
@@ -233,11 +237,26 @@ export interface ScoreEventOptions {
   btcUsdCents?: number;
 }
 
+/**
+ * The addressable per-level namespace a run scores into (the tail of the `d`
+ * tag, and the claim service's best-score key — shared so they can never
+ * drift). The secret stone tour gets its own namespace: a prehistoric run must
+ * never REPLACE (or be replaced by) a road-tour score at the same level number.
+ */
+export function scoreLevelKey(tour: string | undefined, level: number): string {
+  return tour === 'stone' ? `stone-${level}` : String(level);
+}
+
 /** The human-readable line gamestr renders as the event body (their spec wants
  *  a message here, not data — the run's numbers all live in tags). */
-function scoreMessage(summary: RunSummary, level: number, playerName?: string): string {
+function scoreMessage(summary: RunSummary, level: number, playerName?: string, tour?: string): string {
   const rider = playerName ?? 'A fren';
   const km = (summary.distanceM / 1000).toFixed(1);
+  if (tour === 'stone') {
+    return summary.endedBy === 'finish'
+      ? `${rider} survived 600 BILLION BC — ${summary.score} points over ${km} km on ${GAME_TITLE} (SECRET LEVEL)!`
+      : `${rider} scored ${summary.score} points over ${km} km in 600 BILLION BC on ${GAME_TITLE} (SECRET LEVEL).`;
+  }
   if (summary.endedBy === 'finish') {
     return `${rider} finished the grand tour — ${summary.score} points over ${km} km on ${GAME_TITLE}!`;
   }
@@ -262,7 +281,7 @@ export function buildScoreEvent(summary: RunSummary, playerPubkey = 'guest', opt
   const source = opts.siteUrl ? hostOf(opts.siteUrl) : gameSource();
   const level = opts.level ?? 1;
   const tags = [
-    ['d', `${GAME_ID}:${playerPubkey}:${level}`],
+    ['d', `${GAME_ID}:${playerPubkey}:${scoreLevelKey(opts.tour, level)}`],
     ['game', GAME_ID],
     ['score', String(summary.score)],
     ['p', playerPubkey],
@@ -291,10 +310,14 @@ export function buildScoreEvent(summary: RunSummary, playerPubkey = 'guest', opt
   if (opts.playerMode) tags.push(['playerMode', opts.playerMode]);
   if (opts.btcBlock) tags.push(['btc_block', String(opts.btcBlock)]);
   if (opts.btcUsdCents) tags.push(['btc_usd_cents', String(opts.btcUsdCents)]);
+  // The tour rides along so boards can tell the runs apart; the secret level
+  // additionally announces itself for gamestr-wide discovery.
+  if (opts.tour) tags.push(['tour', opts.tour]);
+  if (opts.tour === 'stone') tags.push(['t', 'secret']);
   return {
     kind: SCORE_KIND,
     created_at: Math.floor(Date.now() / 1000),
-    content: scoreMessage(summary, level, opts.playerName),
+    content: scoreMessage(summary, level, opts.playerName, opts.tour),
     tags,
   };
 }

@@ -491,6 +491,353 @@ function fallbackDeadTree(): SpriteImage {
   });
 }
 
+// --- 600 BILLION BC (secret level) fallbacks ---------------------------------
+
+// Giant prehistoric tree fern: shaggy trunk, a crown of long arching fronds.
+function fallbackFern(): SpriteImage {
+  return bake(150, 210, ctx => {
+    ctx.fillStyle = '#6b4a2b';
+    ctx.fillRect(69, 90, 14, 120);
+    ctx.strokeStyle = 'rgba(0,0,0,0.2)';
+    ctx.lineWidth = 2;
+    for (let y = 100; y < 205; y += 12) { ctx.beginPath(); ctx.moveTo(69, y); ctx.lineTo(83, y + 4); ctx.stroke(); } // fibrous rings
+    ctx.strokeStyle = '#3f9f4a';
+    ctx.lineWidth = 8;
+    ctx.lineCap = 'round';
+    const crown: [number, number] = [76, 88];
+    const tips: [number, number][] = [[8, 60], [26, 22], [76, 8], [126, 22], [142, 60], [116, 96], [36, 96]];
+    for (const [tx, ty] of tips) {
+      ctx.beginPath();
+      ctx.moveTo(crown[0], crown[1]);
+      ctx.quadraticCurveTo((crown[0] + tx) / 2, ty - 20, tx, ty);
+      ctx.stroke();
+    }
+    ctx.fillStyle = '#2f7d3a';
+    ctx.beginPath(); ctx.arc(76, 86, 13, 0, Math.PI * 2); ctx.fill();
+  });
+}
+
+// Bleached dinosaur ribcage with a long-toothed skull beside it.
+function fallbackBones(): SpriteImage {
+  return bake(180, 110, ctx => {
+    ctx.strokeStyle = '#efe8d8';
+    ctx.lineWidth = 9;
+    ctx.lineCap = 'round';
+    for (let i = 0; i < 5; i += 1) { // ribs arcing out of the ground
+      const x = 30 + i * 24;
+      ctx.beginPath();
+      ctx.arc(x, 106, 52 - i * 5, Math.PI * 1.05, Math.PI * 1.72);
+      ctx.stroke();
+    }
+    ctx.fillStyle = '#efe8d8'; // skull
+    ctx.beginPath();
+    ctx.ellipse(148, 84, 26, 17, -0.15, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillRect(150, 92, 28, 10); // snout
+    ctx.fillStyle = '#2a2420';
+    ctx.beginPath(); ctx.arc(146, 80, 5, 0, Math.PI * 2); ctx.fill(); // socket
+    for (let t = 0; t < 4; t += 1) { // teeth
+      ctx.fillStyle = '#efe8d8';
+      ctx.beginPath();
+      ctx.moveTo(152 + t * 7, 102);
+      ctx.lineTo(155 + t * 7, 110);
+      ctx.lineTo(158 + t * 7, 102);
+      ctx.closePath();
+      ctx.fill();
+    }
+  });
+}
+
+// Smoking volcano cone with lava streaks — the secret level's landmark.
+function fallbackVolcano(): SpriteImage {
+  return bake(200, 160, ctx => {
+    ctx.fillStyle = '#2e2226';
+    ctx.beginPath();
+    ctx.moveTo(6, 158); ctx.lineTo(78, 34); ctx.lineTo(122, 34); ctx.lineTo(194, 158);
+    ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#443036'; // lit flank
+    ctx.beginPath();
+    ctx.moveTo(78, 34); ctx.lineTo(122, 34); ctx.lineTo(150, 158); ctx.lineTo(96, 158);
+    ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = '#ff6a1a'; // lava streaks
+    ctx.lineWidth = 5;
+    ctx.lineCap = 'round';
+    for (const [x1, x2] of [[88, 66], [104, 108], [116, 146]] as const) {
+      ctx.beginPath();
+      ctx.moveTo(x1, 40);
+      ctx.quadraticCurveTo((x1 + x2) / 2, 100, x2, 154);
+      ctx.stroke();
+    }
+    ctx.fillStyle = '#ff9d3c'; // crater glow
+    ctx.fillRect(80, 30, 40, 7);
+    ctx.fillStyle = 'rgba(200,198,192,0.75)'; // smoke plume
+    for (const [cx, cy, r] of [[100, 20, 14], [116, 10, 11], [130, 4, 8]] as const) {
+      ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill();
+    }
+  });
+}
+
+// Top-down pothole crater decal (the renderer squashes it into the road plane).
+function fallbackHole(): SpriteImage {
+  return bake(160, 160, ctx => {
+    ctx.fillStyle = '#4a3a2c'; // cracked rim
+    ctx.beginPath(); ctx.ellipse(80, 80, 74, 62, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#171009'; // the hole
+    ctx.beginPath(); ctx.ellipse(80, 84, 58, 48, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = '#5f4b38'; // radiating cracks
+    ctx.lineWidth = 4;
+    for (let i = 0; i < 7; i += 1) {
+      const a = (i / 7) * Math.PI * 2 + 0.4;
+      ctx.beginPath();
+      ctx.moveTo(80 + Math.cos(a) * 60, 82 + Math.sin(a) * 50);
+      ctx.lineTo(80 + Math.cos(a + 0.12) * 78, 82 + Math.sin(a + 0.12) * 64);
+      ctx.stroke();
+    }
+    ctx.fillStyle = 'rgba(240,225,190,0.55)'; // sunlit far lip
+    ctx.beginPath(); ctx.ellipse(80, 74, 56, 44, 0, Math.PI, Math.PI * 2); ctx.stroke();
+  });
+}
+
+// Front-view charging T-rex — a wall of teeth coming the other way.
+function fallbackTrex(): SpriteImage {
+  return bake(150, 150, ctx => {
+    ctx.fillStyle = '#3f7d42'; // legs mid-stride
+    ctx.fillRect(38, 96, 26, 52);
+    ctx.fillRect(88, 90, 26, 58);
+    ctx.fillStyle = '#4c934f'; // body
+    ctx.beginPath(); ctx.ellipse(75, 78, 44, 40, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#57a55a'; // head, lowered and coming at you
+    ctx.beginPath(); ctx.ellipse(75, 40, 34, 28, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#2a1416'; // open jaw
+    ctx.beginPath(); ctx.ellipse(75, 52, 24, 14, 0, 0, Math.PI); ctx.fill();
+    ctx.fillStyle = '#f4efe0'; // teeth
+    for (let t = 0; t < 6; t += 1) {
+      ctx.beginPath();
+      ctx.moveTo(55 + t * 8, 52);
+      ctx.lineTo(59 + t * 8, 60);
+      ctx.lineTo(63 + t * 8, 52);
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.fillStyle = '#ffd23f'; // eyes
+    ctx.fillRect(58, 28, 8, 8);
+    ctx.fillRect(84, 28, 8, 8);
+    ctx.fillStyle = '#141414';
+    ctx.fillRect(60, 30, 4, 4);
+    ctx.fillRect(86, 30, 4, 4);
+    ctx.fillStyle = '#3f7d42'; // tiny arms
+    ctx.fillRect(34, 74, 12, 8);
+    ctx.fillRect(104, 74, 12, 8);
+  });
+}
+
+// Front-view sprinting raptor — low, fast, claws up.
+function fallbackRaptor(): SpriteImage {
+  return bake(130, 110, ctx => {
+    ctx.fillStyle = '#c97a2e'; // legs
+    ctx.fillRect(36, 66, 16, 44);
+    ctx.fillRect(78, 60, 16, 50);
+    ctx.fillStyle = '#dd8f3a'; // lean body
+    ctx.beginPath(); ctx.ellipse(65, 56, 34, 26, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#3a7d72'; // teal back stripes
+    for (let i = 0; i < 3; i += 1) ctx.fillRect(40 + i * 18, 34 + i * 2, 10, 6);
+    ctx.fillStyle = '#e8a04c'; // head
+    ctx.beginPath(); ctx.ellipse(65, 26, 22, 16, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#2a1416';
+    ctx.beginPath(); ctx.ellipse(65, 32, 14, 7, 0, 0, Math.PI); ctx.fill(); // jaw
+    ctx.fillStyle = '#f4efe0';
+    for (let t = 0; t < 4; t += 1) {
+      ctx.beginPath();
+      ctx.moveTo(54 + t * 7, 32);
+      ctx.lineTo(57 + t * 7, 38);
+      ctx.lineTo(60 + t * 7, 32);
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.fillStyle = '#ffd23f';
+    ctx.fillRect(54, 16, 7, 7);
+    ctx.fillRect(70, 16, 7, 7);
+    ctx.fillStyle = '#141414';
+    ctx.fillRect(56, 18, 3, 3);
+    ctx.fillRect(72, 18, 3, 3);
+    ctx.strokeStyle = '#c97a2e'; // raised sickle claws
+    ctx.lineWidth = 6;
+    ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(34, 52); ctx.lineTo(22, 38); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(96, 52); ctx.lineTo(108, 38); ctx.stroke();
+  });
+}
+
+// Rear-view woolly mammoth — a slow shaggy roadblock.
+function fallbackMammoth(): SpriteImage {
+  return bake(170, 140, ctx => {
+    ctx.fillStyle = '#5e4128'; // legs
+    for (const x of [28, 62, 96, 126]) ctx.fillRect(x, 96, 20, 42);
+    ctx.fillStyle = '#77522f'; // great shaggy rear dome
+    ctx.beginPath(); ctx.ellipse(85, 66, 66, 56, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = '#5e4128'; // hanging fur strands
+    ctx.lineWidth = 4;
+    for (let i = 0; i < 12; i += 1) {
+      const x = 28 + i * 10;
+      ctx.beginPath(); ctx.moveTo(x, 92); ctx.lineTo(x - 2, 112); ctx.stroke();
+    }
+    ctx.fillStyle = '#8a6238'; // head hump peeking over the back
+    ctx.beginPath(); ctx.ellipse(85, 24, 30, 18, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = '#f4e8d0'; // tusk tips either side of the head
+    ctx.lineWidth = 8;
+    ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(52, 30); ctx.quadraticCurveTo(38, 42, 44, 58); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(118, 30); ctx.quadraticCurveTo(132, 42, 126, 58); ctx.stroke();
+    ctx.strokeStyle = '#5e4128'; // ropey tail
+    ctx.lineWidth = 5;
+    ctx.beginPath(); ctx.moveTo(85, 96); ctx.quadraticCurveTo(89, 116, 82, 128); ctx.stroke();
+    ctx.fillStyle = '#3a2a18';
+    ctx.beginPath(); ctx.arc(82, 130, 5, 0, Math.PI * 2); ctx.fill(); // tail tuft
+  });
+}
+
+// The Flintstones-style log car with the two cavemen aboard (rear view). All
+// four pose names map here — drawRider's analogue rotation supplies the lean.
+function fallbackCavemanCar(): SpriteImage {
+  return bake(170, 140, ctx => {
+    ctx.fillStyle = '#8a6238'; // log body
+    ctx.beginPath();
+    ctx.ellipse(85, 92, 62, 26, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#6b4a2b';
+    ctx.lineWidth = 4;
+    ctx.beginPath(); ctx.ellipse(85, 92, 62, 26, 0, 0, Math.PI * 2); ctx.stroke();
+    ctx.strokeStyle = 'rgba(0,0,0,0.25)'; // log grain rings
+    ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.ellipse(85, 92, 46, 18, 0, 0, Math.PI * 2); ctx.stroke();
+    ctx.beginPath(); ctx.ellipse(85, 92, 28, 11, 0, 0, Math.PI * 2); ctx.stroke();
+    ctx.fillStyle = '#8f8a82'; // stone wheels
+    ctx.beginPath(); ctx.arc(38, 116, 22, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(132, 116, 22, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#6f6a62';
+    ctx.beginPath(); ctx.arc(38, 116, 8, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(132, 116, 8, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#c9a86a'; // hide canopy on two poles
+    ctx.fillRect(30, 8, 110, 12);
+    ctx.strokeStyle = '#6b4a2b';
+    ctx.lineWidth = 5;
+    ctx.beginPath(); ctx.moveTo(36, 20); ctx.lineTo(36, 78); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(134, 20); ctx.lineTo(134, 78); ctx.stroke();
+    // DNI the caveman (left): long hair, beard, leopard tunic.
+    ctx.fillStyle = '#e8b23a';
+    ctx.fillRect(42, 52, 34, 30); // tunic
+    ctx.fillStyle = '#3a2a18';
+    for (const [sx, sy] of [[48, 58], [62, 66], [56, 74]] as const) { ctx.beginPath(); ctx.arc(sx, sy, 3, 0, Math.PI * 2); ctx.fill(); }
+    ctx.fillStyle = '#a5561f'; // hair
+    ctx.beginPath(); ctx.ellipse(59, 36, 17, 20, 0, 0, Math.PI * 2); ctx.fill();
+    // The monkey (right): smaller, round ears, curling tail.
+    ctx.fillStyle = '#7a5230';
+    ctx.beginPath(); ctx.ellipse(112, 62, 15, 18, 0, 0, Math.PI * 2); ctx.fill(); // back
+    ctx.beginPath(); ctx.arc(112, 40, 12, 0, Math.PI * 2); ctx.fill(); // head
+    ctx.beginPath(); ctx.arc(101, 34, 5, 0, Math.PI * 2); ctx.fill(); // ears
+    ctx.beginPath(); ctx.arc(123, 34, 5, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = '#7a5230';
+    ctx.lineWidth = 5;
+    ctx.beginPath(); ctx.moveTo(126, 74); ctx.quadraticCurveTo(150, 66, 146, 46); ctx.stroke(); // tail
+  });
+}
+
+// Fat hand-rolled joint with a glowing ember and a curl of smoke.
+function fallbackJoint(): SpriteImage {
+  return bake(90, 100, ctx => {
+    ctx.save();
+    ctx.translate(45, 58);
+    ctx.rotate(-0.6);
+    ctx.fillStyle = '#f2ead6'; // paper cone
+    ctx.beginPath();
+    ctx.moveTo(-34, -5); ctx.lineTo(30, -9); ctx.lineTo(30, 9); ctx.lineTo(-34, 5);
+    ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = 'rgba(0,0,0,0.35)';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.fillStyle = '#c9b98a'; // twisted tip
+    ctx.fillRect(28, -9, 8, 18);
+    ctx.fillStyle = '#ff6a1a'; // ember
+    ctx.beginPath(); ctx.arc(-36, 0, 6, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#ffd23f';
+    ctx.beginPath(); ctx.arc(-36, 0, 3, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+    ctx.strokeStyle = 'rgba(220,220,215,0.8)'; // smoke curl
+    ctx.lineWidth = 4;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(18, 34);
+    ctx.quadraticCurveTo(6, 24, 16, 14);
+    ctx.quadraticCurveTo(26, 6, 18, 2);
+    ctx.stroke();
+  });
+}
+
+// The 600B orange pill.
+function fallbackPill(): SpriteImage {
+  return bake(80, 90, ctx => {
+    ctx.save();
+    ctx.translate(40, 46);
+    ctx.rotate(-0.5);
+    const grad = ctx.createLinearGradient(0, -16, 0, 16);
+    grad.addColorStop(0, '#ffb43c');
+    grad.addColorStop(0.5, '#ff8c1a');
+    grad.addColorStop(1, '#d96a08');
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.moveTo(-26, -14);
+    ctx.arc(-26, 0, 14, -Math.PI / 2, Math.PI / 2, true);
+    ctx.lineTo(26, 14);
+    ctx.arc(26, 0, 14, Math.PI / 2, -Math.PI / 2, true);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(0,0,0,0.4)';
+    ctx.lineWidth = 2.5;
+    ctx.stroke();
+    ctx.strokeStyle = 'rgba(120,50,0,0.5)'; // capsule seam
+    ctx.beginPath(); ctx.moveTo(0, -14); ctx.lineTo(0, 14); ctx.stroke();
+    ctx.fillStyle = 'rgba(255,255,255,0.6)'; // sheen
+    ctx.beginPath(); ctx.ellipse(-14, -7, 10, 4, -0.2, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+  });
+}
+
+// Bitcoin timelock crystal — the stone age's clock top-up.
+function fallbackCrystal(): SpriteImage {
+  return bake(90, 104, ctx => {
+    ctx.fillStyle = '#6f6a62'; // rocky base
+    ctx.beginPath(); ctx.ellipse(45, 94, 30, 9, 0, 0, Math.PI * 2); ctx.fill();
+    const shard = (cx: number, top: number, half: number, base: number, light: string, dark: string): void => {
+      ctx.fillStyle = dark;
+      ctx.beginPath();
+      ctx.moveTo(cx, top); ctx.lineTo(cx + half, base); ctx.lineTo(cx - half, base);
+      ctx.closePath(); ctx.fill();
+      ctx.fillStyle = light; // lit facet
+      ctx.beginPath();
+      ctx.moveTo(cx, top); ctx.lineTo(cx - half, base); ctx.lineTo(cx - half * 0.2, base);
+      ctx.closePath(); ctx.fill();
+      ctx.strokeStyle = 'rgba(0,0,0,0.35)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(cx, top); ctx.lineTo(cx + half, base); ctx.lineTo(cx - half, base);
+      ctx.closePath(); ctx.stroke();
+    };
+    shard(24, 40, 12, 94, '#ffc978', '#e88a1a');
+    shard(66, 32, 13, 94, '#ffc978', '#e88a1a');
+    shard(45, 8, 17, 96, '#ffd9a0', '#ff9d2e');
+    ctx.fillStyle = '#8a5200'; // the ₿ glowing in the tall shard
+    ctx.font = `900 22px 'Trebuchet MS', sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('₿', 45, 62);
+    ctx.fillStyle = '#fff4d6';
+    for (const [sx, sy] of [[36, 22], [72, 44]] as const) { // sparkle glints
+      ctx.fillRect(sx - 1, sy - 4, 2, 8);
+      ctx.fillRect(sx - 4, sy - 1, 8, 2);
+    }
+  });
+}
+
 // Glowing lava rock.
 function fallbackLavaRock(): SpriteImage {
   return bake(180, 130, ctx => {
@@ -1550,6 +1897,20 @@ const FALLBACKS: Record<string, () => SpriteImage> = {
   'prop-lighthouse': fallbackLighthouse,
   'prop-deadtree': fallbackDeadTree,
   'prop-lavarock': fallbackLavaRock,
+  'prop-fern': fallbackFern,
+  'prop-bones': fallbackBones,
+  'prop-volcano': fallbackVolcano,
+  'hazard-hole': fallbackHole,
+  'dino-trex': fallbackTrex,
+  'dino-raptor': fallbackRaptor,
+  mammoth: fallbackMammoth,
+  'caveman-straight': fallbackCavemanCar,
+  'caveman-lean-right': fallbackCavemanCar,
+  'caveman-wipeout': fallbackCavemanCar,
+  // (No fallbacks for the '-2'/'-3' animation frames or a lean-left: rider.ts
+  // must see a MISS for those so it can fall back to frame 1 / mirroring.)
+  'finish-line-cavewomen': fallbackFinishGirls,
+  'victory-cavemen': fallbackCavemanCar,
   'prop-mill': fallbackMill,
   'prop-clocktower': fallbackClockTower,
   'prop-windmill': fallbackWindmill,
@@ -1593,6 +1954,9 @@ const FALLBACKS: Record<string, () => SpriteImage> = {
   'pickup-shield': fallbackShield,
   'pickup-beer': fallbackBeer,
   'pickup-shroom': fallbackShroom,
+  'pickup-joint': fallbackJoint,
+  'pickup-pill': fallbackPill,
+  'pickup-crystal': fallbackCrystal,
 };
 
 const ART_URLS: Record<string, string> = {
@@ -1600,6 +1964,30 @@ const ART_URLS: Record<string, string> = {
   'hero-lean-left': assetUrl('art/hero-lean-left.webp'),
   'hero-lean-right': assetUrl('art/hero-lean-right.webp'),
   'hero-wipeout': assetUrl('art/hero-wipeout.webp'),
+  // 600 BILLION BC — the secret level's log car, beasts, pickups and scenery.
+  // The '-2' frames flip with frame 1 at speed (turning stone wheels); the
+  // wipeout stages animate the tumble. One lean frame, mirrored (hero style).
+  'caveman-straight': assetUrl('art/caveman-straight.webp'),
+  'caveman-straight-2': assetUrl('art/caveman-straight-2.webp'),
+  // ONE lean frame, mirrored for left (no '-2' flip: the generated lean pair
+  // drifted too much between frames and the flip read as wobble, not wheels).
+  'caveman-lean-right': assetUrl('art/caveman-lean-right.webp'),
+  'caveman-wipeout': assetUrl('art/caveman-wipeout.webp'),
+  'caveman-wipeout-2': assetUrl('art/caveman-wipeout-2.webp'),
+  'caveman-wipeout-3': assetUrl('art/caveman-wipeout-3.webp'),
+  'finish-line-cavewomen': assetUrl('art/finish-line-cavewomen.webp'),
+  'victory-cavemen': assetUrl('art/victory-cavemen.webp'),
+  'dino-trex': assetUrl('art/dino-trex.webp'),
+  'dino-raptor': assetUrl('art/dino-raptor.webp'),
+  mammoth: assetUrl('art/mammoth.webp'),
+  'pickup-joint': assetUrl('art/pickup-joint.webp'),
+  'pickup-pill': assetUrl('art/pickup-pill.webp'),
+  'pickup-crystal': assetUrl('art/pickup-crystal.webp'),
+  'prop-fern': assetUrl('art/prop-fern.webp'),
+  'prop-bones': assetUrl('art/prop-bones.webp'),
+  'prop-volcano': assetUrl('art/prop-volcano.webp'),
+  'hazard-hole': assetUrl('art/hazard-hole.webp'),
+  'horizon-jurassic': assetUrl('art/horizon-jurassic.webp'),
   'car-classic': assetUrl('art/car-classic.webp'),
   'car-van': assetUrl('art/car-van.webp'),
   'scooter-rival': assetUrl('art/scooter-rival.webp'),

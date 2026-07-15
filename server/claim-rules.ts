@@ -68,6 +68,12 @@ export interface ClaimInput {
   drifts?: number;
   level: number;
   ended_by: 'time' | 'finish';
+  /**
+   * Which tour the run rode. OPTIONAL (older clients omit it → 'grand'). The
+   * secret 'stone' tour publishes with a `tour` tag and scores into its own
+   * addressable namespace (scoreLevelKey), so it never replaces a road score.
+   */
+  tour?: 'grand' | 'world' | 'stone';
   player_name?: string;
   player_mode?: 'guest' | 'nostr';
   /** Bitcoin chain tip at run end — flavour, dropped (not refused) if implausible. */
@@ -99,10 +105,15 @@ export function parseClaim(body: unknown, now = Date.now()): ParseResult {
   if (value.ended_by !== 'time' && value.ended_by !== 'finish') {
     return { ok: false, status: 422, error: 'invalid_payload', detail: 'ended_by must be time|finish' };
   }
+  if (value.tour !== undefined && value.tour !== 'grand' && value.tour !== 'world' && value.tour !== 'stone') {
+    return { ok: false, status: 422, error: 'invalid_payload', detail: 'tour must be grand|world|stone' };
+  }
   const claim = value as ClaimInput;
 
   if (claim.score <= 0) return { ok: false, status: 422, error: 'invalid_score' };
   if (claim.level < 1 || claim.level > 10) return { ok: false, status: 422, error: 'invalid_level' };
+  // The secret prehistoric trip is a single leg — there is no stone level 2.
+  if (claim.tour === 'stone' && claim.level !== 1) return { ok: false, status: 422, error: 'invalid_level' };
   if (claim.duration_s <= 0 || claim.duration_s > MAX_DURATION_S) return { ok: false, status: 422, error: 'invalid_duration' };
   if (claim.started_at >= claim.finished_at || claim.finished_at > now + FUTURE_SLACK_MS) {
     return { ok: false, status: 422, error: 'invalid_run_clock' };

@@ -74,14 +74,19 @@ export const TRANSITION = 0.22;
 
 // --- tours -------------------------------------------------------------------
 
-/** Which journey a run rides: the main grand tour, or the 600B world tour
- *  (the conference circuit — see WORLD_STAGES). */
-export type TourId = 'grand' | 'world';
+/** Which journey a run rides: the main grand tour, the 600B world tour
+ *  (the conference circuit — see WORLD_STAGES), or the SECRET single-level
+ *  prehistoric trip (600 BILLION BC — tap the title logo to find it). */
+export type TourId = 'grand' | 'world' | 'stone';
 
 export const TOUR_TITLES: Record<TourId, string> = {
   grand: 'GRAND TOUR',
   world: '600B WORLD TOUR',
+  stone: '600 BILLION BC',
 };
+
+/** How many levels the secret prehistoric trip runs (one long broken timeline). */
+export const STONE_LEVELS = 1;
 
 let activeTour: TourId = 'grand';
 
@@ -97,7 +102,9 @@ export function getActiveTour(): TourId {
 
 /** Levels in the ACTIVE tour. */
 export function levelCount(): number {
-  return activeTour === 'world' ? WORLD_LEVELS : LEVELS;
+  if (activeTour === 'world') return WORLD_LEVELS;
+  if (activeTour === 'stone') return STONE_LEVELS;
+  return LEVELS;
 }
 
 /** Finish-line distance of the ACTIVE tour. */
@@ -106,19 +113,27 @@ export function finishDistanceM(): number {
 }
 
 function activeKeyframes(): readonly Palette[] {
-  return activeTour === 'world' ? WORLD_KEYFRAMES : KEYFRAMES;
+  if (activeTour === 'world') return WORLD_KEYFRAMES;
+  if (activeTour === 'stone') return STONE_KEYFRAMES;
+  return KEYFRAMES;
 }
 
 function activeStages(): readonly { name: string; roster: readonly string[] }[] {
-  return activeTour === 'world' ? WORLD_STAGES : STAGES;
+  if (activeTour === 'world') return WORLD_STAGES;
+  if (activeTour === 'stone') return STONE_STAGES;
+  return STAGES;
 }
 
 function activeKits(): readonly SceneryKit[] {
-  return activeTour === 'world' ? WORLD_SCENERY_KITS : SCENERY_KITS;
+  if (activeTour === 'world') return WORLD_SCENERY_KITS;
+  if (activeTour === 'stone') return STONE_SCENERY_KITS;
+  return SCENERY_KITS;
 }
 
 function activeBiomes(): readonly BiomeBackdrop[] {
-  return activeTour === 'world' ? WORLD_BIOME_NAMES : BIOME_NAMES;
+  if (activeTour === 'world') return WORLD_BIOME_NAMES;
+  if (activeTour === 'stone') return STONE_BIOME_NAMES;
+  return BIOME_NAMES;
 }
 
 /** True where the treat lottery should be dominated by roses — the Taj Mahal
@@ -295,6 +310,25 @@ const TAJ: Palette = {
 
 const WORLD_KEYFRAMES: readonly Palette[] = [MANCHESTER, PRAGUE, MALLORCA, TAJ];
 
+// --- 600 BILLION BC (the secret prehistoric trip) -----------------------------
+
+// S1. JURASSIC VALLEY — steaming fern jungle under a smoking volcano: teal haze
+// sky, lagoon water, lush green verges, a dusty GRAVEL road with bone-white and
+// hide-brown rumble strips.
+const JURASSIC: Palette = {
+  skyTop: '#3fa4bc', skyHorizon: '#f0d9a0', sea: '#2f9f8f',
+  hillsFar: '#7aa578', hillsNear: '#4d7f4a',
+  grassLight: '#7fae58', grassDark: '#74a34e', ground: 'grass',
+  roadLight: '#9a8f7a', roadDark: '#90856f',
+  // lane == roadLight: nobody painted lane markings 600 billion years ago —
+  // matching the road colour erases the dashes and the tarmac reads as gravel.
+  rumbleLight: '#e8dcc2', rumbleDark: '#7a4a2a', lane: '#9a8f7a',
+  offRoadLight: '#b09a66', offRoadDark: '#a48e5a', fog: '#d8e0c0',
+  sun: '#ffe9b0', star: 0,
+};
+
+const STONE_KEYFRAMES: readonly Palette[] = [JURASSIC];
+
 // Each region drives its OWN traffic: the vehicles you meet belong to the place
 // you're riding through — coaches and ploughs on the mountain, pickups and
 // buggies in the canyon, taxis and squad cars in the city, tractors in the
@@ -333,6 +367,12 @@ const WORLD_STAGES: readonly { name: string; roster: readonly string[] }[] = [
   { name: 'OLD MALLORCA', roster: ['car-camper', 'car-porsche', 'car-classic'] },
   // W4 Taj Mahal — a grand closing procession of coaches and tourers.
   { name: 'TAJ MAHAL', roster: ['car-bus', 'car-bentley', 'car-ferrari'] },
+];
+
+const STONE_STAGES: readonly { name: string; roster: readonly string[] }[] = [
+  // S1 The Stoned Age — mammoths lumber ahead; the dinosaurs CHARGE AT you
+  // (world.ts gives dino-* sprites oncoming speed).
+  { name: 'THE STONED AGE', roster: ['dino-trex', 'dino-raptor', 'mammoth'] },
 ];
 
 /**
@@ -397,6 +437,12 @@ const WORLD_SCENERY_KITS: readonly SceneryKit[] = [
   { trees: ['prop-palm', 'prop-cypress'], accent: 'prop-parasol', landmark: 'prop-windmill' },
   // W4 TAJ MAHAL — charbagh cypress avenues, ROSES everywhere, the mausoleum itself.
   { trees: ['prop-cypress', 'prop-blossom'], accent: 'prop-flowers', landmark: 'prop-tajmahal' },
+];
+
+const STONE_SCENERY_KITS: readonly SceneryKit[] = [
+  // S1 THE STONED AGE — giant tree ferns and palms, dinosaur bones on the verge,
+  // a smoking volcano for a landmark.
+  { trees: ['prop-fern', 'prop-palm', 'prop-fern'], accent: 'prop-bones', landmark: 'prop-volcano' },
 ];
 
 export function sceneryKitAt(distanceM: number): SceneryKit {
@@ -470,8 +516,16 @@ const WORLD_TERRAIN: readonly Terrain[] = [
   { left: 'flat', right: 'flat', cliffLight: '#c8b48c', cliffDark: '#b09a72', dropColor: '#cfe0d0', cliffHeight: 1600 },
 ];
 
+// One for the single prehistoric leg: red-rock canyon wall inland, the ground
+// falling away to the steaming lagoon on the other shoulder.
+const STONE_TERRAIN: readonly Terrain[] = [
+  { left: 'cliff', right: 'drop', cliffLight: '#8a664a', cliffDark: '#6d4e3a', dropColor: '#2f9f8f', cliffHeight: 3800 },
+];
+
 function activeTerrain(): readonly Terrain[] {
-  return activeTour === 'world' ? WORLD_TERRAIN : TERRAIN;
+  if (activeTour === 'world') return WORLD_TERRAIN;
+  if (activeTour === 'stone') return STONE_TERRAIN;
+  return TERRAIN;
 }
 
 export function terrainAt(distanceM: number): Terrain {
@@ -503,9 +557,12 @@ export function rosterAt(distanceM: number): readonly string[] {
 // instead, one phase per city, closing on the gala at the Taj.
 const MARKET_PHASES = ['BEAR MARKET', 'BULL RUN', 'TO THE MOON', 'NEW DAWN'] as const;
 const CONFERENCE_PHASES = ['REGISTRATION DAY', 'KEYNOTE DAY', 'PANEL MARATHON', 'CLOSING GALA'] as const;
+const STONE_PHASES = ['ONE BROKEN TIMELINE'] as const;
 
 export function marketPhaseAt(distanceM: number): string {
-  const phases: readonly string[] = activeTour === 'world' ? CONFERENCE_PHASES : MARKET_PHASES;
+  const phases: readonly string[] = activeTour === 'world'
+    ? CONFERENCE_PHASES
+    : activeTour === 'stone' ? STONE_PHASES : MARKET_PHASES;
   const level = stageIndexAt(distanceM);
   const phase = Math.min(phases.length - 1, Math.floor((level * phases.length) / levelCount()));
   return phases[phase];
@@ -587,7 +644,8 @@ const BIOME_NAMES = [
   'riviera', 'beach', 'alpine', 'desert', 'city', 'valley', 'autumn', 'lake', 'volcano', 'finale',
 ] as const;
 const WORLD_BIOME_NAMES = ['manchester', 'prague', 'mallorca', 'tajmahal'] as const;
-export type BiomeBackdrop = typeof BIOME_NAMES[number] | typeof WORLD_BIOME_NAMES[number];
+const STONE_BIOME_NAMES = ['jurassic'] as const;
+export type BiomeBackdrop = typeof BIOME_NAMES[number] | typeof WORLD_BIOME_NAMES[number] | typeof STONE_BIOME_NAMES[number];
 export type TimeOfDay = { a: BiomeBackdrop; b: BiomeBackdrop; t: number };
 
 /** The two horizon backdrops to crossfade at a distance, and the blend 0..1 —

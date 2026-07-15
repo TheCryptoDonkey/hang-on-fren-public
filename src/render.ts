@@ -40,6 +40,9 @@ const PICKUP_SPRITE: Record<string, string> = {
   shield: 'pickup-shield',
   beer: 'pickup-beer',
   shroom: 'pickup-shroom',
+  joint: 'pickup-joint',
+  pill: 'pickup-pill',
+  crystal: 'pickup-crystal',
 };
 
 // Sprite widths (fraction of the full road width) live in geometry.ts — the
@@ -451,6 +454,9 @@ export interface Scene {
   /** Drop the rider (and their flame/streaks) from the frame — the victory
    *  tableau shows the finish cast, not the back of the scooter. */
   hideRider?: boolean;
+  /** Which player sprite family to draw: 'hero' (the Vespa, default) or
+   *  'caveman' (the secret level's log car). */
+  heroSet?: string;
 }
 
 // Offscreen frame snapshot reused by the trip kaleidoscope (no per-frame alloc).
@@ -621,6 +627,44 @@ export function renderScene(scene: Scene): void {
     entities.push({ sx: lerp(p1.x, p2.x, frac), sy: lerp(p1.y, p2.y, frac), scale, clip: seg.clip, offset, sprite, bobY, fwd });
   };
 
+  // Potholes lie IN the road surface, so they go down before any entity: a
+  // dark crater decal squashed into the ground plane, clipped like everything
+  // else so a hill crest can still hide one until the last moment.
+  for (const hole of world.hazards) {
+    const fwd = signedForward(hole.z, player.z, track.length);
+    if (fwd < 0 || fwd > maxFwd) continue;
+    const seg = findSegment(track, hole.z);
+    const p1 = seg.p1.screen;
+    const p2 = seg.p2.screen;
+    const frac = clamp((wrap(hole.z, track.length) - seg.index * ROAD.segmentLength) / ROAD.segmentLength, 0, 1);
+    const hScale = lerp(p1.scale, p2.scale, frac);
+    if (hScale <= 0) continue;
+    const hx = lerp(p1.x, p2.x, frac) + hScale * hole.offset * ROAD.roadWidth * (width / 2);
+    const hy = lerp(p1.y, p2.y, frac);
+    const hw = hScale * spriteWorldWidth('hazard-hole') * ROAD.roadWidth * (width / 2);
+    if (hw < 1.5) continue;
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, 0, width, Math.max(0, seg.clip));
+    ctx.clip();
+    const art = store.get('hazard-hole');
+    if (art) {
+      // The generated top-down crater, squashed into the road's perspective.
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(art.canvas, hx - hw / 2, hy - hw * 0.36, hw, hw * 0.4);
+    } else {
+      ctx.fillStyle = 'rgba(30,22,16,0.92)';
+      ctx.beginPath();
+      ctx.ellipse(hx, hy - hw * 0.14, hw * 0.5, hw * 0.16, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = 'rgba(240,225,190,0.5)'; // cracked lip catching the light
+      ctx.beginPath();
+      ctx.ellipse(hx, hy - hw * 0.2, hw * 0.5, hw * 0.15, 0, Math.PI, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
   for (const pickup of world.pickups) {
     if (pickup.taken) continue;
     pushEntity(pickup.z, pickup.offset, PICKUP_SPRITE[pickup.kind] ?? 'pickup-petrol', Math.sin(pickup.bob * 3) * 0.05);
@@ -685,6 +729,7 @@ export function renderScene(scene: Scene): void {
       spin: player.z * 0.03,
       speed: speedPct,
       time: scene.time,
+      set: scene.heroSet,
     });
 
     // Speed rush: streaks raked out of the vanishing point. Always in turbo or a
@@ -2012,7 +2057,8 @@ function renderSegment(ctx: CanvasRenderingContext2D, width: number, height: num
 }
 
 function needsContactShadow(sprite: string): boolean {
-  return sprite.startsWith('car-') || sprite.startsWith('scooter-') || sprite.startsWith('pickup-') || sprite === 'rose';
+  return sprite.startsWith('car-') || sprite.startsWith('scooter-') || sprite.startsWith('pickup-')
+    || sprite === 'rose' || sprite.startsWith('dino-') || sprite === 'mammoth';
 }
 
 function drawEntity(ctx: CanvasRenderingContext2D, width: number, store: SpriteStore, e: EntityDraw): void {

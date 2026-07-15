@@ -31,7 +31,7 @@ import {
   validateEventTimestamp,
   validateEventUrlTag,
 } from 'nostr-tools/nip98';
-import { buildScoreEvent, GAME_ID, GAME_PUBKEY, SCORE_KIND, type RunSummary } from '../src/scoring.js';
+import { buildScoreEvent, scoreLevelKey, GAME_ID, GAME_PUBKEY, SCORE_KIND, type RunSummary } from '../src/scoring.js';
 import { DEFAULT_WRITE_RELAYS } from '../src/relays.js';
 import { parseClaim, cleanPlayerName, MAX_DISTANCE_M, STALE_RUN_MS, type ClaimInput } from './claim-rules.js';
 import { seedHistoricBestScores } from './historic-scores.js';
@@ -210,10 +210,12 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     return;
   }
 
-  // Kind 30762 is addressable: the `d` tag is game:player:level, so publishing
-  // a worse run would REPLACE the player's better score for that level on the
-  // relays. Sign and log every accepted claim, but only publish improvements.
-  const bestKey = `${auth.pubkey}:${claim.level}`;
+  // Kind 30762 is addressable: the `d` tag is game:player:levelKey, so
+  // publishing a worse run would REPLACE the player's better score for that
+  // level on the relays. Sign and log every accepted claim, but only publish
+  // improvements. The level key is tour-namespaced (scoreLevelKey) so the
+  // secret stone tour can never displace a road-tour score.
+  const bestKey = `${auth.pubkey}:${scoreLevelKey(claim.tour, claim.level)}`;
   const improves = claim.score > (bestScores.get(bestKey) ?? 0);
   if (improves) bestScores.set(bestKey, claim.score);
 
@@ -270,6 +272,7 @@ function buildGameSignedScore(claim: ClaimInput, playerPubkey: string): ReturnTy
     playerName: cleanPlayerName(claim.player_name) ?? undefined,
     playerMode: claim.player_mode === 'nostr' ? 'nostr' : 'guest',
     level: claim.level,
+    tour: claim.tour,
     siteUrl: SITE_URL,
     btcBlock: claim.btc_block,
     btcUsdCents: claim.btc_usd_cents,
@@ -386,7 +389,7 @@ async function loadClaims(): Promise<{ claims: Map<string, StoredClaim>; bestSco
     for (const line of raw.split('\n')) {
       if (!line.trim()) continue;
       try {
-        const parsed = JSON.parse(line) as Partial<StoredClaim> & { claim?: { score?: unknown; level?: unknown } };
+        const parsed = JSON.parse(line) as Partial<StoredClaim> & { claim?: { score?: unknown; level?: unknown; tour?: unknown } };
         if (typeof parsed.key === 'string' && typeof parsed.score_event_id === 'string') {
           const acceptedAt = String(parsed.accepted_at ?? '');
           const pubkey = String(parsed.pubkey ?? '');
@@ -401,8 +404,9 @@ async function loadClaims(): Promise<{ claims: Map<string, StoredClaim>; bestSco
           });
           const score = parsed.claim?.score;
           const level = parsed.claim?.level;
+          const tour = typeof parsed.claim?.tour === 'string' ? parsed.claim.tour : undefined;
           if (pubkey && typeof score === 'number' && typeof level === 'number') {
-            const key = `${pubkey}:${level}`;
+            const key = `${pubkey}:${scoreLevelKey(tour, level)}`;
             if (score > (best.get(key) ?? 0)) best.set(key, score);
           }
         }

@@ -18,9 +18,19 @@ export const SPRITE_WORLD_WIDTH: Record<string, number> = {
   'pickup-shield': 0.14,
   'pickup-beer': 0.13,
   'pickup-shroom': 0.14,
+  'pickup-joint': 0.14,
+  'pickup-pill': 0.11,
+  'pickup-crystal': 0.14,
   'car-classic': 0.32,
   'car-van': 0.3,
   'scooter-rival': 0.16,
+  // Prehistoric "traffic" — the dinosaurs charge AT the rider, the mammoth is a
+  // slow shaggy roadblock. Widths tell the truth about their bulk.
+  'dino-trex': 0.36,
+  'dino-raptor': 0.24,
+  mammoth: 0.42,
+  // Pothole decal (drawn flat on the road; collision uses its own window).
+  'hazard-hole': 0.3,
   'car-lambo': 0.34,
   'car-ferrari': 0.34,
   'car-porsche': 0.32,
@@ -69,12 +79,17 @@ export const SPRITE_WORLD_WIDTH: Record<string, number> = {
   'prop-clocktower': 0.75,
   'prop-windmill': 0.95,
   'prop-tajmahal': 1.5,
+  // 600 BILLION BC scenery
+  'prop-fern': 0.52,
+  'prop-bones': 0.7,
+  'prop-volcano': 1.4,
   // road-spanning gate / finish arches (wider than the tarmac so posts sit off it)
   'prop-gate': 2.7,
   'prop-finish': 2.7,
   // The flag-marshal cast waiting at the finish line — a road-hugging group you
   // ride up to, so the payoff is visible all the way down the run-in.
   'finish-line-girls': 0.8,
+  'finish-line-cavewomen': 0.8,
   'prop-chevron-left': 0.62,
   'prop-chevron-right': 0.62,
 };
@@ -144,6 +159,11 @@ const SCENERY_HIT_HALF_WIDTH: Record<string, number | null> = {
   'prop-clocktower': 0.2,
   'prop-windmill': 0.26,
   'prop-tajmahal': 0.5,
+  // 600 BILLION BC scenery: the fern is a trunk strike like any tree; the bones
+  // and the volcano are solid enough to hurt.
+  'prop-fern': 0.08,
+  'prop-bones': 0.18,
+  'prop-volcano': 0.4,
   // Soft verge dressing: drawn for speed/parallax, not as crash hazards.
   'prop-flowers': null,
   'prop-reed': null,
@@ -151,6 +171,7 @@ const SCENERY_HIT_HALF_WIDTH: Record<string, number | null> = {
   'prop-gate': null,
   'prop-finish': null,
   'finish-line-girls': null, // the welcome party is not a crash hazard
+  'finish-line-cavewomen': null,
   // Warning boards sit just beyond the verge and are guidance, not hazards.
   'prop-chevron-left': null,
   'prop-chevron-right': null,

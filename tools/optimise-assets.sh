@@ -29,17 +29,26 @@ webp() { cwebp -quiet -q "$4" -resize "$3" 0 "$1" -o "$2"; }
 #    title-art-orig; prop-finish.png by prop-finish-decorated).
 for f in "$ART_SRC"/car-*.png "$ART_SRC"/hero-*.png "$ART_SRC"/scooter-*.png \
          "$ART_SRC"/prop-*.png "$ART_SRC"/pickup-petrol.png "$ART_SRC"/pickup-shield.png \
+         "$ART_SRC"/caveman-*.png "$ART_SRC"/dino-*.png "$ART_SRC"/mammoth.png \
+         "$ART_SRC"/hazard-*.png "$ART_SRC"/pickup-joint.png "$ART_SRC"/pickup-pill.png \
+         "$ART_SRC"/pickup-crystal.png "$ART_SRC"/victory-*.png \
          "$ART_SRC"/billboard-rose.png; do
   [ -f "$f" ] || continue
   name=$(basename "$f" .png)
   [ "$name" = "prop-finish" ] && continue          # orphan source
   case "$name" in
     prop-gate|prop-finish-decorated) webp "$f" "$ART_OUT/$name.webp" 820 88 ;;
+    victory-cavemen)                 webp "$f" "$ART_OUT/$name.webp" 820 88 ;;
     finish-line-girls)               webp "$f" "$ART_OUT/$name.webp" 1100 90 ;;
     *)                               webp "$f" "$ART_OUT/$name.webp" 512 86 ;;
   esac
 done
-[ -f "$ART_SRC/finish-line-girls.png" ] && webp "$ART_SRC/finish-line-girls.png" "$ART_OUT/finish-line-girls.webp" 1100 90
+# Finish-line casts (girls + the secret level's cave women) stay big — they're
+# the full-screen victory tableau.
+for f in "$ART_SRC"/finish-line-*.png; do
+  [ -f "$f" ] || continue
+  webp "$f" "$ART_OUT/$(basename "$f" .png).webp" 1100 90
+done
 
 # 1b. Ground textures (gen-textures.mjs): trim the border, pixel-downscale,
 #     quantise back to a small palette, then 2x2 MIRROR-BAKE so the final tile
@@ -98,6 +107,7 @@ declare -a MUSIC_MAP=(
   "Old Manchester — Loose Gears.wav|old-manchester-loose-gears.m4a"
   "Old Prague — Allegretto Circuit.wav|old-prague-allegretto.m4a"
   "Taj Mahal — Roses at Dawn.wav|taj-mahal-roses-at-dawn.m4a"
+  "Two Cavemen, One Broken Timeline.wav|two-cavemen-one-broken-timeline.m4a"
 )
 for pair in "${MUSIC_MAP[@]}"; do
   wav="$WAV_SRC/${pair%%|*}"; out="$MUSIC_OUT/${pair##*|}"
