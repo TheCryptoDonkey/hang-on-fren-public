@@ -126,9 +126,9 @@ const FINISH_LOOKAHEAD_M = 620;
 const TIME_BONUS_PER_SEC = 100;
 const RIVAL_WIN_BONUS = 3000;
 // Hold on the bespoke goal celebration before the score/name card appears.
-// Long enough to enjoy the finish cast and several firework volleys, short
-// enough that repeat runs still flow like an arcade game.
-const VICTORY_SHOW_TIME = 5.5;
+// Long enough to soak in the finish cast and a good few firework volleys —
+// and a tap / Enter skips ahead, so repeat runs still flow like an arcade game.
+const VICTORY_SHOW_TIME = 9;
 // Level-skip cheat: two + presses inside this window jump to the next stage.
 // Cheating is honest about itself — a cheated run NEVER submits to gamestr.
 const CHEAT_PLUS_WINDOW = 0.6;
@@ -855,6 +855,12 @@ function onKeyDown(e: KeyboardEvent): void {
     }
   }
 
+  // The victory tableau lingers; Enter/space skips straight to the score card.
+  if (state.phase === 'victory' && (k === 'enter' || k === ' ')) {
+    state.phase = 'gameover';
+    return;
+  }
+
   if (state.phase === 'title') {
     if (k === 'enter' || k === ' ') startRun();
     else if (k === 'arrowleft' || k === 'a') { unlockAudio(); cycleMode(-1); }
@@ -948,6 +954,11 @@ function pointerAction(clientX: number, clientY: number): void {
       return;
     }
     startRun();
+    return;
+  }
+  // A tap on the victory tableau skips ahead to the score card.
+  if (state.phase === 'victory') {
+    state.phase = 'gameover';
     return;
   }
   if (state.phase !== 'gameover' || !state.summary) return;
@@ -2173,7 +2184,7 @@ function render(): void {
   // effect ever snaps on or off mid-frame.
   const wobble = clamp(Math.min(state.beerWobble / 1.5, (BEER_WOBBLE_TIME - state.beerWobble) / 0.6), 0, 1);
   const trip = clamp(Math.min(state.shroom / 1.2, (SHROOM_TIME - state.shroom) / 0.4), 0, 1);
-  renderScene({ ctx, width: W, height: H, track, player, world, store, time: state.time, wipeout: state.wipeout, boost: state.boost > 0 ? state.boost / ROSE_BOOST_TIME : 0, sling: state.slingshot > 0 ? state.slingshot / SLING_TIME_MAX : 0, draft: state.draftCharge, wobble, trip, palette: paletteAt(score.distance), scenery: sceneryKitAt(score.distance), terrain: terrainAt(score.distance), timeOfDay: timeOfDayAt(score.distance), camYaw: state.camYaw, camRoll: state.camRoll, camLag: camLag(), smoke: state.smoke, enclosure: state.enclosure, hideRider: state.outcome === 'finish' && (state.phase === 'victory' || state.phase === 'gameover'), heroSet: getActiveTour() === 'stone' ? 'caveman' : 'hero' });
+  renderScene({ ctx, width: W, height: H, track, player, world, store, time: state.time, wipeout: state.wipeout, boost: state.boost > 0 ? state.boost / ROSE_BOOST_TIME : 0, sling: state.slingshot > 0 ? state.slingshot / SLING_TIME_MAX : 0, draft: state.draftCharge, wobble, trip, palette: paletteAt(score.distance), scenery: sceneryKitAt(score.distance), terrain: terrainAt(score.distance), timeOfDay: timeOfDayAt(score.distance), camYaw: state.camYaw, camRoll: state.camRoll, camLag: camLag(), smoke: state.smoke, enclosure: state.enclosure, hideRider: state.outcome === 'finish' && (state.phase === 'victory' || state.phase === 'gameover'), heroSet: getActiveTour() === 'stone' ? 'caveman' : 'hero', cave: getActiveTour() === 'stone' });
   if (state.phase === 'playing') drawSparks(ctx);
 
   // The game-over card carries the score/stats itself — drawing the live HUD

@@ -457,6 +457,10 @@ export interface Scene {
   /** Which player sprite family to draw: 'hero' (the Vespa, default) or
    *  'caveman' (the secret level's log car). */
   heroSet?: string;
+  /** The secret level's tunnels are MOUNTAIN CAVES: rock strata walls, a
+   *  jagged rocky mouth, and candle flames lining the sides instead of strip
+   *  lights. */
+  cave?: boolean;
 }
 
 // Offscreen frame snapshot reused by the trip kaleidoscope (no per-frame alloc).
@@ -467,6 +471,7 @@ export function renderScene(scene: Scene): void {
   groundArt = store; // ground tiles pull their generated textures from here
   const palette = scene.palette ?? DEFAULT_PALETTE;
   const terrain = scene.terrain ?? DEFAULT_TERRAIN;
+  const cave = scene.cave ?? false;
   const camYaw = scene.camYaw ?? 0;
   const camRoll = scene.camRoll ?? 0;
   const camLag = scene.camLag ?? 0;
@@ -579,7 +584,7 @@ export function renderScene(scene: Scene): void {
         clipped = false;
       }
     }
-    renderSegment(ctx, width, height, seg, n / ROAD.drawDistance, palette, lamps, terrain, scene.time, groundTiles);
+    renderSegment(ctx, width, height, seg, n / ROAD.drawDistance, palette, lamps, terrain, scene.time, groundTiles, cave);
   }
   if (clipped) ctx.restore();
   ctx.imageSmoothingEnabled = true;
@@ -594,7 +599,7 @@ export function renderScene(scene: Scene): void {
     const nearest = drawn[0]; // the road loop pushes near-to-far
     const roofY = upFrom(nearest.p1.screen, ROOF_Y, height);
     if (roofY > -height * ROLL_BLEED) {
-      ctx.fillStyle = mix('#20242b', palette.fog, 0.1);
+      ctx.fillStyle = mix(cave ? '#2a1c12' : '#20242b', palette.fog, 0.1);
       ctx.fillRect(-width * ROLL_BLEED, -height * ROLL_BLEED, width * (1 + 2 * ROLL_BLEED), roofY + height * ROLL_BLEED);
     }
   }
@@ -754,8 +759,9 @@ export function renderScene(scene: Scene): void {
     // Eased back deliberately. The tunnel SEGMENTS already carry their own gloom
     // (so the bore looks dark from outside), and this rides on top of that — the
     // two multiplying at full strength took the interior to near-black, which is
-    // atmospheric for about a second and unplayable thereafter.
-    ctx.fillStyle = `rgba(96,112,140,${enclosure * 0.42})`;
+    // atmospheric for about a second and unplayable thereafter. Concrete goes
+    // COOL under a hillside; candle-lit cave rock goes WARM.
+    ctx.fillStyle = cave ? `rgba(150,118,86,${enclosure * 0.42})` : `rgba(96,112,140,${enclosure * 0.42})`;
     ctx.fillRect(0, 0, width, height);
     ctx.restore();
     const lamp = ctx.createRadialGradient(riderX, riderY - size * 0.35, 0, riderX, riderY - size * 0.35, size * 2.1);
@@ -764,7 +770,7 @@ export function renderScene(scene: Scene): void {
     ctx.fillStyle = lamp;
     ctx.fillRect(0, 0, width, height);
   }
-  drawLamps(ctx, lamps);
+  drawLamps(ctx, lamps, scene.time);
 
   // Beer double vision: ghost the finished scene back over itself, drifting on
   // its own slow sinusoid, then wash the colours with a gently cycling hue.
@@ -1040,6 +1046,7 @@ function drawBore(
   overhead: NonNullable<Segment['overhead']>,
   fog: number,
   palette: Palette,
+  cave = false,
 ): void {
   const p1 = seg.p1.screen;
   const p2 = seg.p2.screen;
@@ -1059,22 +1066,28 @@ function drawBore(
   // and a dark skirting kerb at the road. Each is hazed toward the region fog
   // with depth so the bore recedes into its own gloom. This is what lifts the
   // interior from "flat concrete box" to something with 32-bit surface.
+  //
+  // A CAVE (the secret level) wears the same course machinery as rock STRATA:
+  // dark earth in the roof shadow, banded sandstone down the wall, a candle
+  // ledge, and a warm candle-lit lower band the flames actually sit in.
   if (tunnel) {
-    const cShadow = mix('#191c22', palette.fog, haze);
-    const cUpper = mix('#39404a', palette.fog, haze);
-    const cLedge = mix('#5a626e', palette.fog, haze);
-    const cStripe = mix('#c98a2e', palette.fog, haze); // sodium-amber safety band
-    const cDado = mix('#9aa2ae', palette.fog, haze); // lit ceramic tiling
-    const cKerb = mix('#141117', palette.fog, haze);
-    // course boundaries, ceiling(0) -> road(1)
-    const courses: Array<[number, number, string]> = [
-      [0.0, 0.1, cShadow],
-      [0.1, 0.52, cUpper],
-      [0.52, 0.56, cLedge],
-      [0.56, 0.62, cStripe],
-      [0.62, 0.92, cDado],
-      [0.92, 1.0, cKerb],
-    ];
+    const courses: Array<[number, number, string]> = cave
+      ? [
+        [0.0, 0.12, mix('#170e08', palette.fog, haze)],
+        [0.12, 0.34, mix('#4a3626', palette.fog, haze)],
+        [0.34, 0.5, mix('#5d4430', palette.fog, haze)],
+        [0.5, 0.55, mix('#7d5a3a', palette.fog, haze)], // the candle ledge
+        [0.55, 0.9, mix('#8a6544', palette.fog, haze)], // candle-warmed lower wall
+        [0.9, 1.0, mix('#1d1410', palette.fog, haze)],
+      ]
+      : [
+        [0.0, 0.1, mix('#191c22', palette.fog, haze)],
+        [0.1, 0.52, mix('#39404a', palette.fog, haze)],
+        [0.52, 0.56, mix('#5a626e', palette.fog, haze)],
+        [0.56, 0.62, mix('#c98a2e', palette.fog, haze)], // sodium-amber safety band
+        [0.62, 0.92, mix('#9aa2ae', palette.fog, haze)], // lit ceramic tiling
+        [0.92, 1.0, mix('#141117', palette.fog, haze)],
+      ];
     for (const [xn, xf] of [[l1, l2], [r1, r2]] as const) {
       for (const [t0, t1, color] of courses) {
         wallBand(ctx, xn, xf, roof1, p1.y, roof2, p2.y, t0, t1, color);
@@ -1087,11 +1100,12 @@ function drawBore(
   if (!tunnel && seg.index === overhead.end) drawBridgeLegs(ctx, p2, roof2, palette);
 
   // Ceiling: dark, with a slightly lifted rib down the centre where the strip
-  // lights hang — gives the roof a spine to read the speed against.
-  const roof = mix('#20242b', palette.fog, haze);
+  // lights hang — gives the roof a spine to read the speed against. The cave's
+  // roof is warm earth rather than concrete.
+  const roof = mix(cave ? '#241812' : '#20242b', palette.fog, haze);
   polygon(ctx, l1, roof1, r1, roof1, r2, roof2, l2, roof2, roof);
   if (tunnel) {
-    const rib = mix('#2b303c', palette.fog, haze);
+    const rib = mix(cave ? '#33241a' : '#2b303c', palette.fog, haze);
     const c1 = (l1 + r1) / 2;
     const c2 = (l2 + r2) / 2;
     const rw1 = (r1 - l1) * 0.16;
@@ -1116,6 +1130,11 @@ interface Lamp {
   w: number;
   h: number;
   tunnel: boolean;
+  /** 'strip' = the road tunnels' ceiling lights; 'candle' = the cave's
+   *  wall-mounted flames. */
+  kind: 'strip' | 'candle';
+  /** Stable per-flame phase so every candle flickers to its own beat. */
+  seed: number;
 }
 
 function collectLamp(lamps: Lamp[], w: number, h: number, seg: Segment, tunnel: boolean): void {
@@ -1132,7 +1151,31 @@ function collectLamp(lamps: Lamp[], w: number, h: number, seg: Segment, tunnel: 
     w: clamp(p.w * 0.09, 2, w * 0.05),
     h: Math.max(1, Math.min(p.w * 0.02, h * 0.012)),
     tunnel,
+    kind: 'strip',
+    seed: seg.index,
   });
+}
+
+/** Candles line BOTH walls of a cave, denser than the strip lights (a cave lit
+ *  every fourth segment reads as abandoned, not cosy), standing on the ledge
+ *  course the bore paints at ~52% of the wall height. */
+function collectCandles(lamps: Lamp[], w: number, h: number, seg: Segment): void {
+  if (seg.index % 3 !== 0) return;
+  const p = seg.p1.screen;
+  if (p.w <= 0) return;
+  const roofY = upFrom(p, ROOF_Y, h);
+  const ledgeY = roofY + (p.y - roofY) * 0.52;
+  for (const side of [-1, 1] as const) {
+    lamps.push({
+      x: p.x + side * p.w * (WALL_X * 0.96),
+      y: ledgeY,
+      w: clamp(p.w * 0.05, 1.5, w * 0.018),
+      h: 0,
+      tunnel: true,
+      kind: 'candle',
+      seed: seg.index * 7.3 + side * 1.7,
+    });
+  }
 }
 
 /**
@@ -1142,12 +1185,32 @@ function collectLamp(lamps: Lamp[], w: number, h: number, seg: Segment, tunnel: 
  * the lamps came out as cold blue-grey slabs floating in the dark: the ambient
  * shade was tinting the one thing in the tunnel that is generating its own light.
  */
-function drawLamps(ctx: CanvasRenderingContext2D, lamps: readonly Lamp[]): void {
+function drawLamps(ctx: CanvasRenderingContext2D, lamps: readonly Lamp[], time = 0): void {
   if (!lamps.length) return;
   ctx.save();
   ctx.globalCompositeOperation = 'lighter';
   const glow = glowSprite('lampglow', '#ffde96', [[0, 1], [1, 0]]);
+  const candleGlow = glowSprite('candleglow', '#ffb45a', [[0, 1], [1, 0]]);
   for (const lamp of lamps) {
+    if (lamp.kind === 'candle') {
+      // A candle is a live flame: it breathes on its own beat, throws a warm
+      // pool onto the rock, and reads as wax + wick + teardrop even small.
+      const flicker = 0.72 + 0.28 * Math.sin(time * 11 + lamp.seed * 5.1) * Math.cos(time * 4.7 + lamp.seed);
+      const s = lamp.w;
+      if (candleGlow) {
+        const reach = s * 5 * flicker;
+        ctx.globalAlpha = 0.42 * flicker;
+        ctx.drawImage(candleGlow, lamp.x - reach, lamp.y - s * 1.5 - reach, reach * 2, reach * 2);
+        ctx.globalAlpha = 1;
+      }
+      ctx.fillStyle = 'rgba(232,220,194,0.9)'; // wax stub on the ledge
+      ctx.fillRect(lamp.x - s * 0.45, lamp.y - s * 0.9, s * 0.9, s * 0.9);
+      ctx.fillStyle = `rgba(255,157,60,${0.9 * flicker})`; // flame body
+      ctx.fillRect(lamp.x - s * 0.32, lamp.y - s * 2.1, s * 0.64, s * 1.25);
+      ctx.fillStyle = `rgba(255,242,192,${flicker})`; // hot core
+      ctx.fillRect(lamp.x - s * 0.16, lamp.y - s * 1.85, s * 0.32, s * 0.8);
+      continue;
+    }
     const reach = lamp.w * 1.6;
     if (glow) {
       ctx.globalAlpha = lamp.tunnel ? 0.34 : 0.2;
@@ -1214,6 +1277,8 @@ function drawPortal(
   seg: Segment,
   overhead: NonNullable<Segment['overhead']>,
   palette: Palette,
+  terrain: Terrain,
+  cave = false,
 ): void {
   const p = seg.p1.screen;
   if (p.w <= 0 || p.scale <= 0) return;
@@ -1221,7 +1286,7 @@ function drawPortal(
   const r = p.x + p.w * WALL_X;
   const roof = upFrom(p, ROOF_Y, h);
   const deck = upFrom(p, ROOF_Y + DECK_THICK, h);
-  const face = mix('#4a5058', palette.fog, 0.25);
+  const face = mix(cave ? terrain.cliffDark : '#4a5058', palette.fog, 0.25);
 
   if (overhead.kind === 'overpass') {
     // A bridge, not a hillside: the deck's front face on two proper piers. You
@@ -1274,22 +1339,48 @@ function drawPortal(
   const oL = l - wing;
   const oR = r + wing;
   const topY = roof - headH;
-  const base = mix('#565d67', palette.fog, 0.22);
+  // The cave face sits between the terrain's rock tones and takes far less
+  // haze than concrete — washed out it read as plaster, not mountain.
+  const base = cave
+    ? mix(mix(terrain.cliffLight, terrain.cliffDark, 0.45), palette.fog, 0.12)
+    : mix('#565d67', palette.fog, 0.22);
 
   // Facade silhouette (battered trapezoid) with the bore's cross-section wound as
   // a second sub-path: even-odd leaves the opening a genuine HOLE, so the interior
-  // already on the canvas survives.
+  // already on the canvas survives. A CAVE mouth's hole is a JAGGED ARCH — broken
+  // rock, not shuttered concrete — carved with stable hash() jags that lean INTO
+  // the rectangular aperture, so the overhang covers the clip edge rather than
+  // exposing it.
   const facade = new Path2D();
   facade.moveTo(oL, p.y);
   facade.lineTo(oL + batter, topY);
   facade.lineTo(oR - batter, topY);
   facade.lineTo(oR, p.y);
   facade.closePath();
-  facade.moveTo(l, p.y);
-  facade.lineTo(l, roof);
-  facade.lineTo(r, roof);
-  facade.lineTo(r, p.y);
-  facade.closePath();
+  const hole = new Path2D();
+  if (cave) {
+    const jag = (i: number): number => hash(seg.index * 3.1 + i * 17.7) * mouthW * 0.055;
+    hole.moveTo(l, p.y);
+    hole.lineTo(l + jag(1), p.y - openH * 0.3);
+    hole.lineTo(l + jag(2) * 0.4, p.y - openH * 0.55);
+    hole.lineTo(l + jag(3), p.y - openH * 0.8);
+    hole.lineTo(l + mouthW * 0.22, roof + jag(4)); // arch shoulder
+    hole.lineTo(l + mouthW * 0.38, roof + jag(5) * 0.5);
+    hole.lineTo(l + mouthW * 0.55, roof + jag(6));
+    hole.lineTo(l + mouthW * 0.78, roof + jag(7) * 0.7);
+    hole.lineTo(r - jag(8), p.y - openH * 0.78);
+    hole.lineTo(r - jag(9) * 0.4, p.y - openH * 0.5);
+    hole.lineTo(r - jag(10), p.y - openH * 0.26);
+    hole.lineTo(r, p.y);
+    hole.closePath();
+  } else {
+    hole.moveTo(l, p.y);
+    hole.lineTo(l, roof);
+    hole.lineTo(r, roof);
+    hole.lineTo(r, p.y);
+    hole.closePath();
+  }
+  facade.addPath(hole);
   ctx.fillStyle = base;
   ctx.fill(facade, 'evenodd');
 
@@ -1303,22 +1394,52 @@ function drawPortal(
   lit.addColorStop(1, 'rgba(0,0,0,0.28)');
   ctx.fillStyle = lit;
   ctx.fillRect(oL, topY, oR - oL, p.y - topY);
-  // horizontal block courses
-  ctx.strokeStyle = 'rgba(0,0,0,0.16)';
-  ctx.lineWidth = Math.max(1, openH * 0.012);
+  // horizontal courses: block joints on concrete, sediment STRATA on rock
+  ctx.strokeStyle = cave ? rgba(terrain.cliffDark, 0.55) : 'rgba(0,0,0,0.16)';
+  ctx.lineWidth = Math.max(1, openH * (cave ? 0.02 : 0.012));
   const course = Math.max(6, openH * 0.15);
   for (let y = topY + course; y < p.y; y += course) {
     ctx.beginPath();
-    ctx.moveTo(oL, y);
-    ctx.lineTo(oR, y);
+    ctx.moveTo(oL, y + (cave ? hash(y) * course * 0.3 : 0));
+    ctx.lineTo(oR, y + (cave ? hash(y * 1.7) * course * 0.3 : 0));
     ctx.stroke();
   }
-  // vertical control joints down the wing walls
-  ctx.beginPath();
-  ctx.moveTo(l - wing * 0.5, topY); ctx.lineTo(l - wing * 0.5, p.y);
-  ctx.moveTo(r + wing * 0.5, topY); ctx.lineTo(r + wing * 0.5, p.y);
-  ctx.stroke();
+  if (!cave) {
+    // vertical control joints down the wing walls
+    ctx.beginPath();
+    ctx.moveTo(l - wing * 0.5, topY); ctx.lineTo(l - wing * 0.5, p.y);
+    ctx.moveTo(r + wing * 0.5, topY); ctx.lineTo(r + wing * 0.5, p.y);
+    ctx.stroke();
+  } else {
+    // Rock pocks scattered over the face — the mottle that makes it stone
+    // rather than rendered plaster.
+    for (let i = 0; i < 26; i += 1) {
+      const px = oL + hash(seg.index * 1.3 + i * 5.1) * (oR - oL);
+      const py = topY + hash(i * 9.7 + 2) * (p.y - topY);
+      const ps = Math.max(1, mouthW * 0.008 * (0.5 + hash(i * 3.7)));
+      ctx.fillStyle = hash(i * 13.9) > 0.5 ? rgba(terrain.cliffDark, 0.5) : 'rgba(255,255,255,0.10)';
+      ctx.fillRect(px, py, ps * 2, ps);
+    }
+    // a little greenery clinging to the rock over the mouth
+    ctx.fillStyle = 'rgba(74,127,74,0.8)';
+    for (let i = 0; i < 7; i += 1) {
+      const gx = l + hash(seg.index + i * 3.3) * mouthW;
+      const gy = roof - openH * 0.06 - hash(i * 7.7) * headH * 0.6;
+      const gs = Math.max(1.5, mouthW * 0.012 * (0.6 + hash(i * 11.1)));
+      ctx.fillRect(gx, gy, gs * 2, gs);
+    }
+  }
   ctx.restore();
+
+  if (cave) {
+    // A deep rock rim around the jagged mouth — the broken edge reads as
+    // metre-thick stone, and the overhang swallows the interior clip line.
+    ctx.lineJoin = 'round';
+    ctx.strokeStyle = 'rgba(18,10,5,0.6)';
+    ctx.lineWidth = Math.max(2, mouthW * 0.045);
+    ctx.stroke(hole);
+    return;
+  }
 
   // Recessed reveal: a dark inner shadow just outside the opening + a bright
   // chamfer catching the light, so the mouth reads as a thick portal, not a
@@ -1945,7 +2066,7 @@ function renderSides(
   // valley art shows through where the wall used to stand.)
 }
 
-function renderSegment(ctx: CanvasRenderingContext2D, width: number, height: number, seg: Segment, fogT: number, palette: Palette, lamps: Lamp[], terrain: Terrain, time: number, tiles: GroundTiles): void {
+function renderSegment(ctx: CanvasRenderingContext2D, width: number, height: number, seg: Segment, fogT: number, palette: Palette, lamps: Lamp[], terrain: Terrain, time: number, tiles: GroundTiles, cave = false): void {
   const p1 = seg.p1.screen;
   const p2 = seg.p2.screen;
   const dark = seg.color === 'dark';
@@ -2022,7 +2143,7 @@ function renderSegment(ctx: CanvasRenderingContext2D, width: number, height: num
   // mouth, with the bore cut out of it.
   const overhead = seg.overhead;
   if (overhead) {
-    drawBore(ctx, height, seg, overhead, fog, palette);
+    drawBore(ctx, height, seg, overhead, fog, palette, cave);
     // Shade the INTERIOR by how deep into the bore this segment sits — not by
     // where the rider is. The rider's own darkness (main.ts `enclosure`) only
     // lands once they are already inside, which leaves a tunnel that is as
@@ -2035,16 +2156,19 @@ function renderSegment(ctx: CanvasRenderingContext2D, width: number, height: num
       // From the roof down to this segment's near edge. At the mouth itself depth
       // is 0, so nothing is shaded there and the portal stays crisp; deeper
       // segments are already clipped to the aperture, so this can never spill out
-      // across the sky.
+      // across the sky. Concrete darkens COOL; the candle-lit cave darkens WARM
+      // and less deeply — the flames are meant to be doing some of the lighting.
       const top = Math.min(upFrom(p1, ROOF_Y, height), upFrom(p2, ROOF_Y, height));
       ctx.save();
       ctx.globalCompositeOperation = 'multiply';
-      ctx.fillStyle = `rgba(88,102,128,${gloom * 0.62})`;
+      ctx.fillStyle = cave ? `rgba(172,138,102,${gloom * 0.5})` : `rgba(88,102,128,${gloom * 0.62})`;
       ctx.fillRect(bleedX, top, bleedW, p1.y - top + 1);
       ctx.restore();
     }
-    collectLamp(lamps, width, height, seg, overhead.kind === 'tunnel');
-    if (seg.index === overhead.start) drawPortal(ctx, height, seg, overhead, palette);
+    // A cave is lit by candles down both walls; a road tunnel by strip lights.
+    if (cave && overhead.kind === 'tunnel') collectCandles(lamps, width, height, seg);
+    else collectLamp(lamps, width, height, seg, overhead.kind === 'tunnel');
+    if (seg.index === overhead.start) drawPortal(ctx, height, seg, overhead, palette, terrain, cave);
   }
 
   // distance fog

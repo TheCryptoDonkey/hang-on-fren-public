@@ -596,17 +596,16 @@ const ASSETS = [
       'monkey sitting dazed on the ground with little stars circling their heads. Same characters, same colours. ' + SPRITE_STYLE,
   },
   // The secret level's GOAL tableau: drawn to the LEFT of the cavewomen cast —
-  // the log car side-on, both heroes stood beside it with a fat joint each.
+  // the log car front-on with both heroes lounging IN it, a fat joint each.
   // (The bitcoin rain is code-drawn.)
   {
-    name: 'victory-cavemen', model: 'gpt-image-1.5', size: '1536x1024', quality: 'high', ref: ['art-originals/art/caveman-straight.png'],
+    name: 'victory-cavemen', model: 'gpt-image-1.5', size: '1024x1024', quality: 'high', ref: ['art-originals/art/caveman-straight.png'],
     prompt:
-      'SIDE-ON profile view of the SAME prehistoric log car, PARKED, drawn side view like a racing-game garage shot: ' +
-      'hollowed tree-trunk body, animal-hide canopy on poles, both round STONE WHEELS on the ground. STANDING on the ' +
-      'ground NEXT TO the car (outside it, full body, feet on the same baseline): the SAME long-haired bearded ' +
-      'caveman in his leopard-skin tunic and the SAME brown monkey with its bone necklace — EACH smoking their own ' +
-      'HUGE FAT hand-rolled JOINT with a glowing ember and a lazy curl of smoke, blissed-out victory grins, relaxed ' +
-      'celebratory poses. ' + SPRITE_STYLE,
+      'FRONT three-quarter view of the SAME prehistoric log car, parked and seen from the front so both occupants ' +
+      'face the viewer: on one seat the SAME long-haired bearded caveman in his leopard-skin tunic, on the other the ' +
+      'SAME brown monkey — EACH lounging back and smoking their own HUGE FAT hand-rolled JOINT with a glowing ember ' +
+      'and a lazy curl of smoke, blissed-out victory grins, one arm raised in celebration. Whole car visible with ' +
+      'its round stone wheels. ' + SPRITE_STYLE,
   },
   // The secret level's own finish cast: amazon cave women instead of the
   // Riviera flag marshals. Same composition and guardrails as the originals.
