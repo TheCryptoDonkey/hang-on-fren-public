@@ -41,6 +41,8 @@ const WIND_SLICES = 22;
 // visibly crossed up under a rider who is still hanging off the inside.
 const YAW_SHEAR = 0.42;
 const YAW_TILT = 0.2;
+const LEAN_BANK = 0.11; // hero: rotation added on top of the art's weight-shift
+const CART_BANK = 0.2; // cart: no hang-off art, so it leans purely by rotation
 
 export function drawRider(ctx: CanvasRenderingContext2D, store: SpriteStore, v: RiderVisual): void {
   const cx = v.x;
@@ -56,16 +58,17 @@ export function drawRider(ctx: CanvasRenderingContext2D, store: SpriteStore, v: 
   ctx.restore();
 
   const set = v.set ?? 'hero';
-  // Two-frame wheel animation: a set that ships a '-2' variant flips between
-  // the frames at a speed-scaled cadence, so the stone wheels read as turning.
-  // Sets without one (the hero Vespa has its wheel-blur instead) just get
-  // frame 1 — the lookup misses and falls straight through.
-  const flip = v.wipeout === 0 && v.speed > 0.05 && Math.floor(v.time * (5 + v.speed * 9)) % 2 === 1;
-  const frame = (name: string): SpriteImage | null =>
-    (flip ? store.get(`${name}-2`) : null) ?? store.get(name);
-  // Every set's canonical lean frame VISUALLY leans right and mirrors for a
-  // left lean. The hero's is (confusingly) NAMED 'hero-lean-left'; newer sets
-  // name it what it is.
+  // The hero is a single, symmetric rider: one '-lean' frame can be MIRRORED to
+  // lean the other way. The prehistoric log car cannot — it seats the caveman on
+  // the LEFT and the monkey on the RIGHT, so mirroring teleports the pair into
+  // each other's seats (a jarring left/right swap). Nor can it flip between two
+  // whole frames to animate the wheels: its '-straight' and '-straight-2' are
+  // different renders, so alternating them flickered the ENTIRE vehicle. So an
+  // asymmetric set rides ONE upright frame and leans purely by the code bank
+  // below. The upright frame prefers '-straight-2', whose painterly style
+  // matches the lean/wipeout art — '-straight' is an earlier, mismatched render
+  // kept only as a fallback.
+  const mirrorable = set === 'hero';
   const leanFrame = set === 'hero' ? 'hero-lean-left' : `${set}-lean-right`;
 
   let sprite: SpriteImage | null;
@@ -80,13 +83,17 @@ export function drawRider(ctx: CanvasRenderingContext2D, store: SpriteStore, v: 
     stagedWipeout = store.get(`${set}-wipeout-2`) !== null;
     const wf = !stagedWipeout ? '' : v.wipeout < 0.28 ? '' : v.wipeout < 0.6 ? '-2' : '-3';
     sprite = (wf ? store.get(`${set}-wipeout${wf}`) : null) ?? store.get(`${set}-wipeout`) ?? store.get(`${set}-straight`);
+  } else if (!mirrorable) {
+    // Asymmetric two-seater: never mirror, never frame-swap. One stable frame —
+    // the bank (applied below) supplies the lean and the occupants never move.
+    sprite = store.get(`${set}-straight-2`) ?? store.get(`${set}-straight`);
   } else if (v.lean > LEAN_DEADZONE) {
-    sprite = frame(leanFrame) ?? store.get(`${set}-straight`);
+    sprite = store.get(leanFrame) ?? store.get(`${set}-straight`);
   } else if (v.lean < -LEAN_DEADZONE) {
-    sprite = frame(leanFrame) ?? store.get(`${set}-straight`);
+    sprite = store.get(leanFrame) ?? store.get(`${set}-straight`);
     mirror = true; // flip the visually-right canonical frame -> leans left
   } else {
-    sprite = frame(`${set}-straight`);
+    sprite = store.get(`${set}-straight`);
   }
 
   if (!sprite) {
@@ -116,7 +123,9 @@ export function drawRider(ctx: CanvasRenderingContext2D, store: SpriteStore, v: 
     // Continuous bank on top of the discrete lean frames — the rotation is
     // applied OUTSIDE the mirror flip, so it stays screen-oriented and pivots
     // at the wheel contact. Analogue lean makes the frames read as weight-shift.
-    ctx.rotate(clamp(v.lean, -1, 1) * 0.11 + v.yaw * YAW_TILT);
+    // The log car has no hang-off art, so it banks HARDER: the tilt is its only
+    // lean tell (CART_BANK vs LEAN_BANK).
+    ctx.rotate(clamp(v.lean, -1, 1) * (mirrorable ? LEAN_BANK : CART_BANK) + v.yaw * YAW_TILT);
     // Crossed up: shear the machine over against the slide. The contact patch is
     // the origin here, so the wheels stay planted and only the body lays over.
     if (v.yaw !== 0) ctx.transform(1, 0, v.yaw * YAW_SHEAR, 1, 0, 0);
@@ -125,7 +134,9 @@ export function drawRider(ctx: CanvasRenderingContext2D, store: SpriteStore, v: 
   }
   ctx.restore();
 
-  if (v.wipeout === 0) drawWheelBlur(ctx, cx, baseY, w, v.spin, v.speed);
+  // The hero's single rear wheel gets the centred wheel-blur. The cart's stone
+  // wheels are left as the art draws them (they can't be cleanly spun in code).
+  if (v.wipeout === 0 && mirrorable) drawWheelBlur(ctx, cx, baseY, w, v.spin, v.speed);
 }
 
 /**
