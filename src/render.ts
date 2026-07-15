@@ -1381,16 +1381,16 @@ function slabTextured(seg: Segment): boolean {
  *  - `rows`: texture rows per segment (scales vertical texel to match).
  *  - `strength`: how loudly the texture reads over the flat band colour. */
 const TILE_STYLE: Record<TileKind, { tint: 'palette' | 'natural'; texels: number; rows: number; strength: number }> = {
-  grass: { tint: 'palette', texels: 48, rows: 3, strength: 1 },
-  sand: { tint: 'palette', texels: 48, rows: 3, strength: 1 },
-  snow: { tint: 'palette', texels: 48, rows: 3, strength: 0.7 },
-  salt: { tint: 'palette', texels: 48, rows: 3, strength: 0.7 },
-  leaves: { tint: 'natural', texels: 48, rows: 3, strength: 1 },
-  ash: { tint: 'natural', texels: 48, rows: 3, strength: 1 },
-  asphalt: { tint: 'palette', texels: 64, rows: 4, strength: 0.8 },
-  rock: { tint: 'palette', texels: 56, rows: 3, strength: 0.9 },
-  tarmac: { tint: 'palette', texels: 128, rows: 8, strength: 0.28 },
-  water: { tint: 'natural', texels: 64, rows: 4, strength: 0.9 },
+  grass: { tint: 'palette', texels: 48, rows: 3, strength: 0.8 },
+  sand: { tint: 'palette', texels: 48, rows: 3, strength: 0.7 },
+  snow: { tint: 'palette', texels: 48, rows: 3, strength: 0.55 },
+  salt: { tint: 'palette', texels: 48, rows: 3, strength: 0.55 },
+  leaves: { tint: 'natural', texels: 48, rows: 3, strength: 0.95 },
+  ash: { tint: 'natural', texels: 48, rows: 3, strength: 0.9 },
+  asphalt: { tint: 'palette', texels: 64, rows: 4, strength: 0.6 },
+  rock: { tint: 'palette', texels: 56, rows: 3, strength: 0.65 },
+  tarmac: { tint: 'palette', texels: 96, rows: 6, strength: 0.16 },
+  water: { tint: 'natural', texels: 64, rows: 4, strength: 0.8 },
 };
 
 /** Perspective transform mapping tile texels onto this segment's ground band:

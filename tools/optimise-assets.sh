@@ -51,7 +51,7 @@ for f in "$ART_SRC"/texture-*.png; do
   tmp=$(mktemp -t "$name").png
   python3 - "$f" "$tmp" <<'PY'
 import sys
-from PIL import Image, ImageOps
+from PIL import Image, ImageOps, ImageStat
 src, out = sys.argv[1], sys.argv[2]
 im = Image.open(src).convert('RGB')
 w, h = im.size
@@ -59,6 +59,10 @@ b = round(w * 0.03)
 im = im.crop((b, b, w - b, h - b))          # trim border artefacts
 im = im.resize((128, 128), Image.BOX)       # pixel-downscale
 im = ImageOps.autocontrast(im, cutoff=1)    # the downscale averages fine grain flat — stretch it back
+# ...then compress the stretch around the tile's mean: full-range value swings
+# tint into near-black chunks in-game (sand read as dirt, tarmac as static).
+mean = tuple(int(v) for v in ImageStat.Stat(im).mean)
+im = Image.blend(Image.new('RGB', im.size, mean), im, 0.55)
 im = im.quantize(colors=24).convert('RGB')  # re-crisp to a small palette
 tile = Image.new('RGB', (256, 256))
 tile.paste(im, (0, 0))
