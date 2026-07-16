@@ -787,6 +787,9 @@ export function renderScene(scene: Scene): void {
   }
   entities.sort((a, b) => b.fwd - a.fwd);
   for (const e of entities) drawEntity(ctx, width, store, e, scene.time);
+  // drawEntity no longer save/restores unconditionally, so the last sprite's
+  // smoothing choice must not leak into the smoke/rider pass.
+  ctx.imageSmoothingEnabled = true;
 
   // Rider. Held at a fixed screen HEIGHT (RIDER_SCREEN_FRAC is shared with
   // road.ts's RIDER_FWD, so collision happens exactly where the bike is drawn),
@@ -2161,20 +2164,31 @@ function renderSegment(ctx: CanvasRenderingContext2D, width: number, height: num
   const bleedX = -width * ROLL_BLEED;
   const bleedW = width * (1 + 2 * ROLL_BLEED);
 
-  // grass slab spanning full width — the sides then reclaim everything past the
-  // verge with rock / sea / canyon (but a tunnel bore fills its own walls).
+  // Grass slab, then the sides reclaim everything past the verge with rock /
+  // sea / canyon (but a tunnel bore fills its own walls). Where a side WILL
+  // repaint (any non-flat kind), painting the slab out to the frame edge is
+  // pure overdraw — twice over, once flat and once textured — so the slab is
+  // clamped to the widest lip position plus a seam pixel. A 'flat' side skips
+  // its repaint, so on that side the slab still runs to the bleed edge.
+  const tunnelSeg = seg.overhead?.kind === 'tunnel';
+  const slabL = !tunnelSeg && terrain.left !== 'flat'
+    ? Math.max(bleedX, Math.min(p1.x - VERGE * p1.w, p2.x - VERGE * p2.w) - 1)
+    : bleedX;
+  const slabR = !tunnelSeg && terrain.right !== 'flat'
+    ? Math.min(bleedX + bleedW, Math.max(p1.x + VERGE * p1.w, p2.x + VERGE * p2.w) + 1)
+    : bleedX + bleedW;
   ctx.fillStyle = grass;
-  ctx.fillRect(bleedX, p2.y, bleedW, p1.y - p2.y + 1);
+  ctx.fillRect(slabL, p2.y, slabR - slabL, p1.y - p2.y + 1);
   const textured = bandTextured(seg);
-  if (textured && seg.overhead?.kind !== 'tunnel') {
-    // The biome's pixel tile over the full slab; the sides repaint whatever
-    // lies beyond a sea / canyon / rock lip on top of it.
+  if (textured && !tunnelSeg) {
+    // The biome's pixel tile over the slab; the sides repaint whatever lies
+    // beyond a sea / canyon / rock lip on top of it.
     const tile = tiles.slab[dark ? 1 : 0];
     if (tile) {
       const lvl = tileLevel(tile, seg, tiles.ground);
       lvl.pat.setTransform(groundMatrix(seg, lvl, tiles.ground));
       ctx.fillStyle = lvl.pat;
-      ctx.fillRect(bleedX, p2.y, bleedW, p1.y - p2.y + 1);
+      ctx.fillRect(slabL, p2.y, slabR - slabL, p1.y - p2.y + 1);
     }
   }
   if (seg.overhead?.kind !== 'tunnel') renderSides(ctx, width, seg, palette, terrain, time, tiles);
@@ -2279,10 +2293,27 @@ function drawEntity(ctx: CanvasRenderingContext2D, width: number, store: SpriteS
   const destX = e.sx + e.scale * e.offset * ROAD.roadWidth * (width / 2) - destW / 2;
   const destY = e.sy - destH + e.bobY * destH * -6;
 
-  ctx.save();
-  ctx.beginPath();
-  ctx.rect(0, 0, width, Math.max(0, e.clip));
-  ctx.clip();
+  // The clip exists solely so a hill crest can occlude the sprite's lower half —
+  // but a save/clip/restore per sprite is real raster state churn, and MOST
+  // sprites are nowhere near their crest line. Bound everything this entity can
+  // paint (sprite, pickup glow box, contact shadow) and only pay for the clip
+  // when that box actually crosses the line; skip entirely when it's all under.
+  const clipY = Math.max(0, e.clip);
+  const paintTop = destY - destH * 0.35; // pickup glow reaches above the sprite
+  const paintBottom = Math.max(destY + destH * 1.35, e.sy + Math.max(1.5, destW * 0.07));
+  if (paintTop >= clipY) return; // fully hidden behind a crest
+  const needsClip = paintBottom > clipY;
+  if (needsClip) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, 0, width, clipY);
+    ctx.clip();
+  }
+  // Purpose-built chevrons use hard pixel clusters; bilinear filtering turns
+  // them back into the flat blurry boards they replaced. Set BEFORE the glow —
+  // without the old unconditional save/restore the previous sprite's choice
+  // would otherwise still be live while the halo draws.
+  ctx.imageSmoothingEnabled = !e.sprite.startsWith('prop-chevron-');
   // Rainbow halo behind every pickup: cycles hue over time and pulses, so the
   // pills/treats shimmer and can never be mistaken for a beast or a hazard (the
   // charging raptor used to read as a pickup on a small screen). A per-pickup
@@ -2307,9 +2338,6 @@ function drawEntity(ctx: CanvasRenderingContext2D, width: number, store: SpriteS
       ctx.globalAlpha = 1;
     }
   }
-  // Purpose-built chevrons use hard pixel clusters; bilinear filtering turns
-  // them back into the flat blurry boards they replaced.
-  ctx.imageSmoothingEnabled = !e.sprite.startsWith('prop-chevron-');
   // Soft contact shadow under cars and pickups grounds them on the tarmac —
   // without it billboards read as floating cardboard. Scenery skips it (props
   // sit on painted verge and bake their own grounding).
@@ -2322,7 +2350,7 @@ function drawEntity(ctx: CanvasRenderingContext2D, width: number, store: SpriteS
     ctx.globalAlpha = 1;
   }
   ctx.drawImage(sprite.canvas, destX, destY, destW, destH);
-  ctx.restore();
+  if (needsClip) ctx.restore();
 }
 
 /**

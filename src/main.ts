@@ -591,6 +591,53 @@ let renderScale = 1;
  * pixelated`, which on this art reads as MORE chunky-authentic, not less.
  */
 const MAX_BACKING_PX = 2_300_000;
+
+// ---- adaptive resolution ----------------------------------------------------
+// Canvas2D raster cost scales almost linearly with buffer pixels (measured:
+// halving the area halves the frame time), and it is the single biggest lever
+// on phones — where "painfully slow in every mode" reports came from. So the
+// buffer scale is DYNAMIC: sustained over-budget frames step it down, and only
+// long, comfortably-fast stretches step it back up. With `image-rendering:
+// pixelated` the upscale reads as more chunky-authentic, not blurrier.
+/** Extra multiplier on the buffer scale, stepped by adaptQuality(). */
+let quality = 1;
+const Q_MIN = 0.5; // floor: quarter the pixels of full scale
+const Q_STEP = 0.84; // ~30% fewer pixels per step down
+/** Frame-time thresholds, ms. Down when sustained above JANK; up only when
+ *  sustained below FAST — the gap is the hysteresis that stops ping-ponging
+ *  (after a step down a borderline device lands between the two and stays). */
+const Q_JANK_MS = 34;
+const Q_FAST_MS = 20;
+let qJank = 0; // recent over-budget frames
+let qFast = 0; // consecutive comfortably-fast frames
+let qUpNeed = 360; // fast frames required before stepping back up (~6s at 60fps)
+let qLastUp = 0; // timestamp of the last step up, for revert detection
+function adaptQuality(frameMs: number, now: number): void {
+  // Ignore hiccups that are not rendering load: tab switches, huge GC pauses.
+  if (document.visibilityState !== 'visible' || frameMs > 250) return;
+  if (frameMs > Q_JANK_MS) {
+    qJank += 1;
+    qFast = 0;
+  } else {
+    qJank = Math.max(0, qJank - 2);
+    if (frameMs < Q_FAST_MS) qFast += 1;
+    else qFast = 0;
+  }
+  if (qJank >= 20 && quality > Q_MIN) {
+    quality = Math.max(Q_MIN, quality * Q_STEP);
+    qJank = 0;
+    qFast = 0;
+    // A step up that immediately janks back down was premature — demand a much
+    // longer proof of headroom before trying again, or the buffer realloc
+    // itself becomes a once-a-few-seconds stutter.
+    if (now - qLastUp < 3000) qUpNeed = Math.min(qUpNeed * 2, 7200);
+  } else if (qFast >= qUpNeed && quality < 1) {
+    quality = Math.min(1, quality / Q_STEP);
+    qFast = 0;
+    qLastUp = now;
+  }
+}
+
 /**
  * Size the DRAWING BUFFER to match the canvas element's actual laid-out size.
  *
@@ -611,13 +658,13 @@ function resize(): void {
   const cssW = rect.width || window.innerWidth;
   const cssH = rect.height || window.innerHeight;
   const budget = Math.min(1, Math.sqrt(MAX_BACKING_PX / Math.max(1, cssW * cssH * dpr * dpr)));
-  const scale = dpr * budget;
+  const scale = dpr * budget * quality;
   const nw = Math.max(1, Math.round(cssW * scale));
   const nh = Math.max(1, Math.round(cssH * scale));
   if (canvas.width !== nw || canvas.height !== nh) {
     canvas.width = nw;
     canvas.height = nh;
-    canvas.style.imageRendering = budget < 0.999 ? 'pixelated' : '';
+    canvas.style.imageRendering = budget * quality < 0.999 ? 'pixelated' : '';
   }
   renderScale = scale;
   W = nw;
@@ -2808,11 +2855,13 @@ const MAX_FRAME = 0.05; // clamp big pauses (tab switch) rather than fast-forwar
 let last = performance.now();
 let simAccum = 0;
 function frame(now: number): void {
-  const elapsed = clamp((now - last) / 1000, 0, MAX_FRAME);
+  const rawMs = now - last;
+  const elapsed = clamp(rawMs / 1000, 0, MAX_FRAME);
   last = now;
   // Never let a transient error kill the loop — if it did, resize() would stop
   // and the canvas would freeze at its old size (black bars on window growth).
   try {
+    adaptQuality(rawMs, now);
     resize();
     simAccum += elapsed;
     while (simAccum >= SIM_DT) {
@@ -2891,6 +2940,7 @@ if ((import.meta as { env?: { DEV?: boolean } }).env?.DEV) {
     get timer() { return timer; },
     get score() { return score; },
     get musicUrl() { return currentMusicUrl(); },
+    get renderQuality() { return quality; },
   };
 }
 
