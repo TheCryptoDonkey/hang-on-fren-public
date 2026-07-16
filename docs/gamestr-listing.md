@@ -25,7 +25,7 @@ and test relays in the spec's kind-30762 shape, game-signed.
 | **Game dev npub** | `npub12ycjmydvdlrwx5q9cgm9dv80lg2eez0ykg09dcz56kh49tw8cfeqnap6qw` |
 | **Game dev pubkey (hex)** | `51312d91ac6fc6e35005c23656b0effa159c89e4b21e56e054d5af52adc7c272` |
 | **Event shape** | kind 30762, `d` = `hangonfren:<player-pubkey>:<level>`, `state` = `final`, player attributed via `p` tag |
-| **Relays published to** | main.relay.gamestr.io, test.relay.gamestr.io, relay.trotters.cc, nos.lol, relay.damus.io, relay.nostr.band, relay.primal.net, relay.ditto.pub |
+| **Relays published to** | main.relay.gamestr.io, relay.trotters.cc, nos.lol, relay.damus.io, relay.nostr.band, relay.primal.net, relay.ditto.pub |
 
 ## Ready-to-send message
 

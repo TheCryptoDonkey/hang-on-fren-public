@@ -139,6 +139,11 @@ jobs:
           sudo install -m 0644 "$STAGED" "${api_entry}.next"
           sudo mv "${api_entry}.next" "$api_entry"
           rm -f "$STAGED"
+          sudo sed -i \
+            -e 's#wss://test\.relay\.gamestr\.io,##g' \
+            -e 's#,wss://test\.relay\.gamestr\.io##g' \
+            -e 's#wss://test\.relay\.gamestr\.io##g' \
+            /etc/hangonfren-api.env
           sudo systemctl restart hangonfren-api.service
           curl --retry 8 --retry-delay 1 --retry-connrefused --retry-all-errors \
             -fsS http://127.0.0.1:3191/healthz
