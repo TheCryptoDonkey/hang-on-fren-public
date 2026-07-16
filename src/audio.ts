@@ -63,6 +63,37 @@ let unlocked = false;
 let sfxPitch = 1;
 let settings = loadSettings();
 
+// ---- continuous-update rate limiting -----------------------------------------
+// The continuous updaters (engine, rumble, screech, turbo, echo, traffic) are
+// driven from the 240Hz sim loop — and on a STRUGGLING device the catch-up loop
+// runs MORE sim steps per rendered frame, so audio scheduling grew exactly when
+// the frame could least afford it. All their smoothing time-constants sit at
+// 30-120ms, which cannot voice updates faster than ~40Hz anyway, so each updater
+// runs at most once per AUDIO_TICK and unchanged targets are not rescheduled at
+// all (repeat setTargetAtTime calls also pile events onto WebKit's AudioParam
+// timelines — a slow leak of exactly the "fast at first, laggy later" kind).
+const AUDIO_TICK = 0.024;
+const lastRunAt = new Map<string, number>();
+function audioTickDue(key: string, now: number): boolean {
+  const t = lastRunAt.get(key);
+  if (t !== undefined && now - t < AUDIO_TICK) return false;
+  lastRunAt.set(key, now);
+  return true;
+}
+const lastTarget = new WeakMap<AudioParam, number>();
+/** setTargetAtTime, skipped when the target hasn't moved beyond a whisker. */
+function setTarget(p: AudioParam, v: number, now: number, tc: number): void {
+  const prev = lastTarget.get(p);
+  if (prev !== undefined && Math.abs(prev - v) <= Math.max(0.0002, Math.abs(prev) * 0.002)) return;
+  lastTarget.set(p, v);
+  p.setTargetAtTime(v, now, tc);
+}
+/** setValueAtTime that keeps the skip-cache honest for params setTarget drives. */
+function setValueNow(p: AudioParam, v: number, now: number): void {
+  lastTarget.set(p, v);
+  p.setValueAtTime(v, now);
+}
+
 export function unlockAudio(): void {
   const ctx = getCtx();
   if (ctx.state !== 'running' && ctx.state !== 'closed') void ctx.resume().catch(() => undefined);
@@ -140,6 +171,7 @@ export function updateEngine(frame: EngineFrame): void {
   if (!audioCtx || !engineOsc || !engineGain || !engineFilter || !engineSubOsc || !engineSubGain ||
       !engineSubFilter || !engineNoiseGain || !engineNoiseFilter) return;
   const now = audioCtx.currentTime;
+  if (!audioTickDue('engine', now)) return;
   const speed = clamp(frame.speed, 0, 1.3);
   const throttle = clamp(frame.throttle, 0, 1);
 
@@ -172,23 +204,23 @@ export function updateEngine(frame: EngineFrame): void {
   const limiter = rpm > 1 ? 0.6 + 0.4 * Math.sin(now * 96) : 1;
   const dip = now < shiftUntil ? 0.34 : 1; // clutch out: the note falls away
   const level = frame.playing ? (0.052 + moving * 0.105 + throttle * 0.018) * dip * limiter : 0;
-  engineOsc.frequency.setTargetAtTime(firingRate, now, 0.035);
-  engineFilter.frequency.setTargetAtTime(720 + rpm * 1700 + throttle * 420, now, 0.06);
-  engineFilter.Q.setTargetAtTime(1.15 + moving * 0.65, now, 0.08);
-  engineGain.gain.setTargetAtTime(level, now, 0.04);
+  setTarget(engineOsc.frequency, firingRate, now, 0.035);
+  setTarget(engineFilter.frequency, 720 + rpm * 1700 + throttle * 420, now, 0.06);
+  setTarget(engineFilter.Q, 1.15 + moving * 0.65, now, 0.08);
+  setTarget(engineGain.gain, level, now, 0.04);
 
   // Half-rate crankcase thump gives the exhaust pulse some body without the
   // oversized sub-bass drone the previous engine carried. It tracks ROAD speed,
   // not revs, so the bottom end stays planted through a shift instead of dropping
   // out from under the bike along with the note.
-  engineSubOsc.frequency.setTargetAtTime(Math.max(24, (48 + clamp(speed, 0, 1) * 112) * 0.5), now, 0.065);
-  engineSubFilter.frequency.setTargetAtTime(150 + moving * 160, now, 0.08);
-  engineSubGain.gain.setTargetAtTime(frame.playing ? 0.012 + moving * 0.03 : 0, now, 0.07);
+  setTarget(engineSubOsc.frequency, Math.max(24, (48 + clamp(speed, 0, 1) * 112) * 0.5), now, 0.065);
+  setTarget(engineSubFilter.frequency, 150 + moving * 160, now, 0.08);
+  setTarget(engineSubGain.gain, frame.playing ? 0.012 + moving * 0.03 : 0, now, 0.07);
 
   // Filtered noise supplies the breathy, metallic two-stroke rasp visible in
   // the reference spectrum between the main exhaust harmonics.
-  engineNoiseFilter.frequency.setTargetAtTime(620 + rpm * 1900 + throttle * 380, now, 0.055);
-  engineNoiseGain.gain.setTargetAtTime(frame.playing ? (0.007 + moving * 0.032 + throttle * 0.012) * dip : 0, now, 0.06);
+  setTarget(engineNoiseFilter.frequency, 620 + rpm * 1900 + throttle * 380, now, 0.055);
+  setTarget(engineNoiseGain.gain, frame.playing ? (0.007 + moving * 0.032 + throttle * 0.012) * dip : 0, now, 0.06);
 }
 
 export interface RumbleFrame {
@@ -206,18 +238,19 @@ export interface RumbleFrame {
 export function updateRumble(frame: RumbleFrame): void {
   if (!audioCtx || !rumbleNoiseGain || !rumbleNoiseFilter || !rumbleBuzzGain || !rumbleBuzzOsc) return;
   const now = audioCtx.currentTime;
+  if (!audioTickDue('rumble', now)) return;
   const i = frame.active ? clamp(frame.intensity, 0, 1) : 0;
   const spd = clamp(frame.speed, 0, 1);
   // Roar: broadband grass/gravel hiss. Present even at a crawl (so you hear the
   // verge), but it opens up with speed. Filter brightens as you go deeper/faster.
   const roar = i * (0.08 + spd * 0.22);
-  rumbleNoiseGain.gain.setTargetAtTime(roar, now, 0.05);
-  rumbleNoiseFilter.frequency.setTargetAtTime(340 + i * 480 + spd * 620, now, 0.08);
+  setTarget(rumbleNoiseGain.gain, roar, now, 0.05);
+  setTarget(rumbleNoiseFilter.frequency, 340 + i * 480 + spd * 620, now, 0.08);
   // Buzz: the rumble-strip corrugation whir, pitch climbing with speed. Needs
   // both off-road AND motion, so a stationary drift off the edge won't drone.
   const buzz = i * spd * 0.06;
-  rumbleBuzzGain.gain.setTargetAtTime(buzz, now, 0.06);
-  rumbleBuzzOsc.frequency.setTargetAtTime(46 + spd * 88, now, 0.05);
+  setTarget(rumbleBuzzGain.gain, buzz, now, 0.06);
+  setTarget(rumbleBuzzOsc.frequency, 46 + spd * 88, now, 0.05);
 }
 
 export interface ScreechFrame {
@@ -236,6 +269,7 @@ export function updateScreech(frame: ScreechFrame): void {
   if (!audioCtx || !screechGain || !screechFilter || !screechWhineGain ||
       !screechWhineFilter || !screechToneGain || !screechToneOsc) return;
   const now = audioCtx.currentTime;
+  if (!audioTickDue('screech', now)) return;
   const load = frame.active ? clamp(frame.load, 0, 1) : 0;
   const spd = clamp(frame.speed, 0, 1);
   // Rubber squeal has a broad scrub, a narrow resonant whine, and a small tonal
@@ -247,12 +281,12 @@ export function updateScreech(frame: ScreechFrame): void {
   const whine = Math.pow(load, 1.9) * speedGate * (0.018 + spd * 0.072);
   const tone = Math.pow(load, 2.3) * speedGate * (0.008 + spd * 0.022);
   const smoothing = body > screechGain.gain.value ? 0.018 : 0.085;
-  screechGain.gain.setTargetAtTime(body, now, smoothing);
-  screechFilter.frequency.setTargetAtTime(1050 + load * 650 + spd * 420 + Math.sin(now * 8.7) * 70, now, 0.045);
-  screechWhineGain.gain.setTargetAtTime(whine, now, whine > screechWhineGain.gain.value ? 0.014 : 0.075);
-  screechWhineFilter.frequency.setTargetAtTime(2350 + load * 1050 + spd * 520 + Math.sin(now * 15.1) * 120, now, 0.035);
-  screechToneGain.gain.setTargetAtTime(tone, now, tone > screechToneGain.gain.value ? 0.012 : 0.07);
-  screechToneOsc.frequency.setTargetAtTime(1680 + load * 720 + spd * 380 + Math.sin(now * 17.3) * 55, now, 0.035);
+  setTarget(screechGain.gain, body, now, smoothing);
+  setTarget(screechFilter.frequency, 1050 + load * 650 + spd * 420 + Math.sin(now * 8.7) * 70, now, 0.045);
+  setTarget(screechWhineGain.gain, whine, now, whine > screechWhineGain.gain.value ? 0.014 : 0.075);
+  setTarget(screechWhineFilter.frequency, 2350 + load * 1050 + spd * 520 + Math.sin(now * 15.1) * 120, now, 0.035);
+  setTarget(screechToneGain.gain, tone, now, tone > screechToneGain.gain.value ? 0.012 : 0.07);
+  setTarget(screechToneOsc.frequency, 1680 + load * 720 + spd * 380 + Math.sin(now * 17.3) * 55, now, 0.035);
 }
 
 export interface TurboFrame {
@@ -269,9 +303,10 @@ export interface TurboFrame {
 export function updateTurbo(frame: TurboFrame): void {
   if (!audioCtx || !turboGain || !turboFilter) return;
   const now = audioCtx.currentTime;
+  if (!audioTickDue('turbo', now)) return;
   const i = frame.active ? clamp(frame.intensity, 0, 1) : 0;
-  turboGain.gain.setTargetAtTime(i * 0.16, now, i > 0 ? 0.03 : 0.12);
-  turboFilter.frequency.setTargetAtTime(700 + i * 2600 + Math.sin(now * 9) * 200, now, 0.05);
+  setTarget(turboGain.gain, i * 0.16, now, i > 0 ? 0.03 : 0.12);
+  setTarget(turboFilter.frequency, 700 + i * 2600 + Math.sin(now * 9) * 200, now, 0.05);
 }
 
 /**
@@ -343,14 +378,15 @@ export interface EnclosureFrame {
 export function updateEcho(frame: EnclosureFrame): void {
   if (!audioCtx || !echoSend || !echoFeedback || !echoDamp) return;
   const now = audioCtx.currentTime;
+  if (!audioTickDue('echo', now)) return;
   const a = clamp(frame.amount, 0, 1);
   // Opens fast (the wall arrives) and closes fast (daylight) — a slow release
   // would smear the echo out across the road beyond the exit.
-  echoSend.gain.setTargetAtTime(a * 0.4 * settings.sfx, now, 0.08);
+  setTarget(echoSend.gain, a * 0.4 * settings.sfx, now, 0.08);
   // A bigger space rings longer; the returning sound is also duller, because the
   // top end is what the concrete eats first.
-  echoFeedback.gain.setTargetAtTime(0.22 + a * 0.3, now, 0.12);
-  echoDamp.frequency.setTargetAtTime(1500 + a * 900, now, 0.12);
+  setTarget(echoFeedback.gain, 0.22 + a * 0.3, now, 0.12);
+  setTarget(echoDamp.frequency, 1500 + a * 900, now, 0.12);
 }
 
 // ---- traffic engines --------------------------------------------------------
@@ -422,9 +458,10 @@ export interface TrafficSoundFrame {
  * places in the sort order would swap their engines with them, and a machine
  * would appear to change pitch instantly for no reason the player can see.
  */
-export function updateTraffic(cars: readonly TrafficSoundFrame[]): void {
+export function updateTraffic(cars: readonly TrafficSoundFrame[], force = false): void {
   if (!audioCtx || !trafficVoices.length) return;
   const now = audioCtx.currentTime;
+  if (!force && !audioTickDue('traffic', now)) return;
 
   // Hold every voice that is still following a car we can hear.
   const live = new Set(cars.map(c => c.id));
@@ -440,28 +477,29 @@ export function updateTraffic(cars: readonly TrafficSoundFrame[]): void {
       voice.carId = car.id;
       // Start the new voice silent: fading it in from zero is what stops a car
       // entering earshot from arriving as a click.
-      voice.gain.gain.setValueAtTime(0, now);
+      setValueNow(voice.gain.gain, 0, now);
     }
     // Doppler: a car you are closing on is coming at you, so its note rides up.
     const doppler = 1 + car.closing * 0.22;
     const base = (58 + car.rpm * 120) * doppler;
-    voice.osc.frequency.setTargetAtTime(base, now, 0.06);
-    voice.osc2.frequency.setTargetAtTime(base * 1.5, now, 0.06); // a fifth up: body
+    setTarget(voice.osc.frequency, base, now, 0.06);
+    setTarget(voice.osc2.frequency, base * 1.5, now, 0.06); // a fifth up: body
     // Distant engines are muffled by the air between you; they open up as they close.
-    voice.filter.frequency.setTargetAtTime(240 + car.rpm * 520 + car.proximity * 900, now, 0.08);
-    voice.panner.pan.setTargetAtTime(car.pan, now, 0.05);
-    voice.gain.gain.setTargetAtTime(car.proximity * car.proximity * 0.2 * settings.sfx, now, 0.07);
+    setTarget(voice.filter.frequency, 240 + car.rpm * 520 + car.proximity * 900, now, 0.08);
+    setTarget(voice.panner.pan, car.pan, now, 0.05);
+    setTarget(voice.gain.gain, car.proximity * car.proximity * 0.2 * settings.sfx, now, 0.07);
   }
 
   // Anything not following a car fades out rather than cutting.
   for (const voice of trafficVoices) {
-    if (voice.carId === null) voice.gain.gain.setTargetAtTime(0, now, 0.12);
+    if (voice.carId === null) setTarget(voice.gain.gain, 0, now, 0.12);
   }
 }
 
-/** Cut every traffic engine — new run, pause, title screen. */
+/** Cut every traffic engine — new run, pause, title screen. One-shot, so it
+ *  must not be swallowed by the update throttle. */
 export function silenceTraffic(): void {
-  updateTraffic([]);
+  updateTraffic([], true);
 }
 
 export function playSfx(kind: ToneKind, intensity = 1, pitch = 1): void {

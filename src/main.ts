@@ -612,6 +612,12 @@ let qJank = 0; // recent over-budget frames
 let qFast = 0; // consecutive comfortably-fast frames
 let qUpNeed = 360; // fast frames required before stepping back up (~6s at 60fps)
 let qLastUp = 0; // timestamp of the last step up, for revert detection
+/** Highest quality worth attempting. Every failed upward probe costs the player
+ *  a jank window plus two buffer reallocs (up, then back down) — on a phone that
+ *  can only ever hold the lower level, endless retries read as "it keeps going
+ *  laggy". Two failed probes at a level and the ceiling locks below it. */
+let qCeil = 1;
+let qProbeFails = 0;
 function adaptQuality(frameMs: number, now: number): void {
   // Ignore hiccups that are not rendering load: tab switches, huge GC pauses.
   if (document.visibilityState !== 'visible' || frameMs > 250) return;
@@ -627,12 +633,16 @@ function adaptQuality(frameMs: number, now: number): void {
     quality = Math.max(Q_MIN, quality * Q_STEP);
     qJank = 0;
     qFast = 0;
-    // A step up that immediately janks back down was premature — demand a much
-    // longer proof of headroom before trying again, or the buffer realloc
-    // itself becomes a once-a-few-seconds stutter.
-    if (now - qLastUp < 3000) qUpNeed = Math.min(qUpNeed * 2, 7200);
-  } else if (qFast >= qUpNeed && quality < 1) {
-    quality = Math.min(1, quality / Q_STEP);
+    // A step up that promptly janks back down was a failed probe — demand a
+    // longer proof of headroom next time, and after two failures stop probing
+    // above the level that actually holds.
+    if (now - qLastUp < 5000) {
+      qUpNeed = Math.min(qUpNeed * 2, 7200);
+      qProbeFails += 1;
+      if (qProbeFails >= 2) qCeil = quality;
+    }
+  } else if (qFast >= qUpNeed && quality < qCeil) {
+    quality = Math.min(qCeil, quality / Q_STEP);
     qFast = 0;
     qLastUp = now;
   }
@@ -765,10 +775,14 @@ function nameEntryLayout(): ReturnType<typeof nameLayout> {
 }
 
 function syncDomState(): void {
-  document.body.dataset.phase = state.phase;
+  // Guard the writes: re-setting an attribute to its current value every frame
+  // still dirties style in some engines, and this runs 60+ times a second.
+  const { body } = document;
+  if (body.dataset.phase !== state.phase) body.dataset.phase = state.phase;
   // While the high-score keyboard owns the lower screen, keep the floating
   // SUPPORT button out of the way (CSS hides it on data-naming).
-  document.body.dataset.naming = state.phase === 'gameover' && state.qualifies ? '1' : '';
+  const naming = state.phase === 'gameover' && state.qualifies ? '1' : '';
+  if (body.dataset.naming !== naming) body.dataset.naming = naming;
 }
 
 // ---- value-for-value support modal -----------------------------------------
@@ -2854,6 +2868,12 @@ const SIM_DT = 1 / 240;
 const MAX_FRAME = 0.05; // clamp big pauses (tab switch) rather than fast-forward
 let last = performance.now();
 let simAccum = 0;
+// Phones cap at ~60 rendered fps: a 90/120Hz panel runs rAF at panel rate, and
+// painting the whole scene twice as often is pure heat — thermal throttle is a
+// big part of "it gets laggy after a few minutes" on mobile. The sim still
+// steps every rAF, so input latency and physics are untouched; only the paint
+// is skipped. 12ms cleanly separates 120/90Hz ticks (~8-11ms) from 60Hz (~16).
+let lastRenderAt = -1e9;
 function frame(now: number): void {
   const rawMs = now - last;
   const elapsed = clamp(rawMs / 1000, 0, MAX_FRAME);
@@ -2862,14 +2882,17 @@ function frame(now: number): void {
   // and the canvas would freeze at its old size (black bars on window growth).
   try {
     adaptQuality(rawMs, now);
-    resize();
     simAccum += elapsed;
     while (simAccum >= SIM_DT) {
       simAccum -= SIM_DT;
       update(SIM_DT);
     }
     syncDomState();
-    render();
+    if (!isTouch || now - lastRenderAt >= 12) {
+      lastRenderAt = now;
+      resize();
+      render();
+    }
   } catch (err) {
     console.error('frame error:', err);
   }
