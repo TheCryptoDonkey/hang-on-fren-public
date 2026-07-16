@@ -206,7 +206,10 @@ const SMOKE_RATE = 120; // puffs/sec once it is
 type Phase = 'loading' | 'title' | 'playing' | 'victory' | 'gameover';
 
 const canvas = document.getElementById('game') as HTMLCanvasElement;
-const ctx = canvas.getContext('2d')!;
+// `let`, not `const`: renderTitle temporarily retargets the module ctx at an
+// offscreen layer so every drawing helper (outlinedText, panel, leaderboards)
+// renders into the cache without threading a context through all of them.
+let ctx = canvas.getContext('2d')!;
 
 // Two roads through the game: the Riviera loop the road tours lap, and the
 // prehistoric drift valley. `track` points at whichever the CURRENT run rides
@@ -507,14 +510,25 @@ function drawFireworks(ctx2: CanvasRenderingContext2D): void {
   for (const p of state.fireworks) {
     const a = Math.min(1, p.life / Math.min(0.45, p.ttl));
     const trail = 0.085;
-    ctx2.globalAlpha = a * (0.65 + Math.sin(state.time * 18 + p.twinkle) * 0.25);
+    const flicker = a * (0.65 + Math.sin(state.time * 18 + p.twinkle) * 0.25);
+    const tx = p.x - p.vx * trail;
+    const ty = p.y - p.vy * trail;
     ctx2.strokeStyle = p.color;
-    ctx2.lineWidth = Math.max(2, p.size);
-    ctx2.shadowColor = p.color;
-    ctx2.shadowBlur = 9;
+    // Bloom WITHOUT shadowBlur: a canvas shadow re-renders a Gaussian-blurred
+    // copy of the stroke per draw call, and with a hundred live particles that
+    // alone took the goal screen to a slideshow on phones. A fat faint stroke
+    // under the bright one reads the same through the additive blend.
+    ctx2.globalAlpha = flicker * 0.28;
+    ctx2.lineWidth = Math.max(7, p.size * 3);
     ctx2.beginPath();
     ctx2.moveTo(p.x, p.y);
-    ctx2.lineTo(p.x - p.vx * trail, p.y - p.vy * trail);
+    ctx2.lineTo(tx, ty);
+    ctx2.stroke();
+    ctx2.globalAlpha = flicker;
+    ctx2.lineWidth = Math.max(2, p.size);
+    ctx2.beginPath();
+    ctx2.moveTo(p.x, p.y);
+    ctx2.lineTo(tx, ty);
     ctx2.stroke();
     // Square hot core keeps the burst unmistakably 32-bit arcade rather than
     // soft modern particle fluff.
@@ -599,8 +613,11 @@ const MAX_BACKING_PX = 2_300_000;
 // buffer scale is DYNAMIC: sustained over-budget frames step it down, and only
 // long, comfortably-fast stretches step it back up. With `image-rendering:
 // pixelated` the upscale reads as more chunky-authentic, not blurrier.
-/** Extra multiplier on the buffer scale, stepped by adaptQuality(). */
-let quality = 1;
+/** Extra multiplier on the buffer scale, stepped by adaptQuality(). Phones
+ *  START a notch down: "slow to start" was the first seconds spent janking
+ *  through four step-downs from full scale — a phone with real headroom earns
+ *  full resolution back within seconds via the probe instead. */
+let quality = matchMedia('(pointer: coarse)').matches ? 0.7 : 1;
 const Q_MIN = 0.5; // floor: quarter the pixels of full scale
 const Q_STEP = 0.84; // ~30% fewer pixels per step down
 /** Frame-time thresholds, ms. Down when sustained above JANK; up only when
@@ -2466,7 +2483,41 @@ function drawLeaderboard(
   ctx.textAlign = 'center';
 }
 
+// The title screen is ~30 stroked-and-filled texts, panels and a full-screen
+// art blit — and between blinks NOTHING changes frame to frame. Rendering it
+// once into a layer and blitting until its state signature moves takes the
+// title from the heaviest screen to a single drawImage; on phones this is most
+// of "it's slow before you even start".
+let titleLayer: HTMLCanvasElement | null = null;
+let titleLayerKey = '';
 function renderTitle(store: SpriteStore): void {
+  const hasArt = !!store.get('title-art');
+  const blink = Math.floor(state.time * 2) % 2 === 0;
+  const showGlobal = state.globalBoard.length > 0 && Math.floor(state.time / 6) % 2 === 1;
+  const rowsSig = (showGlobal ? state.globalBoard : board).slice(0, 5).map(r => `${r.name}:${r.score}`).join(',');
+  const notice = state.titleNotice.text && state.time < state.titleNotice.until ? state.titleNotice.text : '';
+  const id = getIdentity();
+  const key = `${W}x${H}|${hasArt}|${selectedTour}|${modeIndex}|${blink ? 1 : 0}|${showGlobal ? 1 : 0}|${rowsSig}|${notice}|${id.mode}:${id.name}`;
+  if (!titleLayer || titleLayerKey !== key) {
+    if (!titleLayer) titleLayer = document.createElement('canvas');
+    if (titleLayer.width !== W || titleLayer.height !== H) {
+      titleLayer.width = W;
+      titleLayer.height = H;
+    }
+    const real = ctx;
+    ctx = titleLayer.getContext('2d')!;
+    try {
+      ctx.clearRect(0, 0, W, H);
+      renderTitleContents(store);
+    } finally {
+      ctx = real;
+    }
+    titleLayerKey = key;
+  }
+  ctx.drawImage(titleLayer, 0, 0);
+}
+
+function renderTitleContents(store: SpriteStore): void {
   const art = store.get('title-art');
   if (art) drawTitleArt(ctx, W, H, art);
   else {
@@ -2647,26 +2698,47 @@ function finishCastSprite(): string {
   return getActiveTour() === 'stone' ? 'finish-line-cavewomen' : 'finish-line-girls';
 }
 
+// The golden halo around the finish cast is a canvas shadow — which re-renders
+// a Gaussian-blurred copy of the sprite on EVERY draw, and at half a phone
+// screen that was most of the goal-screen slideshow. Bake sprite + glow into an
+// offscreen once per (sprite, size) and blit it; the bounce only moves the blit.
+const glowBakeCache = new Map<string, HTMLCanvasElement>();
+function bakedGlow(name: string, art: { canvas: HTMLCanvasElement; w: number; h: number }, dw: number, dh: number, pad: number): HTMLCanvasElement {
+  const key = `${name}|${Math.round(dw)}x${Math.round(dh)}`;
+  let cv = glowBakeCache.get(key);
+  if (!cv) {
+    if (glowBakeCache.size > 8) glowBakeCache.clear();
+    cv = document.createElement('canvas');
+    cv.width = Math.ceil(dw + pad * 2);
+    cv.height = Math.ceil(dh + pad * 2);
+    const c = cv.getContext('2d')!;
+    c.imageSmoothingEnabled = false;
+    c.shadowColor = 'rgba(255,210,63,0.48)';
+    c.shadowBlur = pad / 2;
+    c.drawImage(art.canvas, pad, pad, dw, dh);
+    glowBakeCache.set(key, cv);
+  }
+  return cv;
+}
+
 function drawFinishCast(store: SpriteStore): void {
   // ONLY the girls stand past the finish line — both tours. The stone age's
   // heroes join the tableau too, but to the LEFT of the women: the log car
   // side-on, caveman and monkey stood beside it, a fat joint each.
   const cast = store.get(finishCastSprite());
   if (!cast) return;
+  const u = uiScale();
+  const pad = Math.ceil(36 * u); // glow reach: 2× the old 18u shadowBlur
   const portrait = H > W;
   const maxW = W * (portrait ? 0.94 : 0.64);
   const maxH = H * (portrait ? 0.5 : 0.62);
   const scale = Math.min(maxW / cast.w, maxH / cast.h);
   const dw = cast.w * scale;
   const dh = cast.h * scale;
-  const bounce = Math.round(Math.abs(Math.sin(state.victoryTime * 5.5)) * 4 * uiScale());
+  const bounce = Math.round(Math.abs(Math.sin(state.victoryTime * 5.5)) * 4 * u);
   const dx = Math.round((W - dw) / 2);
   const dy = Math.round(H * 0.98 - dh - bounce);
-  ctx.save();
-  ctx.imageSmoothingEnabled = false;
-  ctx.shadowColor = 'rgba(255,210,63,0.48)';
-  ctx.shadowBlur = 18 * uiScale();
-  ctx.drawImage(cast.canvas, dx, dy, dw, dh);
+  ctx.drawImage(bakedGlow(finishCastSprite(), cast, dw, dh, pad), dx - pad, dy - pad);
 
   if (getActiveTour() === 'stone') {
     const car = store.get('victory-cavemen');
@@ -2676,7 +2748,7 @@ function drawFinishCast(store: SpriteStore): void {
       // where the women already span most of the width.
       let carH = dh * 0.66;
       let carW = car.w * (carH / car.h);
-      const room = Math.max(dx - 8 * uiScale(), W * 0.2);
+      const room = Math.max(dx - 8 * u, W * 0.2);
       if (carW > room) {
         const shrink = Math.max(0.5, room / carW);
         carW *= shrink;
@@ -2684,10 +2756,9 @@ function drawFinishCast(store: SpriteStore): void {
       }
       const carX = Math.round(Math.max(4, dx - carW * 0.98));
       const carY = Math.round(H * 0.98 - carH);
-      ctx.drawImage(car.canvas, carX, carY, carW, carH);
+      ctx.drawImage(bakedGlow('victory-cavemen', car, carW, carH, pad), carX - pad, carY - pad);
     }
   }
-  ctx.restore();
 }
 
 /** The dedicated five-second finish tableau: race scene still visible behind
