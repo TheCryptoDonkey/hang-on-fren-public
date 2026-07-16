@@ -78,7 +78,7 @@ describe('scoring', () => {
     // player's score AT a level, so improvements replace and runs stay stable.
     expect(ev.tags).toContainEqual(['d', 'hangonfren:abc123:3']);
     expect(ev.tags).toContainEqual(['p', 'abc123']);
-    expect(ev.tags).toContainEqual(['state', 'active']);
+    expect(ev.tags).toContainEqual(['state', 'final']);
     expect(ev.tags).toContainEqual(['run_id', 'run-1']);
     expect(ev.tags).toContainEqual(['playerName', 'DNI']);
     expect(ev.tags).toContainEqual(['playerMode', 'guest']);

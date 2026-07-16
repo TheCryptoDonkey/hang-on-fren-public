@@ -286,7 +286,11 @@ export function buildScoreEvent(summary: RunSummary, playerPubkey = 'guest', opt
     ['game', GAME_ID],
     ['score', String(summary.score)],
     ['p', playerPubkey],
-    ['state', 'active'],
+    // A finished run is a FINAL score. Gamestr boards (pallasite, gamestr-arcade)
+    // list finals and treat `state=active` as a run still IN PROGRESS — publishing
+    // completed runs as 'active' is why our scores landed on the relays but never
+    // showed on the board. We only ever publish once, at run end, so it's final.
+    ['state', 'final'],
     ['distance', String(summary.distanceM)],
     ['roses', String(summary.roses)],
     ['overtakes', String(summary.overtakes)],
