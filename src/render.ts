@@ -542,13 +542,22 @@ export interface Scene {
    *  jagged rocky mouth, and candle flames lining the sides instead of strip
    *  lights. */
   cave?: boolean;
+  /** 'low' drops the ground texture passes, sun flare and speed streaks —
+   *  the flat Mega Drive fills remain. Flipped by main.ts when a device still
+   *  janks at the resolution floor (i.e. Canvas2D is likely software-rastered
+   *  and fill cost, not pixel count, is the wall). */
+  detail?: 'full' | 'low';
 }
+
+/** Frame-wide low-detail switch, set from scene.detail each renderScene. */
+let LOW_DETAIL = false;
 
 // Offscreen frame snapshot reused by the trip kaleidoscope (no per-frame alloc).
 let tripSnap: HTMLCanvasElement | null = null;
 
 export function renderScene(scene: Scene): void {
   const { ctx, width, height, track, player, world, store } = scene;
+  LOW_DETAIL = scene.detail === 'low';
   groundArt = store; // ground tiles pull their generated textures from here
   const palette = scene.palette ?? DEFAULT_PALETTE;
   const terrain = scene.terrain ?? DEFAULT_TERRAIN;
@@ -691,7 +700,7 @@ export function renderScene(scene: Scene): void {
   // flare that washes out the car you are about to hit is a lens effect that has
   // started playing the game for you. Killed under cover, where there is no sun.
   const sunlit = 1 - clamp(scene.enclosure ?? 0, 0, 1);
-  if (sunlit > 0.02) {
+  if (sunlit > 0.02 && !LOW_DETAIL) {
     drawSunFlare(ctx, width, height, horizon, xPan, x * 0.02, palette, scene.boost, sunlit);
   }
 
@@ -826,7 +835,7 @@ export function renderScene(scene: Scene): void {
     // Speed rush: streaks raked out of the vanishing point. Always in turbo or a
     // slingshot, and building as a draft charges so the wake FEELS like something.
     const streak = Math.max(speedPct, scene.boost, scene.sling ?? 0, (scene.draft ?? 0) * 0.8);
-    if (streak > 0.5 && scene.wipeout === 0) {
+    if (streak > 0.5 && scene.wipeout === 0 && !LOW_DETAIL) {
       drawSpeedStreaks(ctx, width, height, width / 2 + xPan, horizon, streak, scene.time);
     }
   }
@@ -2063,7 +2072,7 @@ function renderSides(
   // The ground beyond the lip on each side. A `flat` side is the SAME ground
   // as the verge, so it skips its fill and lets the textured slab run to the
   // frame edge; sea / canyon / rock repaint over the texture past the lip.
-  const sideTextured = bandTextured(seg);
+  const sideTextured = bandTextured(seg) && !LOW_DETAIL;
   const fillSide = (kind: SideKind, x1: number, y1: number, x2: number, y2: number, x3: number, y3: number, x4: number, y4: number): void => {
     if (kind === 'flat') return;
     polygon(ctx, x1, y1, x2, y2, x3, y3, x4, y4, sideColor(kind, terrain, palette, dark));
@@ -2179,7 +2188,7 @@ function renderSegment(ctx: CanvasRenderingContext2D, width: number, height: num
     : bleedX + bleedW;
   ctx.fillStyle = grass;
   ctx.fillRect(slabL, p2.y, slabR - slabL, p1.y - p2.y + 1);
-  const textured = bandTextured(seg);
+  const textured = bandTextured(seg) && !LOW_DETAIL;
   if (textured && !tunnelSeg) {
     // The biome's pixel tile over the slab; the sides repaint whatever lies
     // beyond a sea / canyon / rock lip on top of it.

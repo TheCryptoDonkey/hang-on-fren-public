@@ -7,7 +7,7 @@ import { createWorld, resetWorld, updateWorld, addPickup, addPickupTrail, addHaz
 import { createTimer, tickTimer, addRoseTime, addCanTime, timerUrgency, DEFAULT_TIMER } from './timer.js';
 import { createScore, addDistance, addRose, addFuel, addBonus, addStuntBonus, addDrift, driftPayout, penalise, addOvertake, addNearMiss, registerCrash, summarise, type RunSummary } from './scoring.js';
 import type { PickupKind } from './world.js';
-import { SpriteStore, loadSpriteInto, loadSpritesInto, buildSignVariants, buildBillboardVariants, brandPetrol } from './sprites.js';
+import { SpriteStore, loadSpritesInto, buildSignVariants, buildBillboardVariants, brandPetrol } from './sprites.js';
 import { renderScene, drawTitleArt } from './render.js';
 import { spawnSmoke, updateSmoke, type Smoke } from './smoke.js';
 import { setPickupScale } from './geometry.js';
@@ -246,6 +246,8 @@ function selectTour(tour: TourId): void {
 
 const state = {
   phase: 'loading' as Phase,
+  loadDone: 0,
+  loadTotal: 1,
   store: null as SpriteStore | null,
   paused: false, // Escape mid-run: clock, physics and audio all hold
   invuln: 0,
@@ -635,6 +637,12 @@ let qLastUp = 0; // timestamp of the last step up, for revert detection
  *  laggy". Two failed probes at a level and the ceiling locks below it. */
 let qCeil = 1;
 let qProbeFails = 0;
+/** The rung below the resolution floor: a device that still janks at Q_MIN is
+ *  almost certainly software-rasterising its canvas, and there it's the FILL
+ *  COUNT that costs, not the pixels — so the texture passes go instead
+ *  (renderScene detail:'low'). Sticky for the session: flip-flopping the
+ *  world's dressing mid-run looks broken. */
+let lowDetail = false;
 function adaptQuality(frameMs: number, now: number): void {
   // Ignore hiccups that are not rendering load: tab switches, huge GC pauses.
   if (document.visibilityState !== 'visible' || frameMs > 250) return;
@@ -658,6 +666,10 @@ function adaptQuality(frameMs: number, now: number): void {
       qProbeFails += 1;
       if (qProbeFails >= 2) qCeil = quality;
     }
+  } else if (qJank >= 20 && !lowDetail) {
+    lowDetail = true; // pinned at the floor and still janking: ditch textures
+    qJank = 0;
+    qFast = 0;
   } else if (qFast >= qUpNeed && quality < qCeil) {
     quality = Math.min(qCeil, quality / Q_STEP);
     qFast = 0;
@@ -1236,9 +1248,11 @@ function startRun(tour: TourId = selectedTour): void {
   // A run always opens on its tour's first region — start that region's bed
   // (score.distance still holds the LAST run here, so don't use stageMusicUrl).
   startMusic(STAGE_MUSIC[tour][0] ?? MUSIC_URL);
-  // Warm the next region bed now so the first checkpoint swap is gap-free; each
-  // later bed is warmed as its checkpoint is crossed (frame's stage-change block).
-  if (STAGE_MUSIC[tour][1]) preloadMusic(STAGE_MUSIC[tour][1]);
+  // Warm EVERY bed the tour will play, right now: the run's start absorbs the
+  // fetches (instant from the SW cache after the first visit) instead of the
+  // network spiking mid-run at each checkpoint — which on a phone connection
+  // was another face of "it goes laggy while you ride".
+  for (const bed of Object.values(STAGE_MUSIC[tour])) if (bed) preloadMusic(bed);
   // The stone tour's short goal-screen sting is tiny — warm it up front so it's
   // ready the instant the rider crosses the 600B YEARS BC finish.
   if (tour === 'stone') preloadMusic(STONE_VICTORY_URL);
@@ -2360,6 +2374,10 @@ function render(): void {
   if (!store) return;
   ctx.clearRect(0, 0, W, H);
 
+  if (state.phase === 'loading') {
+    renderLoading();
+    return;
+  }
   if (state.phase === 'title') {
     renderTitle(store);
     return;
@@ -2369,7 +2387,7 @@ function render(): void {
   // effect ever snaps on or off mid-frame.
   const wobble = clamp(Math.min(state.beerWobble / 1.5, (BEER_WOBBLE_TIME - state.beerWobble) / 0.6), 0, 1);
   const trip = clamp(Math.min(state.shroom / 1.2, (SHROOM_TIME - state.shroom) / 0.4), 0, 1);
-  renderScene({ ctx, width: W, height: H, track, player, world, store, time: state.time, wipeout: state.wipeout, boost: state.boost > 0 ? state.boost / ROSE_BOOST_TIME : 0, sling: state.slingshot > 0 ? state.slingshot / SLING_TIME_MAX : 0, draft: state.draftCharge, wobble, trip, palette: paletteAt(score.distance), scenery: sceneryKitAt(score.distance), terrain: terrainAt(score.distance), timeOfDay: timeOfDayAt(score.distance), camYaw: state.camYaw, camRoll: state.camRoll, camLag: camLag(), smoke: state.smoke, enclosure: state.enclosure, hideRider: state.outcome === 'finish' && (state.phase === 'victory' || state.phase === 'gameover'), heroSet: getActiveTour() === 'stone' ? 'caveman' : 'hero', cave: getActiveTour() === 'stone' });
+  renderScene({ ctx, width: W, height: H, track, player, world, store, time: state.time, wipeout: state.wipeout, boost: state.boost > 0 ? state.boost / ROSE_BOOST_TIME : 0, sling: state.slingshot > 0 ? state.slingshot / SLING_TIME_MAX : 0, draft: state.draftCharge, wobble, trip, palette: paletteAt(score.distance), scenery: sceneryKitAt(score.distance), terrain: terrainAt(score.distance), timeOfDay: timeOfDayAt(score.distance), camYaw: state.camYaw, camRoll: state.camRoll, camLag: camLag(), smoke: state.smoke, enclosure: state.enclosure, hideRider: state.outcome === 'finish' && (state.phase === 'victory' || state.phase === 'gameover'), heroSet: getActiveTour() === 'stone' ? 'caveman' : 'hero', cave: getActiveTour() === 'stone', detail: lowDetail ? 'low' : 'full' });
   if (state.phase === 'playing') drawSparks(ctx);
 
   // The game-over card carries the score/stats itself — drawing the live HUD
@@ -2667,6 +2685,32 @@ function renderTitleContents(store: SpriteStore): void {
     const lbW = portrait ? W * 0.9 : W * 0.44;
     drawLeaderboard(showGlobal ? 'TOP FRENS · GAMESTR' : 'BEST RIDERS', rows, (W - lbW) / 2, lbY, lbW, u);
   }
+}
+
+/** Boot loading bar: everything the game will draw is fetched, decoded and
+ *  processed BEHIND this screen, so neither the title nor the run ever fights
+ *  the loader for the main thread (mid-game art streaming was a big slice of
+ *  the mobile "really slow" reports). Deliberately cheap: flat fill, two texts,
+ *  two rects. */
+function renderLoading(): void {
+  const u = uiScale();
+  ctx.fillStyle = '#071019';
+  ctx.fillRect(0, 0, W, H);
+  ctx.textAlign = 'center';
+  ctx.font = `900 ${Math.min(44 * u, W * 0.1)}px 'Trebuchet MS', sans-serif`;
+  outlinedText('HANG ON, FREN', W / 2, H * 0.42, '#ffd23f', u, 8);
+  const frac = Math.min(1, state.loadDone / Math.max(1, state.loadTotal));
+  const bw = Math.min(W * 0.6, 420 * u);
+  const bh = 10 * u;
+  const bx = (W - bw) / 2;
+  const by = H * 0.5;
+  ctx.fillStyle = 'rgba(255,255,255,0.14)';
+  ctx.fillRect(bx, by, bw, bh);
+  ctx.fillStyle = '#8fe6c4';
+  ctx.fillRect(bx, by, bw * frac, bh);
+  ctx.font = `700 ${13 * u}px 'Trebuchet MS', sans-serif`;
+  ctx.fillStyle = 'rgba(159,208,255,0.85)';
+  ctx.fillText(`LOADING  ${Math.round(frac * 100)}%`, W / 2, by + 34 * u);
 }
 
 function renderPaused(): void {
@@ -3035,6 +3079,8 @@ if ((import.meta as { env?: { DEV?: boolean } }).env?.DEV) {
     get score() { return score; },
     get musicUrl() { return currentMusicUrl(); },
     get renderQuality() { return quality; },
+    get lowDetail() { return lowDetail; },
+    setLowDetail: (v: boolean) => { lowDetail = v; },
   };
 }
 
@@ -3061,19 +3107,35 @@ async function boot(): Promise<void> {
   decorateTrack(roadTrack, buildSignVariants(store), buildBillboardVariants(store));
   decorateTrack(stoneTrack, buildSignVariants(store), buildBillboardVariants(store));
   state.store = store;
-  state.phase = 'title';
   last = performance.now();
   requestAnimationFrame(frame);
-  void loadSpriteInto(store, 'title-art')
-    .then(() => loadSpritesInto(store))
+  // Hold the loading screen until the art is genuinely in. The old flow showed
+  // the title immediately and streamed a hundred sprites underneath it — every
+  // trimmed sprite costs a main-thread pixel pass, so phones spent their first
+  // half-minute of PLAY fighting the loader. Now the whole store fills behind
+  // the bar; the title and the run start with everything decoded and resident.
+  const toTitle = (): void => {
+    brandPetrol(store);
+    // Rebuild + rescatter now the real art is in — this is also when the
+    // rose-meme billboard first becomes available (its sticker art loads here).
+    // Runs even if something (arcade handoff) already left the loading phase.
+    decorateTrack(roadTrack, buildSignVariants(store), buildBillboardVariants(store));
+    decorateTrack(stoneTrack, buildSignVariants(store), buildBillboardVariants(store));
+    if (state.phase === 'loading') state.phase = 'title';
+  };
+  // Escape hatch for a dead/dripping connection: fallbacks cover every sprite,
+  // so after 20s the game opens with whatever has landed (the rest keeps
+  // streaming — no worse than the old behaviour).
+  const bail = setTimeout(toTitle, 20_000);
+  void loadSpritesInto(store, (done, total) => {
+    state.loadDone = done;
+    state.loadTotal = total;
+  })
+    .catch(() => undefined)
     .then(() => {
-      brandPetrol(store);
-      // Rebuild + rescatter now the real art is in — this is also when the
-      // rose-meme billboard first becomes available (its sticker art loads here).
-      decorateTrack(roadTrack, buildSignVariants(store), buildBillboardVariants(store));
-      decorateTrack(stoneTrack, buildSignVariants(store), buildBillboardVariants(store));
-    })
-    .catch(() => undefined);
+      clearTimeout(bail);
+      toTitle();
+    });
 }
 
 void boot();

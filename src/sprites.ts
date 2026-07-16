@@ -29,8 +29,7 @@ function makeCanvas(
   return { canvas, ctx };
 }
 
-/** Load an image, erase sub-floor alpha, and trim to the opaque bounding box. */
-async function loadTrimmed(url: string): Promise<SpriteImage | null> {
+async function loadImage(url: string): Promise<HTMLImageElement | null> {
   const img = await new Promise<HTMLImageElement | null>(res => {
     const el = new Image();
     el.onload = () => res(el);
@@ -38,6 +37,34 @@ async function loadTrimmed(url: string): Promise<SpriteImage | null> {
     el.src = url;
   });
   if (!img || !img.width) return null;
+  // decode() rasterises off the main thread where supported — without it the
+  // first drawImage of a megapixel backdrop pays a synchronous decode.
+  await img.decode().catch(() => undefined);
+  return img;
+}
+
+/** Full-bleed art (backdrops, panoramas) is opaque edge to edge: the alpha
+ *  trim below would be a no-op that still costs a full getImageData readback
+ *  and a per-pixel JS scan — for a 1280×853 horizon that is real main-thread
+ *  time, ×15 panoramas, exactly when the game is starting. Draw it straight
+ *  onto a canvas and keep every pixel. */
+async function loadFullBleed(url: string): Promise<SpriteImage | null> {
+  const img = await loadImage(url);
+  if (!img) return null;
+  const { canvas, ctx } = makeCanvas(img.width, img.height);
+  ctx.drawImage(img, 0, 0);
+  return { canvas, w: img.width, h: img.height };
+}
+
+/** Art that needs no alpha trim: name prefixes of full-bleed rectangles. */
+function isFullBleed(name: string): boolean {
+  return name.startsWith('horizon-') || name === 'title-art';
+}
+
+/** Load an image, erase sub-floor alpha, and trim to the opaque bounding box. */
+async function loadTrimmed(url: string): Promise<SpriteImage | null> {
+  const img = await loadImage(url);
+  if (!img) return null;
 
   const { canvas, ctx } = makeCanvas(img.width, img.height, true);
   ctx.drawImage(img, 0, 0);
@@ -2381,17 +2408,36 @@ export function brandPetrol(store: SpriteStore): void {
 export async function loadSpriteInto(store: SpriteStore, name: string): Promise<boolean> {
   const url = ART_URLS[name];
   if (!url) return false;
-  const sprite = await loadTrimmed(url).catch(() => null);
+  const sprite = await (isFullBleed(name) ? loadFullBleed(url) : loadTrimmed(url)).catch(() => null);
   if (!sprite) return false;
   store.set(name, sprite);
   return true;
 }
 
-/** Load every known art asset into `store` (best-effort); fall back per-sprite on failure. */
-export async function loadSpritesInto(store: SpriteStore): Promise<void> {
-  await Promise.all(
-    Object.keys(ART_URLS).map(name => loadSpriteInto(store, name)),
-  );
+/**
+ * Load every known art asset into `store` (best-effort; fallbacks cover
+ * per-sprite failure). Loaded in small batches, not one big Promise.all: each
+ * trimmed sprite still costs a main-thread pixel pass, and a hundred of them
+ * landing at once froze phones for seconds. `onProgress` feeds a loading bar.
+ */
+export async function loadSpritesInto(store: SpriteStore, onProgress?: (done: number, total: number) => void): Promise<void> {
+  // No skip-if-present filter: get() bakes code-drawn fallbacks into the map
+  // (boot decorates tracks before art lands), and those must be OVERWRITTEN.
+  const names = Object.keys(ART_URLS);
+  const total = names.length;
+  let done = 0;
+  const CONCURRENCY = 4;
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    while (next < names.length) {
+      const name = names[next];
+      next += 1;
+      await loadSpriteInto(store, name).catch(() => undefined);
+      done += 1;
+      onProgress?.(done, total);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(CONCURRENCY, names.length) }, worker));
 }
 
 /** Load every known art asset (best-effort); fall back per-sprite on failure. */
