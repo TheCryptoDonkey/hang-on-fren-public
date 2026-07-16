@@ -25,7 +25,7 @@ npm run build:server        # → server-dist/index.js
 
 On the VPS:
 
-1. Copy `server-dist/index.js` somewhere stable (e.g. `/opt/hangonfren/api/`).
+1. Copy `server-dist/index.js` somewhere stable (e.g. `/opt/hang-on-fren/api/`).
 2. Create `/etc/hangonfren-api.env` (mode **0600**, owner root):
 
    ```
@@ -47,7 +47,7 @@ On the VPS:
    After=network-online.target
 
    [Service]
-   ExecStart=/usr/bin/node /opt/hangonfren/api/index.js
+   ExecStart=/usr/bin/node /opt/hang-on-fren/api/index.js
    EnvironmentFile=/etc/hangonfren-api.env
    User=hangonfren
    StateDirectory=hangonfren
