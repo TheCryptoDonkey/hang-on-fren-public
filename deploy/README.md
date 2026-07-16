@@ -47,7 +47,7 @@ On the VPS:
    After=network-online.target
 
    [Service]
-   ExecStart=/usr/bin/node /opt/hang-on-fren/api/index.js
+   ExecStart=/usr/bin/env node /opt/hang-on-fren/api/index.js
    EnvironmentFile=/etc/hangonfren-api.env
    User=hangonfren
    StateDirectory=hangonfren
