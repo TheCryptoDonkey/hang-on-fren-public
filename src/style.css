@@ -27,7 +27,8 @@ body {
  * `manipulation` keeps the tap while stripping the browser's double-tap-to-zoom.
  * The fixed-viewport game has nothing to zoom into and no way back out once it
  * does, so we lock every interactive surface to 1:1. (Pinch-zoom is handled in
- * JS — see the gesture guards in main.ts.)
+ * JS — see the pinch-zoom lockout + zoom rescue in main.ts; iOS ignores
+ * touch-action for pinches entirely.)
  */
 button,
 a {
@@ -191,6 +192,14 @@ body.donate-open #support-btn { display: none; }
 @keyframes supportPulse {
   0%, 100% { box-shadow: 0 4px 18px rgba(0, 0, 0, 0.4), 0 0 0 0 rgba(255, 210, 63, 0.5); }
   50% { box-shadow: 0 4px 18px rgba(0, 0, 0, 0.4), 0 0 0 10px rgba(255, 210, 63, 0); }
+}
+
+/* The donate card is the one tappable surface that isn't a button or link —
+ * its heading, QR and padding would still double-tap-zoom on iOS. pan-y keeps
+ * the card scrollable on short screens while stripping the zoom gestures. */
+#donate-overlay,
+#donate-overlay * {
+  touch-action: pan-y;
 }
 
 #donate-overlay {

@@ -1158,12 +1158,79 @@ canvas.addEventListener('mousedown', e => {
 // once a mobile browser zooms in there is no in-game way to get back out — the
 // player is just stuck peering at a corner of the scene. The viewport meta's
 // `user-scalable=no` stops this on Android but is IGNORED by iOS Safari (10+),
-// which drives pinch-zoom through the non-standard `gesture*` events instead.
-// Cancelling those at the document level pins the scene at 1:1 on iPhone too,
-// wherever the pinch starts (canvas, touch buttons, or the support overlay).
+// and Safari also ignores `touch-action` for pinches (it scales the viewport,
+// not the element), so the lockout has to live in JS. It takes several layers
+// because no single hook sees every pinch on iOS:
+//   1. `gesture*` events — Safari's own pinch pipeline.
+//   2. Multi-finger touchstart — WebKit can start a pinch WITHOUT ever firing
+//      gesturestart when the second thumb lands while the first is already
+//      down steering, which is exactly how this game is held.
+//   3. touchmove carrying a pinch `scale` — the same leak, caught mid-gesture.
+//   4. ctrl+wheel — how iPadOS trackpads (and desktop browsers) pinch.
+// Every touch guard stands down while the page IS zoomed, otherwise they would
+// also block the pinch-OUT a trapped player needs to escape (that trap was the
+// original "stuck zoomed in" bug); the automatic rescue below usually snaps
+// the page back before anyone has to pinch at all.
+const pageZoomed = (): boolean => (window.visualViewport?.scale ?? 1) > 1.02;
+let fingersDown = 0;
+
 for (const type of ['gesturestart', 'gesturechange', 'gestureend']) {
-  document.addEventListener(type, e => e.preventDefault(), { passive: false });
+  document.addEventListener(type, e => {
+    if (!pageZoomed()) e.preventDefault();
+  }, { passive: false, capture: true });
 }
+document.addEventListener('touchstart', e => {
+  fingersDown = e.touches.length;
+  if (e.touches.length > 1 && !pageZoomed()) e.preventDefault();
+}, { passive: false, capture: true });
+document.addEventListener('touchmove', e => {
+  const scale = (e as TouchEvent & { scale?: number }).scale;
+  if (scale !== undefined && scale !== 1 && !pageZoomed()) e.preventDefault();
+}, { passive: false, capture: true });
+// Double-tap smart-zoom rides a third pipeline and fires no gesture events at
+// all. Buttons and links already opt out via `touch-action` (which iOS honours
+// for double-tap, unlike pinch), and eating THEIR touchend would kill the
+// click they synthesise — so only rapid re-taps on everything else are
+// suppressed. A double-tap while zoomed is left alone: on iOS it zooms back
+// OUT, which is one more escape hatch.
+let lastTapEnd = 0;
+document.addEventListener('touchend', e => {
+  fingersDown = e.touches.length;
+  const interactive = e.target instanceof Element && e.target.closest('button, a') !== null;
+  if (!interactive && !pageZoomed() && e.timeStamp - lastTapEnd < 350) e.preventDefault();
+  lastTapEnd = e.timeStamp;
+  if (e.touches.length === 0) scheduleZoomRescue();
+}, { passive: false, capture: true });
+document.addEventListener('touchcancel', e => {
+  fingersDown = e.touches.length;
+  if (e.touches.length === 0) scheduleZoomRescue();
+}, { passive: true, capture: true });
+document.addEventListener('wheel', e => {
+  if (e.ctrlKey) e.preventDefault();
+}, { passive: false, capture: true });
+
+// ---- zoom rescue --------------------------------------------------------------
+// Prevention is best-effort — Safari has changed the pinch rules more than
+// once, and a zoom that lands before this module runs (mid page-load) predates
+// every guard above. If the page is still zoomed once all fingers lift,
+// re-inserting the viewport <meta> forces WebKit to reprocess it, which snaps
+// the page back to maximum-scale=1. (Mutating `content` in place is not
+// enough: WebKit ignores viewport updates once a user zoom has latched.)
+let viewportMeta = document.querySelector<HTMLMetaElement>('meta[name="viewport"]');
+let zoomRescueTimer: number | undefined;
+function rescueZoom(): void {
+  if (fingersDown > 0 || !pageZoomed() || !viewportMeta) return;
+  const fresh = viewportMeta.cloneNode(true) as HTMLMetaElement;
+  viewportMeta.remove();
+  document.head.appendChild(fresh);
+  viewportMeta = fresh;
+}
+function scheduleZoomRescue(): void {
+  window.clearTimeout(zoomRescueTimer);
+  zoomRescueTimer = window.setTimeout(rescueZoom, 250);
+}
+window.visualViewport?.addEventListener('resize', scheduleZoomRescue);
+scheduleZoomRescue();
 
 // ---- gamepad ----------------------------------------------------------------
 // Polled alongside keys/touch: left stick or d-pad steers, bottom/left face
