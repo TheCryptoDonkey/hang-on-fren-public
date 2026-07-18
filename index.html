@@ -31,22 +31,50 @@
   </div>
 
   <!-- Value-for-value support: a tap-to-tip button on the title / game-over
-       screens opens a copyable Lightning address, a scannable QR and links out
-       to Geyser / Ko-fi. Optional, and separate from gameplay score. -->
+       screens opens Lightning / on-chain / silent-payment tabs, each with a
+       scannable QR and a copyable address, plus links out to Geyser / Ko-fi.
+       Optional, and separate from gameplay score. -->
   <button id="support-btn" type="button" aria-label="Support the developer">♥&nbsp;SUPPORT</button>
   <div id="donate-overlay" hidden role="dialog" aria-modal="true" aria-label="Support Hang On, Fren">
     <div class="donate-card" role="document">
       <button id="donate-close" type="button" aria-label="Close">✕</button>
       <h2>VALUE FOR VALUE</h2>
       <p class="donate-sub">Enjoyed the ride, fren? Toss a few sats.</p>
-      <div class="donate-qr">
-        <img src="%BASE_URL%qr-lightning.svg" alt="Lightning address QR code" width="200" height="200" />
+      <div class="donate-tabs" role="tablist" aria-label="Payment method">
+        <button class="donate-tab is-active" type="button" role="tab" aria-selected="true" data-method="lightning">⚡ LIGHTNING</button>
+        <button class="donate-tab" type="button" role="tab" aria-selected="false" data-method="onchain">₿ ON-CHAIN</button>
+        <button class="donate-tab" type="button" role="tab" aria-selected="false" data-method="silent">🤫 SILENT</button>
       </div>
-      <button id="donate-copy" class="donate-addr" type="button" aria-label="Copy Lightning address">
-        <span class="donate-addr-text">profusemeat89@walletofsatoshi.com</span>
-        <span class="donate-copy-label">TAP TO COPY</span>
-      </button>
-      <a class="donate-link donate-link--ln" href="lightning:profusemeat89@walletofsatoshi.com">⚡ Open in Lightning wallet</a>
+      <div class="donate-pane" data-method="lightning" role="tabpanel">
+        <div class="donate-qr">
+          <img src="%BASE_URL%qr-lightning.svg" alt="Lightning address QR code" width="200" height="200" />
+        </div>
+        <button class="donate-addr" type="button" data-copy="profusemeat89@walletofsatoshi.com" aria-label="Copy Lightning address">
+          <span class="donate-addr-text">profusemeat89@walletofsatoshi.com</span>
+          <span class="donate-copy-label">TAP TO COPY</span>
+        </button>
+        <a class="donate-link donate-link--ln" href="lightning:profusemeat89@walletofsatoshi.com">⚡ Open in Lightning wallet</a>
+      </div>
+      <div class="donate-pane" data-method="onchain" role="tabpanel" hidden>
+        <div class="donate-qr">
+          <img src="%BASE_URL%qr-onchain.svg" alt="Bitcoin address QR code" width="200" height="200" />
+        </div>
+        <button class="donate-addr" type="button" data-copy="bc1qc75tj6gs06r0hjwy8z6tdkg92tm39wnzwj4lah" aria-label="Copy Bitcoin address">
+          <span class="donate-addr-text">bc1qc75tj6gs06r0hjwy8z6tdkg92tm39wnzwj4lah</span>
+          <span class="donate-copy-label">TAP TO COPY</span>
+        </button>
+        <a class="donate-link donate-link--ln" href="bitcoin:bc1qc75tj6gs06r0hjwy8z6tdkg92tm39wnzwj4lah">₿ Open in Bitcoin wallet</a>
+      </div>
+      <div class="donate-pane" data-method="silent" role="tabpanel" hidden>
+        <div class="donate-qr">
+          <img src="%BASE_URL%qr-silent.svg" alt="Silent payment address QR code" width="200" height="200" />
+        </div>
+        <button class="donate-addr" type="button" data-copy="sp1qq0s22v57t06499r29yfnwsf408uqzneufpzvy4ennd8dedfwdm08qqes6lwp8uzapmf2x2dhpsfcrhh6j70grs5dfyx7235ae6yl0jr3tcqfym4g" aria-label="Copy silent payment address">
+          <span class="donate-addr-text donate-addr-text--sp">sp1qq0s22v57t06499r29yfnwsf408uqzneufpzvy4ennd8dedfwdm08qqes6lwp8uzapmf2x2dhpsfcrhh6j70grs5dfyx7235ae6yl0jr3tcqfym4g</span>
+          <span class="donate-copy-label">TAP TO COPY</span>
+        </button>
+        <p class="donate-note">Private on-chain — needs a wallet with silent payments (Cake, BlueWallet, Sparrow).</p>
+      </div>
       <div class="donate-links-row">
         <a class="donate-link" href="https://geyser.fund/project/forgesworn?hero=geyserannually1" target="_blank" rel="noopener">Geyser</a>
         <a class="donate-link" href="https://ko-fi.com/brays" target="_blank" rel="noopener">Ko-fi</a>

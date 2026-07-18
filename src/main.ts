@@ -815,14 +815,16 @@ function syncDomState(): void {
 }
 
 // ---- value-for-value support modal -----------------------------------------
-// A floating SUPPORT button (title + game-over) opens a modal with a copyable
-// Lightning address, a scannable QR and links to Geyser / Ko-fi. All optional,
-// and wholly separate from gameplay/score.
+// A floating SUPPORT button (title + game-over) opens a modal with Lightning /
+// on-chain / silent-payment tabs — each a scannable QR plus a copyable
+// address — and links to Geyser / Ko-fi. All optional, and wholly separate
+// from gameplay/score.
 const supportBtn = document.getElementById('support-btn');
 const donateOverlay = document.getElementById('donate-overlay');
 const donateClose = document.getElementById('donate-close');
-const donateCopy = document.getElementById('donate-copy');
-const LIGHTNING_ADDRESS = 'profusemeat89@walletofsatoshi.com';
+const donateTabs = Array.from(document.querySelectorAll<HTMLButtonElement>('.donate-tab'));
+const donatePanes = Array.from(document.querySelectorAll<HTMLElement>('.donate-pane'));
+const donateCopies = Array.from(document.querySelectorAll<HTMLButtonElement>('.donate-addr[data-copy]'));
 
 function openDonate(): void {
   if (!donateOverlay) return;
@@ -835,16 +837,26 @@ function closeDonate(): void {
   document.body.classList.remove('donate-open');
 }
 
-async function copyLightningAddress(): Promise<void> {
+function selectDonateTab(method: string): void {
+  for (const tab of donateTabs) {
+    const active = tab.dataset.method === method;
+    tab.classList.toggle('is-active', active);
+    tab.setAttribute('aria-selected', active ? 'true' : 'false');
+  }
+  for (const pane of donatePanes) pane.hidden = pane.dataset.method !== method;
+}
+
+async function copyDonateAddress(btn: HTMLButtonElement): Promise<void> {
+  const address = btn.dataset.copy ?? '';
   let ok = false;
   try {
-    await navigator.clipboard.writeText(LIGHTNING_ADDRESS);
+    await navigator.clipboard.writeText(address);
     ok = true;
   } catch {
     // Fallback for browsers without async clipboard (older iOS Safari).
     try {
       const ta = document.createElement('textarea');
-      ta.value = LIGHTNING_ADDRESS;
+      ta.value = address;
       ta.style.position = 'fixed';
       ta.style.opacity = '0';
       document.body.appendChild(ta);
@@ -855,12 +867,12 @@ async function copyLightningAddress(): Promise<void> {
       ok = false;
     }
   }
-  const label = donateCopy?.querySelector('.donate-copy-label');
+  const label = btn.querySelector('.donate-copy-label');
   if (label) {
-    donateCopy?.classList.add('is-copied');
+    btn.classList.add('is-copied');
     label.textContent = ok ? 'COPIED!' : 'COPY FAILED — LONG-PRESS TO SELECT';
     setTimeout(() => {
-      donateCopy?.classList.remove('is-copied');
+      btn.classList.remove('is-copied');
       label.textContent = 'TAP TO COPY';
     }, 1800);
   }
@@ -868,7 +880,12 @@ async function copyLightningAddress(): Promise<void> {
 
 supportBtn?.addEventListener('click', openDonate);
 donateClose?.addEventListener('click', closeDonate);
-donateCopy?.addEventListener('click', () => { void copyLightningAddress(); });
+for (const tab of donateTabs) {
+  tab.addEventListener('click', () => selectDonateTab(tab.dataset.method ?? 'lightning'));
+}
+for (const btn of donateCopies) {
+  btn.addEventListener('click', () => { void copyDonateAddress(btn); });
+}
 // Backdrop tap closes; taps inside the card do not.
 donateOverlay?.addEventListener('click', e => { if (e.target === donateOverlay) closeDonate(); });
 
