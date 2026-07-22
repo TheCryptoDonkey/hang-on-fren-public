@@ -30,8 +30,9 @@ const POINTS_PER_FUEL = 120;
 const POINTS_PER_ROSE = 400; // rare special
 const POINTS_PER_OVERTAKE = 250;
 const POINTS_PER_NEAR_MISS = 60;
-/** Points banked per second of slide, at full lock and full speed. */
-const POINTS_PER_DRIFT_SECOND = 900;
+/** Points banked per second of slide, at full lock and full speed. Exported
+ *  for the claim service, which derives its score ceiling from it. */
+export const POINTS_PER_DRIFT_SECOND = 900;
 /** A slide has to be committed to pay — a flick of the tail is not a drift. */
 export const MIN_SCORING_DRIFT_S = 0.35;
 

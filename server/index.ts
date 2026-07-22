@@ -33,7 +33,7 @@ import {
 } from 'nostr-tools/nip98';
 import { buildScoreEvent, scoreLevelKey, GAME_ID, GAME_PUBKEY, SCORE_KIND, type RunSummary } from '../src/scoring.js';
 import { DEFAULT_WRITE_RELAYS } from '../src/relays.js';
-import { parseClaim, cleanPlayerName, MAX_DISTANCE_M, STALE_RUN_MS, type ClaimInput } from './claim-rules.js';
+import { parseClaim, cleanPlayerName, MAX_DISTANCE_M, MAX_SPEED_M_PER_S, STALE_RUN_MS, type ClaimInput } from './claim-rules.js';
 import { seedHistoricBestScores } from './historic-scores.js';
 
 const WRITE_RELAYS = loadWriteRelays();
@@ -132,6 +132,7 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
       game_pubkey: gamePubkey,
       expected_game_npub: EXPECTED_GAME_NPUB,
       max_distance_m: MAX_DISTANCE_M,
+      max_speed_m_per_s: Math.round(MAX_SPEED_M_PER_S * 10) / 10,
       write_relays: WRITE_RELAYS,
       claims_seen: claims.size,
       best_scores_tracked: bestScores.size,

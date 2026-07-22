@@ -2,7 +2,7 @@
 // road (road.ts), dynamic world (world.ts), clock economy (timer.ts), scoring
 // (scoring.ts), audio (audio.ts), rendering (render.ts) and HUD (hud.ts).
 
-import { buildTrack, buildStoneTrack, decorateTrack, createPlayer, updatePlayer, resetDrift, speedKph, riderScreenX, enclosureAt, alignFinishToStraight, DEFAULT_TUNING, ROAD, RIDER_FWD, RIDER_SCREEN_FRAC, type DriveInput } from './road.js';
+import { buildTrack, buildStoneTrack, decorateTrack, createPlayer, updatePlayer, resetDrift, speedKph, riderScreenX, enclosureAt, alignFinishToStraight, DEFAULT_TUNING, ROAD, RIDER_FWD, RIDER_SCREEN_FRAC, BOOST_SPEED_MUL, SLING_SPEED_MUL, BEER_SPEED_MUL, type DriveInput } from './road.js';
 import { createWorld, resetWorld, updateWorld, addPickup, addPickupTrail, addHazard, addMarker, signedForward, draftAt, audibleTraffic, getRival, getRivalGapM, retireRival } from './world.js';
 import { createTimer, tickTimer, addRoseTime, addCanTime, timerUrgency, DEFAULT_TIMER } from './timer.js';
 import { createScore, addDistance, addRose, addFuel, addBonus, addStuntBonus, addDrift, driftPayout, penalise, addOvertake, addNearMiss, registerCrash, summarise, type RunSummary } from './scoring.js';
@@ -93,12 +93,12 @@ const INVULN_TIME = 1.4; // grace after remount
 const VOICE_COOLDOWN = 1.3;
 const PICKUP_GRACE = 0.3; // brief crash-immunity when grabbing a pickup
 const ROSE_BOOST_TIME = 4.5; // seconds of nitro after a rose
-const BOOST_SPEED_MUL = 1.4;
+// BOOST_SPEED_MUL lives in road.ts with the base top speed, so the claim
+// service derives its plausibility cap from the same numbers the game runs on.
 // Beer: a cheeky speed-up whose wobbly-vision hangover OUTLASTS the speed —
 // the classic risk/reward trade: take the pace, ride the wobble.
 const BEER_INTERVAL = 34; // a beer rolls onto the road every 34s
 const BEER_SPEED_TIME = 5; // seconds of beer speed-up
-const BEER_SPEED_MUL = 1.3;
 const BEER_WOBBLE_TIME = 8; // seconds of wobbly vision
 // Fly agaric: a few seconds of invincibility inside a full psychedelic trip.
 // It gets its own clock slot (like beer) — buried in the 42s treat lottery it
@@ -138,7 +138,6 @@ const STONE_GRIP_TUNING = { ...DEFAULT_TUNING, driftCreep: 0 };
 const DRAFT_CHARGE_TIME = 1.1; // seconds tucked in for a full charge
 const DRAFT_DECAY_TIME = 0.7; // charge bleed once out of the wake
 const SLING_TIME_MAX = 1.5; // slingshot duration at full charge
-const SLING_SPEED_MUL = 1.22; // top-speed bonus while slingshotting
 const SLING_MIN_CHARGE = 0.55; // needs a committed tuck, not a graze
 const SLING_COOLDOWN = 2.5; // seconds before the next slingshot can fire
 // A gate/finish arch is dropped onto the road this many metres before its

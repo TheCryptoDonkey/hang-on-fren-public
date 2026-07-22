@@ -795,7 +795,23 @@ const DRIFT_KICK = 1.5;
 /** A slide can't end on the step it started (the seed would trip the exit test). */
 const DRIFT_MIN_HOLD = 0.05;
 
-export function createPlayer(maxSpeed = ROAD.segmentLength / (1 / 60) / 1.35): Player {
+/** The bike's base speed ceiling in world units/s (createPlayer's default).
+ *  In metres that is this / UNITS_PER_M ≈ 88.9 m/s — the HUD's "260 km/h" is a
+ *  cosmetic scale (speedKph), not the physics. */
+export const PLAYER_BASE_TOP_SPEED = ROAD.segmentLength / (1 / 60) / 1.35;
+/**
+ * Pickup speed boosts. Each multiplies player.maxSpeed while its clock runs,
+ * and they STACK (rose boost × slingshot × beer can all be live at once), so
+ * the true speed ceiling — and the claim service's plausibility cap derived
+ * from it — is the full product. They live here, next to the base top speed,
+ * precisely so the server can never disagree with the game about how fast an
+ * honest rider can go.
+ */
+export const BOOST_SPEED_MUL = 1.4;
+export const SLING_SPEED_MUL = 1.22; // top-speed bonus while slingshotting
+export const BEER_SPEED_MUL = 1.3;
+
+export function createPlayer(maxSpeed = PLAYER_BASE_TOP_SPEED): Player {
   return {
     z: 0,
     x: 0,

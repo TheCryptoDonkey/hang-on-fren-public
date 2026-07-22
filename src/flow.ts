@@ -19,6 +19,12 @@ export const FLOW_GAINS = {
 
 const TIER_AT = [0, 20, 45, 70, 90] as const;
 const LABELS = ['READY', 'WARM', 'HOT', 'WILD', 'LEGEND'] as const;
+const TIER_MULT_STEP = 0.25;
+
+/** The biggest action multiplier the meter pays (LEGEND tier). The claim
+ *  service derives its score ceiling from this — keep it true to the maths
+ *  in flowMultiplier, never hand-copied. */
+export const MAX_FLOW_MULTIPLIER = 1 + (TIER_AT.length - 1) * TIER_MULT_STEP;
 
 export function createFlow(): FlowState {
   return { value: 0, peak: 0, hold: 0 };
@@ -38,7 +44,7 @@ export function flowLabel(state: FlowState): string {
 
 /** Action-score multiplier. Distance itself stays unmultiplied. */
 export function flowMultiplier(state: FlowState): number {
-  return 1 + flowTier(state) * 0.25;
+  return 1 + flowTier(state) * TIER_MULT_STEP;
 }
 
 /** Add an authored action reward and hold the meter briefly before decay. */

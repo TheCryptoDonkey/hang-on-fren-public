@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseClaim, cleanPlayerName, MAX_DRIFT_POINTS_PER_S, MAX_DRIFTS_PER_S, type ClaimInput } from './claim-rules.js';
+import { parseClaim, cleanPlayerName, MAX_ACTION_POINTS_PER_S, MAX_DRIFT_POINTS_PER_S, MAX_DRIFTS_PER_S, MAX_SPEED_M_PER_S, SCORE_CEILING_FLAT, type ClaimInput } from './claim-rules.js';
 
 const NOW = 1_800_000_000_000;
 
@@ -68,9 +68,20 @@ describe('claim-rules', () => {
   });
 
   it('rejects physically impossible distance', () => {
-    // 8 km in 60 s is 133 m/s — nearly double the bike's top speed.
-    expect(parseClaim(validClaim({ duration_s: 60, started_at: NOW - 70_000 }), NOW)).toMatchObject({ ok: false, error: 'implausible_distance' });
+    // 8 km in 30 s is 267 m/s — beyond even a fully boost-stacked bike.
+    expect(parseClaim(validClaim({ duration_s: 30, started_at: NOW - 40_000 }), NOW)).toMatchObject({ ok: false, error: 'implausible_distance' });
     expect(parseClaim(validClaim({ distance_m: 44_000, duration_s: 600, started_at: NOW - 700_000 }), NOW)).toMatchObject({ ok: false, error: 'implausible_distance' });
+  });
+
+  it('never refuses a run the bike can actually do', () => {
+    // The July 2026 outage in one test: the speed cap sat at 80 m/s while the
+    // bike CRUISES at ~88.9, so every well-ridden run was 422'd as a cheat and
+    // the gamestr board looked dead. The cap must clear the base top speed…
+    expect(MAX_SPEED_M_PER_S).toBeGreaterThan(88.8);
+    // …a clean level-1 sprint just over the old cap (3,400 m in 42 s ≈ 81 m/s):
+    expect(parseClaim(validClaim({ distance_m: 3_400, duration_s: 42, started_at: NOW - 55_000, score: 14_000, level: 1 }), NOW).ok).toBe(true);
+    // …and a boost-stacked stint (rose nitro × slingshot × beer ≈ 150 m/s):
+    expect(parseClaim(validClaim({ distance_m: 6_300, duration_s: 42, started_at: NOW - 55_000, score: 20_000, level: 2 }), NOW).ok).toBe(true);
   });
 
   it('accepts a plausible finish of the shared 42 km grand tour', () => {
@@ -86,6 +97,22 @@ describe('claim-rules', () => {
 
   it('rejects an implausible score for the ground covered', () => {
     expect(parseClaim(validClaim({ score: 999_999 }), NOW)).toMatchObject({ ok: false, error: 'implausible_score' });
+  });
+
+  it('accepts a monster stone-tour score (STONE GRIP pays by the second)', () => {
+    // The best real claim on the board banked 970k over 21 km in 431 s. A
+    // faster rider with better grip uptime scores MORE in LESS time — the
+    // ceiling must never punish that trade.
+    const result = parseClaim(validClaim({
+      tour: 'stone',
+      level: 5,
+      distance_m: 21_000,
+      duration_s: 360,
+      started_at: NOW - 380_000,
+      score: 1_200_000,
+      ended_by: 'finish',
+    }), NOW);
+    expect(result.ok).toBe(true);
   });
 
   it('rejects out-of-range levels', () => {
@@ -160,7 +187,7 @@ describe('claim-rules: powerslides', () => {
       started_at: NOW - duration * 1000 - 20_000,
       distance_m: 8_000,
       drifts: 60,
-      score: 10_000 + 8_000 * 4 + duration * (800 + MAX_DRIFT_POINTS_PER_S) - 1,
+      score: SCORE_CEILING_FLAT + 8_000 * 4 + duration * (MAX_ACTION_POINTS_PER_S + MAX_DRIFT_POINTS_PER_S) - 1,
     });
     expect(parseClaim(driftHeavy, NOW)).toMatchObject({ ok: true });
   });
@@ -172,7 +199,7 @@ describe('claim-rules: powerslides', () => {
       started_at: NOW - duration * 1000 - 20_000,
       distance_m: 8_000,
       drifts: 60,
-      score: 10_000 + 8_000 * 4 + duration * (800 + MAX_DRIFT_POINTS_PER_S) + 1,
+      score: SCORE_CEILING_FLAT + 8_000 * 4 + duration * (MAX_ACTION_POINTS_PER_S + MAX_DRIFT_POINTS_PER_S) + 1,
     });
     expect(parseClaim(absurd, NOW)).toMatchObject({ ok: false, error: 'implausible_score' });
   });
@@ -182,7 +209,7 @@ describe('claim-rules: powerslides', () => {
     // so charging an allowance per claimed drift would let a forged claim mint
     // itself unlimited headroom. You can only be sideways for as long as the run.
     const duration = 60;
-    const overCeiling = 10_000 + 1_000 * 4 + duration * (800 + MAX_DRIFT_POINTS_PER_S) + 5_000;
+    const overCeiling = SCORE_CEILING_FLAT + 1_000 * 4 + duration * (MAX_ACTION_POINTS_PER_S + MAX_DRIFT_POINTS_PER_S) + 5_000;
     const modest = validClaim({ duration_s: duration, distance_m: 1_000, drifts: 1, score: overCeiling });
     const stuffed = validClaim({ duration_s: duration, distance_m: 1_000, drifts: 100, score: overCeiling });
     expect(parseClaim(modest, NOW)).toMatchObject({ ok: false, error: 'implausible_score' });
