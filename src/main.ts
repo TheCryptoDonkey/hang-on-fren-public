@@ -1496,13 +1496,19 @@ function submitRunScore(playerName?: string): void {
       btcUsdCents: btc.usdCents,
     }))
     .then(result => {
+      // Each outcome gets its own words: "the service refused", "the service
+      // never heard about it" and "published as a different key" are different
+      // failures, and blurring them cost days of silent score loss once.
+      const asGuest = result?.signedAs === 'guest-fallback' ? ' — AS GUEST (NOSTR SIGNER OFFLINE)' : '';
       state.submitStatus = result === null
         ? 'SCORE KEPT LOCAL — NO CLAIM SERVICE'
-        : result.status === 'published'
-          ? `SCORE ON GAMESTR ✓  ${result.ok}/${result.total} relays${state.stoneAge ? ' — BC BOARD' : ''}`
-          : 'SCORE ACCEPTED — PUBLISHING SOON';
+        : result.status === 'rejected'
+          ? `GAMESTR REFUSED THE RUN — ${(result.error ?? 'rejected').toUpperCase()}`
+          : result.status === 'published'
+            ? `SCORE ON GAMESTR ✓  ${result.ok}/${result.total} relays${state.stoneAge ? ' — BC BOARD' : ''}${asGuest}`
+            : `SCORE ACCEPTED — PUBLISHING SOON${asGuest}`;
       setTitleNotice(state.submitStatus);
-      if (result !== null) {
+      if (result !== null && result.status !== 'rejected') {
         void fetchGlobalBoard(5, true)
           .then(board => { state.globalBoard = board; })
           .catch(() => undefined);

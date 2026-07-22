@@ -303,35 +303,47 @@ async function publishGuestProfile(stored: StoredGuest): Promise<void> {
   await publishToRelays(event);
 }
 
-/** Sign an arbitrary event template with the active identity (guest local key
- *  or the signet session's signer). Null when the nostr signer can't sign
- *  (auth-only session), declines, or times out. */
+/** Who actually signed: the nostr session, the guest key by choice, or the
+ *  guest key because the nostr session couldn't sign (auth-only proof, closed
+ *  arcade port, declined or timed-out signer). */
+export type SignedAs = 'nostr' | 'guest' | 'guest-fallback';
+
+/**
+ * Sign an arbitrary event template with the active identity. A nostr session
+ * that cannot sign — an auth-only QR proof, an arcade signer whose port has
+ * closed, a declined or timed-out prompt — FALLS BACK to the local guest key
+ * rather than returning nothing: a finished run must never silently stay off
+ * the board because of session state the rider can't see. The caller learns
+ * who signed via `signedAs` and owns telling the rider.
+ */
 async function signWithIdentity(template: {
   kind: number;
   created_at: number;
   tags: string[][];
   content: string;
-}, guestNameHint?: string): Promise<SignedEvent | null> {
+}, guestNameHint?: string, forceGuest = false): Promise<{ event: SignedEvent; signedAs: SignedAs } | null> {
   const identity = getIdentity();
-  if (identity.mode === 'nostr' && signetSession) {
-    if (!sessionCanSign(signetSession)) {
-      console.warn('[gamestr] nostr session is auth-only (no live signer) — score stays local');
-      return null;
+  if (!forceGuest && identity.mode === 'nostr' && signetSession) {
+    if (sessionCanSign(signetSession)) {
+      try {
+        const signed = await Promise.race([
+          signetSession.signer.signEvent(template),
+          new Promise<never>((_, reject) => {
+            setTimeout(() => reject(new Error('signer-timeout')), SIGN_TIMEOUT_MS);
+          }),
+        ]);
+        return { event: signed as SignedEvent, signedAs: 'nostr' };
+      } catch (err) {
+        console.warn('[gamestr] nostr signer failed — falling back to the guest key:', err);
+      }
+    } else {
+      console.warn('[gamestr] nostr session is auth-only (no live signer) — falling back to the guest key');
     }
-    try {
-      const signed = await Promise.race([
-        signetSession.signer.signEvent(template),
-        new Promise<never>((_, reject) => {
-          setTimeout(() => reject(new Error('signer-timeout')), SIGN_TIMEOUT_MS);
-        }),
-      ]);
-      return signed as SignedEvent;
-    } catch {
-      return null;
-    }
+    const guest = loadOrCreateGuest(guestNameHint ?? 'FREN');
+    return { event: finalizeEvent(template, hexToBytes(guest.nsecHex)) as SignedEvent, signedAs: 'guest-fallback' };
   }
   const guest = loadOrCreateGuest(guestNameHint ?? 'FREN');
-  return finalizeEvent(template, hexToBytes(guest.nsecHex)) as SignedEvent;
+  return { event: finalizeEvent(template, hexToBytes(guest.nsecHex)) as SignedEvent, signedAs: 'guest' };
 }
 
 export interface SubmitScoreOptions {
@@ -356,8 +368,14 @@ export interface PublishOutcome {
   total: number;
   /** 'published' = live on relays; 'accepted' = signed but not on relays (all
    *  publishes failed, or the run didn't beat the player's best at that level —
-   *  score events are per-level addressable, so only improvements go out). */
-  status: 'published' | 'accepted';
+   *  score events are per-level addressable, so only improvements go out);
+   *  'rejected' = the claim service refused the run (error says why). */
+  status: 'published' | 'accepted' | 'rejected';
+  /** Service refusal reason, only on 'rejected' (e.g. 'implausible_score'). */
+  error?: string;
+  /** Which key authenticated the claim — 'guest-fallback' means the nostr
+   *  session couldn't sign and the local guest key carried the run instead. */
+  signedAs: SignedAs;
 }
 
 /** Pure: clock offset (server − local) in ms from an HTTP Date header, 0 when
@@ -385,8 +403,11 @@ async function fetchServerClockOffset(): Promise<number> {
 /**
  * Claim the finished run: NIP-98-sign the payload with the PLAYER's key and
  * POST it to the claim service, which validates, signs the score event with
- * the GAME key and publishes it. Null = score stays local (no service, signer
- * declined, or the claim was rejected).
+ * the GAME key and publishes it. Null = score stays local (no service
+ * reachable or no key could sign the auth). A refused claim comes back as
+ * status 'rejected' with the service's reason — it is NOT null, because "the
+ * server said no" and "the server never heard about it" must never wear the
+ * same message again (that disguise hid a three-day outage in July 2026).
  */
 export async function submitScore(summary: RunSummary, opts: SubmitScoreOptions): Promise<PublishOutcome | null> {
   if (summary.score <= 0) return null; // boards ignore zero scores
@@ -395,50 +416,68 @@ export async function submitScore(summary: RunSummary, opts: SubmitScoreOptions)
   // both bounds move together, so the duration/wall-clock relation the service
   // checks is preserved.
   const clockOffset = await fetchServerClockOffset();
-  const claim = {
-    game: GAME_ID,
-    score: summary.score,
-    distance_m: summary.distanceM,
-    duration_s: summary.durationS,
-    started_at: opts.startedAt + clockOffset,
-    finished_at: opts.finishedAt + clockOffset,
-    run_id: opts.runId,
-    roses: summary.roses,
-    overtakes: summary.overtakes,
-    crashes: summary.crashes,
-    top_speed_kph: summary.topSpeedKph,
-    drifts: summary.drifts,
-    level: opts.level,
-    ended_by: opts.endedBy,
-    ...(opts.tour ? { tour: opts.tour } : {}),
-    ...(opts.playerName ? { player_name: opts.playerName } : {}),
-    ...(opts.btcBlock ? { btc_block: opts.btcBlock } : {}),
-    ...(opts.btcUsdCents ? { btc_usd_cents: opts.btcUsdCents } : {}),
-    player_mode: identity.mode,
+
+  // The claim body carries player_mode and is hash-bound into the NIP-98 auth,
+  // so the signing identity must be decided BEFORE the body is built. A nostr
+  // session that can't sign (auth-only proof, closed arcade port) is known now;
+  // a live signer that fails mid-flight retries once with the guest key.
+  const sessionReady = identity.mode === 'nostr' && signetSession !== null && sessionCanSign(signetSession);
+  const attempt = async (mode: IdentityMode): Promise<{ bodyJson: string; auth: SignedEvent; signedAs: SignedAs } | null> => {
+    // mode 'guest' pins the guest key outright (forceGuest) so a retry can
+    // never bounce back to a flaky session signer and de-cohere the body.
+    const claim = {
+      game: GAME_ID,
+      score: summary.score,
+      distance_m: summary.distanceM,
+      duration_s: summary.durationS,
+      started_at: opts.startedAt + clockOffset,
+      finished_at: opts.finishedAt + clockOffset,
+      run_id: opts.runId,
+      roses: summary.roses,
+      overtakes: summary.overtakes,
+      crashes: summary.crashes,
+      top_speed_kph: summary.topSpeedKph,
+      drifts: summary.drifts,
+      level: opts.level,
+      ended_by: opts.endedBy,
+      ...(opts.tour ? { tour: opts.tour } : {}),
+      ...(opts.playerName ? { player_name: opts.playerName } : {}),
+      ...(opts.btcBlock ? { btc_block: opts.btcBlock } : {}),
+      ...(opts.btcUsdCents ? { btc_usd_cents: opts.btcUsdCents } : {}),
+      player_mode: mode,
+    };
+    const bodyJson = JSON.stringify(claim);
+    const url = `${location.origin}${CLAIM_API}`;
+    const signed = await signWithIdentity({
+      kind: NIP98_KIND,
+      created_at: Math.floor((Date.now() + clockOffset) / 1000),
+      content: '',
+      tags: [
+        ['u', url],
+        ['method', 'POST'],
+        ['payload', await sha256Hex(bodyJson)],
+      ],
+    }, opts.playerName, mode === 'guest');
+    if (!signed) return null;
+    // The template said 'nostr' but the guest key signed (live signer died
+    // mid-flight): the body's player_mode no longer matches the auth key.
+    // Rebuild both as guest so the claim is coherent.
+    if (mode === 'nostr' && signed.signedAs !== 'nostr') return attempt('guest');
+    return { bodyJson, auth: signed.event, signedAs: signed.signedAs };
   };
-  const bodyJson = JSON.stringify(claim);
-  const url = `${location.origin}${CLAIM_API}`;
-  const auth = await signWithIdentity({
-    kind: NIP98_KIND,
-    created_at: Math.floor((Date.now() + clockOffset) / 1000),
-    content: '',
-    tags: [
-      ['u', url],
-      ['method', 'POST'],
-      ['payload', await sha256Hex(bodyJson)],
-    ],
-  }, opts.playerName);
-  if (!auth) return null;
+  const prepared = await attempt(sessionReady ? 'nostr' : 'guest');
+  if (!prepared) return null;
+  const signedAs: SignedAs = identity.mode === 'nostr' && prepared.signedAs !== 'nostr' ? 'guest-fallback' : prepared.signedAs;
 
   let res: Response;
   try {
     res = await fetch(CLAIM_API, {
       method: 'POST',
       headers: {
-        authorization: `Nostr ${utf8Base64(JSON.stringify(auth))}`,
+        authorization: `Nostr ${utf8Base64(JSON.stringify(prepared.auth))}`,
         'content-type': 'application/json',
       },
-      body: bodyJson,
+      body: prepared.bodyJson,
     });
   } catch {
     return null; // no claim service reachable — score stays local
@@ -450,14 +489,20 @@ export async function submitScore(summary: RunSummary, opts: SubmitScoreOptions)
     return null;
   }
   if (typeof data !== 'object' || data === null) return null;
-  const result = data as { ok?: unknown; published?: { ok?: unknown; total?: unknown }; status?: unknown };
+  const result = data as { ok?: unknown; error?: unknown; published?: { ok?: unknown; total?: unknown }; status?: unknown };
   if (result.ok !== true) {
     console.warn('[gamestr] claim rejected:', data);
-    return null;
+    return {
+      ok: 0,
+      total: 0,
+      status: 'rejected',
+      error: typeof result.error === 'string' ? result.error : `http_${res.status}`,
+      signedAs,
+    };
   }
   const ok = typeof result.published?.ok === 'number' ? result.published.ok : 0;
   const total = typeof result.published?.total === 'number' ? result.published.total : 0;
-  return { ok, total, status: ok > 0 ? 'published' : 'accepted' };
+  return { ok, total, status: ok > 0 ? 'published' : 'accepted', signedAs };
 }
 
 async function sha256Hex(input: string): Promise<string> {
