@@ -889,7 +889,10 @@ for (const btn of donateCopies) {
 // Backdrop tap closes; taps inside the card do not.
 donateOverlay?.addEventListener('click', e => { if (e.target === donateOverlay) closeDonate(); });
 
-initV4v({ onPaid: () => playVoiceClip(STING.checkpoint) });
+// The donkey says thank you in person — same recorded lines as the ledger.
+const THANKS_VOICES = [assetUrl('sfx/thanks-fren.m4a'), assetUrl('sfx/thanks-legend.m4a')];
+for (const url of THANKS_VOICES) preloadVoiceClip(url);
+initV4v({ onPaid: () => playVoiceClip(THANKS_VOICES[Math.floor(Math.random() * THANKS_VOICES.length)]) });
 
 for (const button of touchControlButtons) {
   button.addEventListener('pointerdown', e => {

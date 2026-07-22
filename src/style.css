@@ -220,6 +220,13 @@ body.donate-open #support-btn { display: none; }
 #donate-overlay[hidden],
 #v4v-overlay[hidden] { display: none; }
 
+.v4v-thanks-img {
+  width: min(60vw, 260px);
+  height: auto;
+  border-radius: 12px;
+  margin: 12px auto;
+  display: block;
+}
 .v4v-bless {
   margin: 0 0 14px;
   color: #ffd23f;
