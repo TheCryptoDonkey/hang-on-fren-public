@@ -29,6 +29,7 @@ import { fetchBtcSnapshot, type BtcSnapshot } from './bitcoin.js';
 import { breakFlow, createFlow, flowLabel, flowMultiplier, gainFlow, tickFlow, FLOW_GAINS } from './flow.js';
 import { RIVAL_TOUR_FINISH_M, resolveRivalResult, type RivalResult } from './rival.js';
 import { gradeStage, overallGrade, type StageResult } from './grade.js';
+import { initV4v, isBlessed, isV4vOpen, openV4v, shouldAskV4v } from './v4v.js';
 
 // Voice one-liners lifted from Neon Sentinel for the special treat pickups.
 const VOICE: Partial<Record<PickupKind, string>> = {
@@ -888,6 +889,8 @@ for (const btn of donateCopies) {
 // Backdrop tap closes; taps inside the card do not.
 donateOverlay?.addEventListener('click', e => { if (e.target === donateOverlay) closeDonate(); });
 
+initV4v({ onPaid: () => playVoiceClip(STING.checkpoint) });
+
 for (const button of touchControlButtons) {
   button.addEventListener('pointerdown', e => {
     if (state.phase !== 'playing') return;
@@ -1324,6 +1327,18 @@ function readInput(): void {
 // ---- run lifecycle ---------------------------------------------------------
 
 function startRun(tour: TourId = selectedTour): void {
+  // The value-for-value ask sits between the title and the road: every
+  // menu-launched run passes through it, retries go straight back out.
+  if (isV4vOpen()) return;
+  if (state.phase === 'title' && shouldAskV4v()) {
+    unlockAudio();
+    openV4v(() => beginRun(tour));
+    return;
+  }
+  beginRun(tour);
+}
+
+function beginRun(tour: TourId = selectedTour): void {
   // Menu navigation and the previous run's lateral momentum must never leak
   // into a fresh race. Both used to make the bike veer with no key held.
   clearAllInput();
@@ -1449,6 +1464,13 @@ function startRun(tour: TourId = selectedTour): void {
     addPopup(state.popups, 'THE TIMELINE BREAKS!', W / 2, H * 0.3, '#ffd23f', 2.4);
     addPopup(state.popups, '600 BILLION YEARS BC', W / 2, H * 0.38, '#8fe6c4', 2.8);
     addPopup(state.popups, 'TWO CAVEMEN · ONE BROKEN TIMELINE', W / 2, H * 0.45, '#ff9d2e', 3.2);
+  }
+  // Patron's blessing: paid within 24 hours → HODL shield armed, nitro lit.
+  if (isBlessed()) {
+    state.shield = true;
+    state.boost = ROSE_BOOST_TIME;
+    addPopup(state.popups, "🙏 PATRON'S BLESSING", W / 2, H * 0.52, '#ffd84a', 2.6);
+    addPopup(state.popups, 'HODL SHIELD ARMED · NITRO LIT', W / 2, H * 0.58, '#8fd0ff', 2.6);
   }
 }
 

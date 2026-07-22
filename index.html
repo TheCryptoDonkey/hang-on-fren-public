@@ -83,6 +83,37 @@
     </div>
   </div>
 
+  <!-- Value-for-value interstitial: shown between the title screen and the
+       run. Patrons ride blessed — HODL shield + nitro at launch, for 24h. -->
+  <div id="v4v-overlay" hidden role="dialog" aria-modal="true" aria-label="Value for value">
+    <div class="donate-card" role="document">
+      <div id="v4v-ask">
+        <h2>VALUE FOR VALUE</h2>
+        <p id="v4v-nudge" class="donate-sub"></p>
+        <div class="donate-qr">
+          <img src="%BASE_URL%qr-lightning.svg" alt="Lightning address QR code" width="200" height="200" />
+        </div>
+        <p class="v4v-bless">🙏 PATRONS RIDE BLESSED — HODL SHIELD + NITRO AT LAUNCH</p>
+        <button id="v4v-addr" class="donate-addr" type="button" aria-label="Copy Lightning address">
+          <span class="donate-addr-text">profusemeat89@walletofsatoshi.com</span>
+          <span class="donate-copy-label">TAP TO COPY · OPENS WALLET</span>
+        </button>
+        <div class="donate-links-row">
+          <a class="donate-link" href="https://geyser.fund/project/forgesworn?hero=geyserannually1" target="_blank" rel="noopener">Geyser</a>
+          <a class="donate-link" href="https://ko-fi.com/brays" target="_blank" rel="noopener">Ko-fi</a>
+        </div>
+        <button id="v4v-paid" class="v4v-primary" type="button">I PAID</button>
+        <button id="v4v-later" class="v4v-ghost" type="button">NEXT TIME</button>
+      </div>
+      <div id="v4v-thanks" hidden>
+        <h2>THANK YOU, FREN</h2>
+        <p class="donate-sub">Sats appreciated. The road remembers.</p>
+        <p class="v4v-bless">🙏 BLESSING ARMED — HODL SHIELD + NITRO AT LAUNCH · 24H</p>
+        <button id="v4v-start" class="v4v-primary" type="button">START THE RIDE</button>
+      </div>
+    </div>
+  </div>
+
   <script type="module" src="/src/main.ts"></script>
 </body>
 </html>

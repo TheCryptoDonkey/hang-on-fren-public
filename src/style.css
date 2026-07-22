@@ -198,11 +198,14 @@ body.donate-open #support-btn { display: none; }
  * its heading, QR and padding would still double-tap-zoom on iOS. pan-y keeps
  * the card scrollable on short screens while stripping the zoom gestures. */
 #donate-overlay,
-#donate-overlay * {
+#donate-overlay *,
+#v4v-overlay,
+#v4v-overlay * {
   touch-action: pan-y;
 }
 
-#donate-overlay {
+#donate-overlay,
+#v4v-overlay {
   position: fixed;
   inset: 0;
   z-index: 40;
@@ -214,7 +217,43 @@ body.donate-open #support-btn { display: none; }
   backdrop-filter: blur(5px);
   overflow-y: auto;
 }
-#donate-overlay[hidden] { display: none; }
+#donate-overlay[hidden],
+#v4v-overlay[hidden] { display: none; }
+
+.v4v-bless {
+  margin: 0 0 14px;
+  color: #ffd23f;
+  font-size: clamp(12px, 3.2vmin, 14px);
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+.v4v-primary {
+  width: 100%;
+  margin: 0 0 10px;
+  padding: 13px 14px;
+  border: none;
+  border-radius: 12px;
+  background: linear-gradient(180deg, #ffe27a, #ffcc33);
+  color: #0a1a12;
+  font-family: inherit;
+  font-size: 16px;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+}
+.v4v-ghost {
+  width: 100%;
+  padding: 10px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.05);
+  color: #eaf6ef;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+}
 
 .donate-card {
   position: relative;
