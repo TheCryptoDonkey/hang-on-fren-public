@@ -1,0 +1,33 @@
+{
+  "fixture": "Locally built client served under consumer origin with private canonical parent, normal keyboard play, all external writes/relay sockets blocked and local simulated claim response. No My Signet, real relay publication or physical acceptance.",
+  "pubkey": "de89e4ed192cbdffa80cfc2be5b9fd0794a226a8938ae2f0d6220b3176d177a9",
+  "score": 4293,
+  "receiptNotSeeded": true,
+  "gameOrScoreStateInjected": false,
+  "automaticApprovalDisablesRetry": true,
+  "pendingHttpDisablesRetry": true,
+  "minimum44pxControls": true,
+  "oneSignatureAndOneClaim": true,
+  "receiptClearedAfterSimulatedPublication": true,
+  "posts": [
+    {
+      "pubkey": "de89e4ed192cbdffa80cfc2be5b9fd0794a226a8938ae2f0d6220b3176d177a9",
+      "runId": "f107c2c4-01ee-43f2-a58f-a041de8673da",
+      "score": 4293,
+      "kind": 27235,
+      "canonicalSignature": true,
+      "payloadHashBound": true
+    }
+  ],
+  "assetFingerprint": {
+    "path": "/assets/index-CGcXZkBA.js",
+    "sha256": "a7e3bb839ccca05a98dd90c18a09a2855cd937345f26a626703f39cf4ce4c64b"
+  },
+  "physicalDevice": false,
+  "actualMySignet": false,
+  "candidateBaseRevision": "e9e37a6",
+  "sourceFingerprints": {
+    "src/nostr.ts": "edd73102a0c1fc2d70f7d4e15b6e87791ecf06e53569f04aa09e6c842537dd8f",
+    "src/main.ts": "4f4a3c421b9cf15b2e1074a02cc83d714dfde36e6d398701ea66876641fcf60b"
+  }
+}

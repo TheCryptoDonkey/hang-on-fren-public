@@ -427,11 +427,33 @@ export function clockOffsetMs(dateHeader: string | null, localNowMs: number): nu
  *  (the claim POST would fail anyway). */
 async function fetchServerClockOffset(): Promise<number> {
   try {
-    const res = await fetch(`${CLAIM_API}/health`, { cache: 'no-store' });
+    const res = await withClaimDeadline(FETCH_TIMEOUT_MS,
+      signal => fetch(`${CLAIM_API}/health`, { cache: 'no-store', signal }));
     return clockOffsetMs(res.headers.get('date'), Date.now());
   } catch {
     return 0;
   }
+}
+
+const CLAIM_TIMEOUT_MS = 15_000;
+const personalClaims = new Map<string, Promise<PublishOutcome | null>>();
+
+function personalClaimKey(pubkey: string, runId: string): string {
+  return `${pubkey}:${runId}`;
+}
+
+export function personalScoreIsPending(pubkey: string, runId: string): boolean {
+  return personalClaims.has(personalClaimKey(pubkey, runId));
+}
+
+async function withClaimDeadline<T>(milliseconds: number, operation: (signal: AbortSignal) => Promise<T>): Promise<T> {
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => { controller.abort(); reject(new Error('claim-timeout')); }, milliseconds);
+  });
+  try { return await Promise.race([operation(controller.signal), timeout]); }
+  finally { clearTimeout(timer); }
 }
 
 /**
@@ -443,7 +465,21 @@ async function fetchServerClockOffset(): Promise<number> {
  * server said no" and "the server never heard about it" must never wear the
  * same message again (that disguise hid a three-day outage in July 2026).
  */
-export async function submitScore(summary: RunSummary, opts: SubmitScoreOptions, identity = getIdentity()): Promise<PublishOutcome | null> {
+export function submitScore(summary: RunSummary, opts: SubmitScoreOptions, identity = getIdentity()): Promise<PublishOutcome | null> {
+  const key = identity.mode === 'nostr' && identity.pubkey
+    ? personalClaimKey(identity.pubkey, opts.runId) : null;
+  const pending = key ? personalClaims.get(key) : undefined;
+  if (pending) return pending;
+  const claim = submitScoreAttempt(structuredClone(summary), structuredClone(opts), { ...identity });
+  if (!key) return claim;
+  const tracked = claim.finally(() => {
+    if (personalClaims.get(key) === tracked) personalClaims.delete(key);
+  });
+  personalClaims.set(key, tracked);
+  return tracked;
+}
+
+async function submitScoreAttempt(summary: RunSummary, opts: SubmitScoreOptions, identity: Identity): Promise<PublishOutcome | null> {
   if (summary.score <= 0) return null; // boards ignore zero scores
   const session = signetSession;
   const epoch = identityEpoch;
@@ -500,25 +536,24 @@ export async function submitScore(summary: RunSummary, opts: SubmitScoreOptions,
   if (identity.mode === 'nostr' && !selectedSessionIsCurrent(identity, session, epoch)) throw new ScoreSigningError();
   const signedAs = prepared.signedAs;
 
-  let res: Response;
+  let response: { res: Response; data: unknown };
   try {
-    res = await fetch(CLAIM_API, {
-      method: 'POST',
-      headers: {
-        authorization: `Nostr ${utf8Base64(JSON.stringify(prepared.auth))}`,
-        'content-type': 'application/json',
-      },
-      body: prepared.bodyJson,
+    response = await withClaimDeadline(CLAIM_TIMEOUT_MS, async signal => {
+      const res = await fetch(CLAIM_API, {
+        method: 'POST',
+        headers: {
+          authorization: `Nostr ${utf8Base64(JSON.stringify(prepared.auth))}`,
+          'content-type': 'application/json',
+        },
+        body: prepared.bodyJson,
+        signal,
+      });
+      return { res, data: await res.json() as unknown };
     });
   } catch {
     return null; // no claim service reachable — score stays local
   }
-  let data: unknown;
-  try {
-    data = await res.json();
-  } catch {
-    return null;
-  }
+  const { res, data } = response;
   if (typeof data !== 'object' || data === null) return null;
   const result = data as { ok?: unknown; error?: unknown; published?: { ok?: unknown; total?: unknown }; status?: unknown };
   if (result.ok !== true) {

@@ -65,3 +65,28 @@ in a new release directory, check the prior release, then atomically switch the
 client symlink. That route changed no API configuration and restarted no API.
 The Actions deployment credential still needs maintenance; no credential or
 hosting policy was changed during this release.
+
+## Submission already in progress
+
+The next client correction shares one pending submission for each personal
+account/run, so a retry cannot prompt the signer or send the same claim twice.
+The title/game-over recovery control shows submission progress and disables
+that run's retry until the original attempt settles. Reconnect remains explicit.
+A stalled clock lookup is bounded to 4.2 seconds; the claim and its response
+body are bounded to 15 seconds. Timeout retains the public receipt and releases
+the attempt for a later explicit retry. Public run details are copied before
+asynchronous work.
+
+All 212 local tests, type checks and client/server builds pass. Two new duplicate
+approval/claim regressions fail on unchanged source and pass after the fix.
+Additional tests cover stalled clock, claim and response-body timeouts, explicit
+retry after timeout and immutable run details. The private browser check uses
+normal keyboard play, a private canonical parent and simulated local claim
+confirmation: the earned 4,293-point run makes exactly one signature and HTTP
+request, retry stays disabled throughout approval and HTTP wait, and confirmed
+publication clears the receipt. Controls remain at least 44 pixels at 390px.
+See [in-flight browser proof](evidence/personal-score-inflight-browser.json).
+
+This candidate is not yet deployed; the public `2c6716f` earned-score recovery
+proof above remains a separate result. Hosted checks and publication of the
+new correction are pending.

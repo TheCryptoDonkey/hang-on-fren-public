@@ -22,7 +22,7 @@ beforeEach(() => {
     ? new Response(JSON.stringify({ ok: true, published: { ok: 1, total: 1 } }))
     : new Response('', { headers: { date: new Date().toUTCString() } })));
 });
-afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
+afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); vi.useRealTimers(); });
 
 async function select(signEvent: (template: Parameters<typeof finalizeEvent>[0]) => Promise<unknown>, key = generateSecretKey(), canSign = true) {
   handoff.consume.mockResolvedValue({ pubkey: getPublicKey(key), method: 'arcade',
@@ -167,4 +167,114 @@ describe('personal score signing', () => {
     expect(signed.pubkey).toBe(getPublicKey(key));
     expect(JSON.parse(String(init?.body)).player_mode).toBe('nostr');
   });
+  it('shares a same-run retry while the original signer approval is pending', async () => {
+    const key = generateSecretKey();
+    let release!: () => void, entered!: () => void;
+    const started = new Promise<void>(resolve => { entered = resolve; });
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const sign = vi.fn(async template => { entered(); await gate; return finalizeEvent(template, key); });
+    const auth = await select(sign, key);
+    const first = auth.submitScore(summary, options);
+    await started;
+    const receipt = (await import('./score-recovery.js')).pendingPersonalScores()[0];
+    const retry = auth.retryPersonalScore(receipt);
+    release();
+    const results = await Promise.all([first, retry]);
+    expect(sign).toHaveBeenCalledOnce();
+    expect(postCount()).toBe(1);
+    expect(results[0]).toEqual(results[1]);
+    expect((await import('./score-recovery.js')).pendingPersonalScores()).toEqual([]);
+  });
+  it('shares a same-run retry while its first claim response is pending', async () => {
+    const key = generateSecretKey();
+    const sign = vi.fn(async template => finalizeEvent(template, key));
+    const auth = await select(sign, key);
+    let release!: () => void, entered!: () => void;
+    const started = new Promise<void>(resolve => { entered = resolve; });
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    vi.mocked(fetch).mockImplementation(async (_url, init) => {
+      if (init?.method !== 'POST') return new Response('');
+      entered(); await gate;
+      return new Response(JSON.stringify({ ok: true, published: { ok: 1, total: 1 } }));
+    });
+    const first = auth.submitScore(summary, options);
+    await started;
+    const receipt = (await import('./score-recovery.js')).pendingPersonalScores()[0];
+    const retry = auth.retryPersonalScore(receipt);
+    release(); await Promise.all([first, retry]);
+    expect(sign).toHaveBeenCalledOnce();
+    expect(postCount()).toBe(1);
+  });
+
+  it('bounds a stalled clock request and still submits the saved run', async () => {
+    vi.useFakeTimers();
+    const key = generateSecretKey();
+    const auth = await select(async template => finalizeEvent(template, key), key);
+    let signal: AbortSignal | undefined;
+    vi.mocked(fetch).mockImplementation(async (_url, init) => {
+      if (init?.method !== 'POST') { signal = init?.signal ?? undefined; return new Promise<Response>(() => {}); }
+      return new Response(JSON.stringify({ ok: true, published: { ok: 1, total: 1 } }));
+    });
+    const first = auth.submitScore(summary, options);
+    await vi.advanceTimersByTimeAsync(4200);
+    expect(signal?.aborted).toBe(true);
+    expect((await first)?.status).toBe('published');
+    expect(auth.personalScoreIsPending(getPublicKey(key), options.runId)).toBe(false);
+  });
+  it('releases a stalled claim for explicit retry without losing its receipt', async () => {
+    vi.useFakeTimers();
+    const key = generateSecretKey();
+    const auth = await select(async template => finalizeEvent(template, key), key);
+    let entered!: () => void, signal: AbortSignal | undefined;
+    const started = new Promise<void>(resolve => { entered = resolve; });
+    vi.mocked(fetch).mockImplementation(async (_url, init) => {
+      if (init?.method !== 'POST') return new Response('');
+      signal = init.signal ?? undefined; entered(); return new Promise<Response>(() => {});
+    });
+    const first = auth.submitScore(summary, options); await started;
+    expect(auth.personalScoreIsPending(getPublicKey(key), options.runId)).toBe(true);
+    await vi.advanceTimersByTimeAsync(15000);
+    expect(await first).toBeNull(); expect(signal?.aborted).toBe(true);
+    expect(auth.personalScoreIsPending(getPublicKey(key), options.runId)).toBe(false);
+    const receipt = (await import('./score-recovery.js')).pendingPersonalScores()[0];
+    expect(receipt.pubkey).toBe(getPublicKey(key));
+    vi.mocked(fetch).mockImplementation(async (_url, init) => init?.method === 'POST'
+      ? new Response(JSON.stringify({ ok: true, published: { ok: 1, total: 1 } })) : new Response(''));
+    expect((await auth.retryPersonalScore(receipt))?.status).toBe('published');
+    expect(postCount()).toBe(2);
+  });
+  it('bounds a stalled response body as well as the claim headers', async () => {
+    vi.useFakeTimers();
+    const key = generateSecretKey();
+    const auth = await select(async template => finalizeEvent(template, key), key);
+    let entered!: () => void;
+    const started = new Promise<void>(resolve => { entered = resolve; });
+    vi.mocked(fetch).mockImplementation(async (_url, init) => {
+      if (init?.method !== 'POST') return new Response('');
+      return { json: async () => { entered(); return new Promise(() => {}); } } as unknown as Response;
+    });
+    const first = auth.submitScore(summary, options); await started;
+    await vi.advanceTimersByTimeAsync(15000);
+    expect(await first).toBeNull();
+    expect(auth.personalScoreIsPending(getPublicKey(key), options.runId)).toBe(false);
+    expect((await import('./score-recovery.js')).pendingPersonalScores()).toHaveLength(1);
+  });
+  it('pins the public run details before asynchronous clock work', async () => {
+    const key = generateSecretKey();
+    const auth = await select(async template => finalizeEvent(template, key), key);
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    vi.mocked(fetch).mockImplementation(async (_url, init) => {
+      if (init?.method !== 'POST') { await gate; return new Response(''); }
+      return new Response(JSON.stringify({ ok: true, published: { ok: 1, total: 1 } }));
+    });
+    const run = { ...summary }, details = { ...options };
+    const first = auth.submitScore(run, details);
+    run.score = 999; details.runId = 'different-run'; release();
+    expect((await first)?.status).toBe('published');
+    const [, init] = vi.mocked(fetch).mock.calls.find(([, init]) => init?.method === 'POST')!;
+    expect(JSON.parse(String(init?.body))).toMatchObject({ score: summary.score, run_id: options.runId });
+    expect((await import('./score-recovery.js')).pendingPersonalScores()).toEqual([]);
+  });
+
 });

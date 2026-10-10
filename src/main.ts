@@ -19,7 +19,7 @@ import { initMusic, preloadMusic, startMusic, currentMusicUrl } from './music.js
 import { paletteAt, stageAt, stageIndexAt, sceneryKitAt, terrainAt, timeOfDayAt, marketPhaseAt, setActiveTour, getActiveTour, levelCount, finishDistanceM, roseRichAt, CHECKPOINT_BONUS, STAGE_M, TOUR_TITLES, type TourId } from './stages.js';
 import { loadSelectedTour, saveSelectedTour } from './progress.js';
 import { appendChar, backspace, cleanName, layout as nameLayout, keyAt as nameKeyAt, drawNameEntry } from './nameentry.js';
-import { connectNostr, fetchGlobalBoard, getIdentity, renameGuest, restoreIdentity, submitScore, retryPersonalScore, ScoreSigningError, useGuestMode, type GlobalScore, type Identity } from './nostr.js';
+import { connectNostr, fetchGlobalBoard, getIdentity, renameGuest, restoreIdentity, submitScore, retryPersonalScore, personalScoreIsPending, ScoreSigningError, useGuestMode, type GlobalScore, type Identity } from './nostr.js';
 import { pendingPersonalScores } from './score-recovery.js';
 import { MODES, loadModeIndex, saveModeIndex } from './difficulty.js';
 import { approach, clamp } from './util.js';
@@ -1591,10 +1591,13 @@ function refreshRecoveryControls(): void {
   savedRunSelect.disabled = recoveryBusy;
   recoveryPanel.hidden = receipts.length === 0 || (state.phase !== 'title' && state.phase !== 'gameover') || state.qualifies || isV4vOpen();
   retryButton.hidden = !own;
-  retryButton.disabled = recoveryBusy;
+  const pending = !!own && personalScoreIsPending(own.pubkey, own.options.runId);
+  retryButton.disabled = recoveryBusy || pending;
   reconnectButton.disabled = recoveryBusy;
   reconnectButton.textContent = (own ?? receipts[0])?.arcade ? 'RECONNECT IN ARCADE' : 'RECONNECT NOSTR';
-  if (!recoveryBusy) recoveryText.textContent = own
+  if (!recoveryBusy) recoveryText.textContent = pending
+    ? 'PERSONAL SCORE SUBMISSION IN PROGRESS — finish the current approval or wait for its result.'
+    : own
     ? `PERSONAL SCORE ${own.summary.score.toLocaleString()} WAITING — retry with this account.`
     : 'PERSONAL SCORE WAITING — reconnect its original Nostr account.';
 }
@@ -1603,7 +1606,7 @@ retryButton.addEventListener('click', () => {
   const identity = getIdentity();
   const receipts = pendingPersonalScores().filter(item => identity.mode === 'nostr' && item.pubkey === identity.pubkey);
   const receipt = receipts.find(item => item.options.runId === selectedSavedRun) ?? receipts[0];
-  if (!receipt) return;
+  if (!receipt || personalScoreIsPending(receipt.pubkey, receipt.options.runId)) return;
   recoveryBusy = true;
   refreshRecoveryControls();
   recoveryText.textContent = 'PUBLISHING PERSONAL SCORE…';
