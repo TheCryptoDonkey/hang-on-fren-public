@@ -1,6 +1,6 @@
 # Arcade personal score recovery
 
-The published `20260722211910` client falls back to a guest key when a personal
+The previous published `20260722211910` client fell back to a guest key when a personal
 Nostr signer fails or cannot sign. Its entry asset is `index-DmrMN_y4.js`,
 SHA-256 `651a54716eb6fbba50020d73fdeda2866e0fd05f0cd1606f2715cc6b1fe61ed6`.
 That can publish a personal run under a different account. Five new regressions
@@ -38,8 +38,18 @@ the claim response. It is not a real earned run, My Signet login or publication.
 Client revision `2c6716f` is now published on the new Hetzner server. All six
 entry/runtime files match its tested artifact; see the
 [public deployment proof](evidence/client-live-2c6716f.json). Hosted unit/build
-runs `38092373260` and `38092377053` pass. An actual earned-score retry and
-physical-phone checks remain separate acceptance gates.
+runs `38092373260` and `38092377053` pass.
+
+An actual published My Signet run now proves earned-score recovery. Closing
+the arcade before normal play left a 4,331-point receipt after signing timed
+out, with no guest fallback or score HTTP attempt. Explicit approval with the
+same account and RETRY SCORE returned HTTP 200, published to six of seven
+relays and cleared the receipt. Independent authority/player/score verification
+and fresh displays in both arcade editions pass; see
+[earned recovery](evidence/hangonfren-earned-recovery-2c6716f.json) and
+[display checks](evidence/hangonfren-earned-recovery-ui-2c6716f.json).
+No game state or receipt was seeded. The 600 browser origin was mapped to
+Hetzner; physical-phone checks remain open.
 
 The existing Deploy workflow now accepts `client_only=true`. That path tests,
 builds and archives the exact branch revision, then publishes only static
