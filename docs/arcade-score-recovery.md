@@ -27,7 +27,11 @@ NIP-98 authorisation for the saved payload. Reconnecting never automatically
 publishes. Controls have a minimum 44-pixel height, preserve receipts across
 reload, and stay hidden during gameplay and name entry.
 
-Local unit, browser and build qualification is recorded alongside this change.
+All 206 unit tests, type checks, client and server builds pass. The browser
+recovery flow and 390-pixel-wide controls also pass; see the
+[local recovery evidence](evidence/arcade-personal-score-recovery.json).
+Multiple saved runs can be selected independently, so a rejected older run does
+not prevent retrying another one. Confirmation removes only the selected run.
 The browser fixture seeds a public receipt, serves the local build under the
 consumer origin, blocks external writes and relay sockets, and simulates only
 the claim response. It is not a real earned run, My Signet login or publication.
