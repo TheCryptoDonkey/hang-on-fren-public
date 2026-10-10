@@ -7,6 +7,11 @@ on:
       - master
   workflow_dispatch:
     inputs:
+      client_only:
+        description: Publish only the static client without API or Pages changes
+        required: false
+        default: false
+        type: boolean
       migrate_scores:
         description: Reconcile historic best scores onto both Gamestr relays
         required: false
@@ -33,6 +38,7 @@ concurrency:
 
 jobs:
   build-pages:
+    if: ${{ !inputs.client_only }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -171,3 +177,12 @@ jobs:
           sudo bash -c 'set -euo pipefail; set -a; . "$1"; set +a; export HANGONFREN_WRITE_RELAYS="$3"; node "$2"' \
             _ /etc/hangonfren-api.env "$STAGED" "$MIGRATION_RELAYS"
           REMOTE
+
+  deploy-client:
+    if: github.event_name == 'workflow_dispatch' && inputs.client_only == true
+    uses: ./.github/workflows/deploy-client.yml
+    secrets:
+      HOF_DEPLOY_HOST: ${{ secrets.HOF_DEPLOY_HOST }}
+      HOF_DEPLOY_ROOT: ${{ secrets.HOF_DEPLOY_ROOT }}
+      HOF_DEPLOY_USER: ${{ secrets.HOF_DEPLOY_USER }}
+      HOF_DEPLOY_SSH_KEY: ${{ secrets.HOF_DEPLOY_SSH_KEY }}

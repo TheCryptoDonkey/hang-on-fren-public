@@ -37,3 +37,10 @@ consumer origin, blocks external writes and relay sockets, and simulates only
 the claim response. It is not a real earned run, My Signet login or publication.
 Public deployment, an actual earned-score retry and physical-phone checks
 remain separate acceptance gates.
+
+The existing Deploy workflow now accepts `client_only=true`. That path tests,
+builds and archives the exact branch revision, then publishes only static
+client files through the existing custom-domain SSH configuration. It skips
+GitHub Pages and API jobs. The release metadata includes the full source
+revision, and each deployment has its own release directory before switching
+the current symlink. No historic-score migration is requested for this fix.

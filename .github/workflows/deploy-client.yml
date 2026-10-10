@@ -1,0 +1,62 @@
+name: Deploy client
+on:
+  workflow_call:
+    secrets:
+      HOF_DEPLOY_HOST:
+        required: true
+      HOF_DEPLOY_ROOT:
+        required: true
+      HOF_DEPLOY_USER:
+        required: true
+      HOF_DEPLOY_SSH_KEY:
+        required: true
+permissions:
+  contents: read
+jobs:
+  deploy-client:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.0
+      - uses: actions/setup-node@v6.4.0
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - name: Build exact client revision
+        env:
+          HOF_SOURCE_REVISION: ${{ github.sha }}
+        run: npm run build
+      - name: Save tested client artifact
+        uses: actions/upload-artifact@v6.0.0
+        with:
+          name: deployed-client
+          path: dist
+      - name: Configure SSH
+        env:
+          DEPLOY_HOST: ${{ secrets.HOF_DEPLOY_HOST }}
+          DEPLOY_SSH_KEY: ${{ secrets.HOF_DEPLOY_SSH_KEY }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/hang-on-fren-deploy
+          chmod 600 ~/.ssh/hang-on-fren-deploy
+          ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts
+      - name: Publish client release
+        env:
+          DEPLOY_HOST: ${{ secrets.HOF_DEPLOY_HOST }}
+          DEPLOY_ROOT: ${{ secrets.HOF_DEPLOY_ROOT }}
+          DEPLOY_USER: ${{ secrets.HOF_DEPLOY_USER }}
+        run: |
+          set -euo pipefail
+          case "$DEPLOY_ROOT" in
+            /*) ;;
+            *) echo 'Expected an absolute deployment root' >&2; exit 1 ;;
+          esac
+          case "$DEPLOY_ROOT" in
+            *[!a-zA-Z0-9_./-]*) echo 'Invalid deployment root' >&2; exit 1 ;;
+          esac
+          release="arcade-${GITHUB_SHA}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          remote="$DEPLOY_ROOT/releases/$release"
+          ssh -i ~/.ssh/hang-on-fren-deploy "$DEPLOY_USER@$DEPLOY_HOST" "mkdir -p '$remote'"
+          rsync -az -e "ssh -i ~/.ssh/hang-on-fren-deploy" dist/ "$DEPLOY_USER@$DEPLOY_HOST:$remote/"
+          ssh -i ~/.ssh/hang-on-fren-deploy "$DEPLOY_USER@$DEPLOY_HOST" "test -s '$remote/index.html' && test -s '$remote/version.json' && ln -sfn '$remote' '$DEPLOY_ROOT/current'"

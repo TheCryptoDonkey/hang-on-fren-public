@@ -2,6 +2,11 @@ import { defineConfig, type Plugin } from 'vite';
 
 // Build stamp baked into the bundle and published as /version.json so a running
 // tab can detect a newer deploy. Mirrors neon-sentinel's convention.
+const SOURCE_REVISION = process.env.HOF_SOURCE_REVISION;
+if (SOURCE_REVISION !== undefined && !/^[a-f0-9]{40}$/.test(SOURCE_REVISION)) {
+  throw new Error('HOF_SOURCE_REVISION must be a full Git revision');
+}
+
 const BUILD_ID = new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 14);
 
 function versionStamp(): Plugin {
@@ -9,7 +14,7 @@ function versionStamp(): Plugin {
     name: 'hang-on-fren-version-stamp',
     apply: 'build',
     generateBundle() {
-      this.emitFile({ type: 'asset', fileName: 'version.json', source: `${JSON.stringify({ build: BUILD_ID })}\n` });
+      this.emitFile({ type: 'asset', fileName: 'version.json', source: `${JSON.stringify({ build: BUILD_ID, ...(SOURCE_REVISION ? { revision: SOURCE_REVISION } : {}) })}\n` });
     },
   };
 }
