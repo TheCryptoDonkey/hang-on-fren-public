@@ -1,0 +1,58 @@
+{
+  "sourceRevision": "328540a3f01dd7bb0450f8d1151c8c8ede5e2595",
+  "version": {
+    "build": "20261010234004",
+    "revision": "328540a3f01dd7bb0450f8d1151c8c8ede5e2595"
+  },
+  "testedRun": 38095785090,
+  "hostedChecks": "success",
+  "files": [
+    {
+      "path": "/",
+      "sha256": "6f417365bb5ccfde2fce973b14c6b524c3a9dd612a5636b43eac51b709f0149f",
+      "status": 200,
+      "matched": true
+    },
+    {
+      "path": "/version.json",
+      "sha256": "0879aa16ebe81e61fe822e83498dfa495f67198abf54c7a6967fa8d989c2126a",
+      "status": 200,
+      "matched": true
+    },
+    {
+      "path": "/assets/index-CGcXZkBA.js",
+      "sha256": "a7e3bb839ccca05a98dd90c18a09a2855cd937345f26a626703f39cf4ce4c64b",
+      "status": 200,
+      "matched": true
+    },
+    {
+      "path": "/assets/index-BRmZg4AQ.css",
+      "sha256": "aa5b47cdf258e97a55ad61ca108d7706e2b370898355db7c8c9ee4bcf73a688c",
+      "status": 200,
+      "matched": true
+    },
+    {
+      "path": "/signet-login.iife.js",
+      "sha256": "237541e0c68dff8bddf84a1c3e7feed1c0753423a832f15adf32e9adb082280a",
+      "status": 200,
+      "matched": true
+    },
+    {
+      "path": "/signet-verify.iife.js",
+      "sha256": "e1e3fbf675428c46cad743debecda96b4ba94de4a2b1930517373f63277d383d",
+      "status": 200,
+      "matched": true
+    }
+  ],
+  "origin": "https://hang-on-fren.playechoseven.com",
+  "checkedAt": "2026-10-10T23:47:22.691695+00:00",
+  "releasePath": "/opt/hang-on-fren/releases/arcade-328540a-38095785090",
+  "previousRelease": "/opt/hang-on-fren/releases/arcade-2c6716f-38092435973",
+  "apiConfigurationChanged": false,
+  "apiRestartRequested": false,
+  "physicalDevice": false,
+  "apiProcessUnchanged": true,
+  "apiMainPidBeforeAndAfter": 480556,
+  "apiActiveSinceBeforeAndAfter": "2026-09-10T06:41:12Z",
+  "clientJsMatchesPrivateNormalPlayFixture": true
+}

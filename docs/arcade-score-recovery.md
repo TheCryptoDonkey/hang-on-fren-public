@@ -87,9 +87,17 @@ request, retry stays disabled throughout approval and HTTP wait, and confirmed
 publication clears the receipt. Controls remain at least 44 pixels at 390px.
 See [in-flight browser proof](evidence/personal-score-inflight-browser.json).
 
-This candidate is not yet deployed; the public `2c6716f` earned-score recovery
-proof above remains a separate result. Hosted runs `38095637805` and `38095640260` pass all 212 tests and builds
-at `53113df`; publication of the new correction remains pending. Reliability
-checks now archive the exact client with full source revision metadata, so the
-checked artifact can be published through established stall access while the
-Actions SSH credential needs maintenance.
+Client revision `328540a` is now public on the new Hetzner box. Both hosted
+checks pass all 212 tests/builds. The deployed branch artifact comes from push
+run `38095785090`; the pull-request artifact correctly identifies its synthetic
+merge instead. All six public entry/runtime files match the branch artifact,
+and its client JS matches the private normal-play browser fixture byte for byte.
+The static release switch changed no API configuration or process: its PID and
+active-since timestamp are unchanged. See
+[public client proof](evidence/client-live-328540a.json).
+
+The earlier actual My Signet earned-score recovery at `2c6716f` remains a
+historical live journey, distinct from the new candidate's private in-flight
+check. Physical checks and maintenance of the Actions SSH credential remain
+open. Reliability checks archive the exact client and full revision metadata
+for publication through established stall access.
