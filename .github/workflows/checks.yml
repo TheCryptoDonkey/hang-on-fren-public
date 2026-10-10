@@ -17,5 +17,15 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm test
-      - run: npm run build
+      - name: Build exact client revision
+        env:
+          HOF_SOURCE_REVISION: ${{ github.sha }}
+        run: npm run build
+      - name: Archive checked client
+        uses: actions/upload-artifact@v6.0.0
+        with:
+          name: checked-client
+          path: dist
+          retention-days: 14
+          if-no-files-found: error
       - run: npm run build:server

@@ -88,5 +88,8 @@ publication clears the receipt. Controls remain at least 44 pixels at 390px.
 See [in-flight browser proof](evidence/personal-score-inflight-browser.json).
 
 This candidate is not yet deployed; the public `2c6716f` earned-score recovery
-proof above remains a separate result. Hosted checks and publication of the
-new correction are pending.
+proof above remains a separate result. Hosted runs `38095637805` and `38095640260` pass all 212 tests and builds
+at `53113df`; publication of the new correction remains pending. Reliability
+checks now archive the exact client with full source revision metadata, so the
+checked artifact can be published through established stall access while the
+Actions SSH credential needs maintenance.
