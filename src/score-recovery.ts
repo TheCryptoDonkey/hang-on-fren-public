@@ -50,36 +50,60 @@ function parseReceipt(value: unknown): PendingPersonalScore | null {
   return { pubkey: receipt.pubkey, summary, options, arcade: receipt.arcade };
 }
 
-export function pendingPersonalScores(): PendingPersonalScore[] {
+function readReceipts(): PendingPersonalScore[] | null {
   try {
     const raw = localStorage.getItem(KEY);
-    if (!raw || raw.length > MAX_BYTES) return [];
+    if (raw === null) return [];
+    if (raw.length > MAX_BYTES) return null;
     const items: unknown = JSON.parse(raw);
-    if (!Array.isArray(items) || items.length > 64) return [];
-    return items.map(parseReceipt).filter((item): item is PendingPersonalScore => item !== null);
-  } catch { return []; }
+    if (!Array.isArray(items) || items.length > 64) return null;
+    const receipts = items.map(parseReceipt);
+    if (receipts.some(item => item === null)) return null;
+    return receipts as PendingPersonalScore[];
+  } catch { return null; }
+}
+
+export function pendingPersonalScores(): PendingPersonalScore[] {
+  return readReceipts() ?? [];
 }
 
 export function retainPersonalScore(receipt: PendingPersonalScore): boolean {
   const safe = parseReceipt(receipt);
   if (!safe) return false;
-  const items = pendingPersonalScores();
+  const items = readReceipts();
+  if (!items) return false;
   const index = items.findIndex(item => item.pubkey === safe.pubkey && item.options.runId === safe.options.runId);
-  if (index >= 0) items[index] = safe;
-  else items.push(safe);
+  // The first completed run remains immutable through reconnect and retry.
+  if (index >= 0) return JSON.stringify(items[index].summary) === JSON.stringify(safe.summary)
+    && JSON.stringify(items[index].options) === JSON.stringify(safe.options);
+  items.push(safe);
   const serialized = JSON.stringify(items);
   if (serialized.length > MAX_BYTES || items.length > 64) return false;
   try { localStorage.setItem(KEY, serialized); return true; } catch { return false; }
 }
 
-export function clearPublishedPersonalScore(pubkey: string, runId: string, expected: { summary: RunSummary; options: SubmitScoreOptions }): void {
-  const confirmed = parseReceipt({ pubkey, summary: expected.summary, options: expected.options, arcade: false });
-  if (!confirmed) return;
-  const items = pendingPersonalScores().filter(item => item.pubkey !== pubkey || item.options.runId !== runId
-    || JSON.stringify(item.summary) !== JSON.stringify(confirmed.summary)
-    || JSON.stringify(item.options) !== JSON.stringify(confirmed.options));
+/** Remove only the exact public receipt the owner reviewed. */
+export function discardPersonalScore(expected: PendingPersonalScore): boolean {
+  const safe = parseReceipt(expected);
+  const items = readReceipts();
+  if (!safe || !items) return false;
+  const index = items.findIndex(item => item.pubkey === safe.pubkey && item.options.runId === safe.options.runId
+    && JSON.stringify(item.summary) === JSON.stringify(safe.summary)
+    && JSON.stringify(item.options) === JSON.stringify(safe.options) && item.arcade === safe.arcade);
+  if (index < 0) return false;
+  items.splice(index, 1);
   try {
     if (items.length) localStorage.setItem(KEY, JSON.stringify(items));
     else localStorage.removeItem(KEY);
-  } catch { /* Leave receipts available if storage cannot be updated. */ }
+    return true;
+  } catch { return false; }
+}
+
+export function clearPublishedPersonalScore(pubkey: string, runId: string, expected: { summary: RunSummary; options: SubmitScoreOptions }): void {
+  const confirmed = parseReceipt({ pubkey, summary: expected.summary, options: expected.options, arcade: false });
+  if (!confirmed) return;
+  const receipt = pendingPersonalScores().find(item => item.pubkey === pubkey && item.options.runId === runId
+    && JSON.stringify(item.summary) === JSON.stringify(confirmed.summary)
+    && JSON.stringify(item.options) === JSON.stringify(confirmed.options));
+  if (receipt) discardPersonalScore(receipt);
 }

@@ -18,7 +18,7 @@ import { GAME_ID, GAME_PUBKEY, GAME_TITLE, SCORE_KIND, type RunSummary } from '.
 import { assetUrl } from './asset-url.js';
 import { DEFAULT_READ_RELAYS, DEFAULT_WRITE_RELAYS } from './relays.js';
 import { consumeArcadeHandoff } from './arcade-handoff.js';
-import { retainPersonalScore, clearPublishedPersonalScore, pendingPersonalScores, type PendingPersonalScore } from './score-recovery.js';
+import { retainPersonalScore, discardPersonalScore, clearPublishedPersonalScore, pendingPersonalScores, type PendingPersonalScore } from './score-recovery.js';
 
 const GUEST_KEY = 'hangonfren:guest:v1';
 const MODE_KEY = 'hangonfren:identity-mode:v1';
@@ -408,6 +408,8 @@ export interface PublishOutcome {
   status: 'published' | 'accepted' | 'rejected';
   /** Service refusal reason, only on 'rejected' (e.g. 'implausible_score'). */
   error?: string;
+  /** An accepted run may be superseded by a better run. */
+  reason?: string;
   /** Which selected identity authenticated the claim. */
   signedAs: SignedAs;
 }
@@ -555,7 +557,7 @@ async function submitScoreAttempt(summary: RunSummary, opts: SubmitScoreOptions,
   }
   const { res, data } = response;
   if (typeof data !== 'object' || data === null) return null;
-  const result = data as { ok?: unknown; error?: unknown; published?: { ok?: unknown; total?: unknown }; status?: unknown };
+  const result = data as { ok?: unknown; error?: unknown; published?: { ok?: unknown; total?: unknown }; status?: unknown; reason?: unknown };
   if (result.ok !== true) {
     console.warn('[gamestr] claim rejected:', data);
     return {
@@ -569,7 +571,21 @@ async function submitScoreAttempt(summary: RunSummary, opts: SubmitScoreOptions,
   const ok = typeof result.published?.ok === 'number' ? result.published.ok : 0;
   const total = typeof result.published?.total === 'number' ? result.published.total : 0;
   if (ok > 0 && identity.mode === 'nostr' && identity.pubkey) clearPublishedPersonalScore(identity.pubkey, opts.runId, { summary, options: opts });
-  return { ok, total, status: ok > 0 ? 'published' : 'accepted', signedAs };
+  return { ok, total, status: ok > 0 ? 'published' : 'accepted', signedAs,
+    ...(typeof result.reason === 'string' ? { reason: result.reason } : {}) };
+}
+
+/** Confirmation must still belong to the same selected account and session. */
+export function discardSavedPersonalScore(receipt: PendingPersonalScore, confirmRemoval: () => boolean): boolean {
+  const identity = getIdentity();
+  const epoch = identityEpoch;
+  if (identity.mode !== 'nostr' || identity.pubkey !== receipt.pubkey ||
+      personalScoreIsPending(receipt.pubkey, receipt.options.runId)) return false;
+  if (!confirmRemoval()) return false;
+  const current = getIdentity();
+  if (identityEpoch !== epoch || current.mode !== 'nostr' || current.pubkey !== receipt.pubkey ||
+      personalScoreIsPending(receipt.pubkey, receipt.options.runId)) return false;
+  return discardPersonalScore(receipt);
 }
 
 export async function retryPersonalScore(receipt: PendingPersonalScore): Promise<PublishOutcome | null> {

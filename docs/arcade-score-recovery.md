@@ -135,3 +135,39 @@ deduplication key and receives `below_best`. The client recalculates server
 clock offset for each retry, so the replacement policy must account for that
 transport correction while preserving the original accepted run and event.
 See [private API baseline](evidence/hangonfren-claim-gap-baseline-110262e.json).
+
+
+## Delayed recovery correction
+
+The replacement API accepts saved runs with fresh canonical NIP-98 rather than
+expiring the original run clock. Durable identity is account/run; a coherent
+clock-offset shift during retry keeps the first accepted run and signed event.
+Changed score, run details or wall interval conflict. Acceptance and publication
+are serialised; the signed event is fsynced to the append-only journal before
+publication. An unconfirmed retry after restart republishes that exact event.
+Confirmed duplicates return the original result without another relay write.
+
+Per-level best-score protection remains in place, including the separate stone
+tour address. A pending run superseded by a higher accepted score cannot publish.
+A higher improvement gets a later event timestamp, avoiding addressable-event
+ID tie-breaking when runs finish within the same second. Historic best scores
+and timestamp-based journal keys remain compatible with API rollback. Confirmed
+legacy records are returned without republishing; an unconfirmed legacy record
+without its signed event fails closed. Corrupt history prevents startup.
+
+The client retains its first public receipt unchanged, preserves malformed
+storage, explains a below-best response, and offers REMOVE SELECTED RUN with
+explicit confirmation. Removal deletes only that exact account/run retry copy,
+keeps other accounts and runs, and does not remove a published score. An ongoing
+submission or changed selected session prevents removal.
+
+All 219 unit tests, type checks and client/server builds pass locally. The
+[private compiled-API gate](evidence/hangonfren-delayed-api-recovery-private.json)
+passes seven-day acceptance, fresh-auth rejection, durable-before-publication,
+restart/same-event retry, clock correction, conflict detection, concurrent
+deduplication, best-score/timestamp protection, stone-tour isolation and legacy
+and corrupt-history checks. Disposable keys, fake relay acknowledgements and
+blocked external network isolate this evidence from live-provider acceptance.
+CI now archives its checked API, exact source/file fingerprints and recovery
+proof alongside the checked client. Deployment and actual long-delay My Signet
+qualification remain outstanding until those artifacts are checked and shipped.

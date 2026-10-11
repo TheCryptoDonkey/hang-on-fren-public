@@ -29,3 +29,21 @@ jobs:
           retention-days: 14
           if-no-files-found: error
       - run: npm run build:server
+      - name: Qualify delayed API recovery without external network
+        run: node tools/claim-recovery-smoke.mjs | tee claim-recovery-proof.json
+      - name: Fingerprint checked API
+        run: node tools/api-manifest.mjs
+      - name: Archive checked API
+        uses: actions/upload-artifact@v6.0.0
+        with:
+          name: checked-api
+          path: server-dist
+          retention-days: 14
+          if-no-files-found: error
+      - name: Archive private recovery proof
+        uses: actions/upload-artifact@v6.0.0
+        with:
+          name: checked-api-recovery
+          path: claim-recovery-proof.json
+          retention-days: 14
+          if-no-files-found: error

@@ -19,7 +19,7 @@ import { initMusic, preloadMusic, startMusic, currentMusicUrl } from './music.js
 import { paletteAt, stageAt, stageIndexAt, sceneryKitAt, terrainAt, timeOfDayAt, marketPhaseAt, setActiveTour, getActiveTour, levelCount, finishDistanceM, roseRichAt, CHECKPOINT_BONUS, STAGE_M, TOUR_TITLES, type TourId } from './stages.js';
 import { loadSelectedTour, saveSelectedTour } from './progress.js';
 import { appendChar, backspace, cleanName, layout as nameLayout, keyAt as nameKeyAt, drawNameEntry } from './nameentry.js';
-import { connectNostr, fetchGlobalBoard, getIdentity, renameGuest, restoreIdentity, submitScore, retryPersonalScore, personalScoreIsPending, ScoreSigningError, useGuestMode, type GlobalScore, type Identity } from './nostr.js';
+import { connectNostr, fetchGlobalBoard, getIdentity, renameGuest, restoreIdentity, submitScore, retryPersonalScore, discardSavedPersonalScore, personalScoreIsPending, ScoreSigningError, useGuestMode, type GlobalScore, type Identity } from './nostr.js';
 import { pendingPersonalScores } from './score-recovery.js';
 import { MODES, loadModeIndex, saveModeIndex } from './difficulty.js';
 import { approach, clamp } from './util.js';
@@ -1563,13 +1563,16 @@ savedRunSelect.addEventListener('change', () => { selectedSavedRun = savedRunSel
 const retryButton = document.createElement('button');
 retryButton.textContent = 'RETRY SCORE';
 const reconnectButton = document.createElement('button');
-for (const button of [retryButton, reconnectButton]) button.style.cssText = 'min-height:44px;padding:8px 12px;margin:2px;border-radius:5px;background:#10273e;color:white;border:1px solid #9fd0ff;font:inherit;cursor:pointer;';
-recoveryPanel.append(recoveryText, savedRunSelect, retryButton, reconnectButton);
+const removeButton = document.createElement('button');
+removeButton.textContent = 'REMOVE SELECTED RUN';
+for (const button of [retryButton, reconnectButton, removeButton]) button.style.cssText = 'min-height:44px;padding:8px 12px;margin:2px;border-radius:5px;background:#10273e;color:white;border:1px solid #9fd0ff;font:inherit;cursor:pointer;';
+recoveryPanel.append(recoveryText, savedRunSelect, retryButton, reconnectButton, removeButton);
 recoveryPanel.hidden = true;
 recoveryPanel.addEventListener('keydown', event => event.stopPropagation());
 document.body.append(recoveryPanel);
 let recoveryBusy = false;
 let recoveryRefreshAt = 0;
+let recoveryNotice: { pubkey: string; runId: string; text: string } | null = null;
 function refreshRecoveryControls(): void {
   const receipts = pendingPersonalScores();
   const identity = getIdentity();
@@ -1593,10 +1596,14 @@ function refreshRecoveryControls(): void {
   retryButton.hidden = !own;
   const pending = !!own && personalScoreIsPending(own.pubkey, own.options.runId);
   retryButton.disabled = recoveryBusy || pending;
+  removeButton.hidden = !own;
+  removeButton.disabled = recoveryBusy || pending;
   reconnectButton.disabled = recoveryBusy;
   reconnectButton.textContent = (own ?? receipts[0])?.arcade ? 'RECONNECT IN ARCADE' : 'RECONNECT NOSTR';
   if (!recoveryBusy) recoveryText.textContent = pending
     ? 'PERSONAL SCORE SUBMISSION IN PROGRESS — finish the current approval or wait for its result.'
+    : own && recoveryNotice?.pubkey === own.pubkey && recoveryNotice.runId === own.options.runId
+    ? recoveryNotice.text
     : own
     ? `PERSONAL SCORE ${own.summary.score.toLocaleString()} WAITING — retry with this account.`
     : 'PERSONAL SCORE WAITING — reconnect its original Nostr account.';
@@ -1611,11 +1618,34 @@ retryButton.addEventListener('click', () => {
   refreshRecoveryControls();
   recoveryText.textContent = 'PUBLISHING PERSONAL SCORE…';
   void retryPersonalScore(receipt).then(result => {
+    const rejectionNotice = result?.status === 'rejected'
+      ? ({ run_conflict: 'This run differs from its first accepted details. Its saved copy is kept; you can remove it if you no longer need it.',
+          recovery_event_missing: 'The older server record cannot be retried safely. Its saved copy is kept; you can remove it if you no longer need it.' } as Record<string, string>)[result.error ?? '']
+      : undefined;
+    recoveryNotice = rejectionNotice
+      ? { pubkey: receipt.pubkey, runId: receipt.options.runId, text: rejectionNotice }
+      : result?.reason === 'below_best'
+      ? { pubkey: receipt.pubkey, runId: receipt.options.runId, text: 'A better run is already accepted. This run cannot replace it. You can remove its saved retry copy.' }
+      : null;
     setTitleNotice(result?.status === 'published' ? 'PERSONAL SCORE ON GAMESTR ✓'
       : result?.status === 'rejected' ? `PERSONAL SCORE REFUSED — ${result.error ?? 'REJECTED'}`
       : 'PERSONAL SCORE STILL WAITING');
   }).catch(() => setTitleNotice('PERSONAL SCORE WAITING — RECONNECT THE ORIGINAL ACCOUNT'))
     .finally(() => { recoveryBusy = false; refreshRecoveryControls(); });
+});
+removeButton.addEventListener('click', () => {
+  if (recoveryBusy) return;
+  const identity = getIdentity();
+  const receipt = pendingPersonalScores().find(item => identity.mode === 'nostr' && item.pubkey === identity.pubkey
+    && item.options.runId === selectedSavedRun);
+  if (!receipt) return;
+  let confirmed = false;
+  const removed = discardSavedPersonalScore(receipt, () => confirmed = window.confirm(
+    `Remove this saved ${receipt.summary.score.toLocaleString()}-point run?\n\nThis removes its retry copy from this device and cannot be undone. Any published score stays on the leaderboard.`));
+  if (removed) recoveryNotice = null;
+  else if (confirmed) recoveryNotice = { pubkey: receipt.pubkey, runId: receipt.options.runId,
+    text: 'The saved run could not be removed. Its retry copy is still kept on this device.' };
+  refreshRecoveryControls();
 });
 reconnectButton.addEventListener('click', () => {
   if (recoveryBusy) return;

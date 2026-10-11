@@ -56,8 +56,8 @@ describe('claim-rules', () => {
     expect(parseClaim(validClaim({ tour: 'stone', level: 0 }), NOW)).toMatchObject({ ok: false, error: 'invalid_level' });
   });
 
-  it('rejects stale, future and inverted run clocks', () => {
-    expect(parseClaim(validClaim({ started_at: NOW - 14 * 60 * 1000, finished_at: NOW - 11 * 60 * 1000 }), NOW)).toMatchObject({ ok: false, error: 'stale_run' });
+  it('accepts saved runs but rejects future and inverted run clocks', () => {
+    expect(parseClaim(validClaim({ started_at: NOW - 7 * 86400000 - 190000, finished_at: NOW - 7 * 86400000 }), NOW).ok).toBe(true);
     expect(parseClaim(validClaim({ finished_at: NOW + 2 * 60 * 1000 }), NOW)).toMatchObject({ ok: false, error: 'invalid_run_clock' });
     expect(parseClaim(validClaim({ started_at: NOW, finished_at: NOW - 1 }), NOW)).toMatchObject({ ok: false, error: 'invalid_run_clock' });
   });

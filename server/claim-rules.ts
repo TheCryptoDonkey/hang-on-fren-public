@@ -10,9 +10,6 @@ import { BEER_SPEED_MUL, BOOST_SPEED_MUL, PLAYER_BASE_TOP_SPEED, SLING_SPEED_MUL
 import { MODES } from '../src/difficulty.js';
 import { MAX_FLOW_MULTIPLIER } from '../src/flow.js';
 
-/** Milliseconds a finished run may lag before a claim is refused. Generous —
- *  a board run only submits after the callsign is typed. */
-export const STALE_RUN_MS = 10 * 60 * 1000;
 export const FUTURE_SLACK_MS = 60 * 1000;
 /** The clock economy makes multi-hour runs impossible; an hour is generous. */
 export const MAX_DURATION_S = 60 * 60;
@@ -81,7 +78,7 @@ export interface ClaimInput {
   distance_m: number;
   /** In-game run time (the pause-free clock). */
   duration_s: number;
-  /** Wall-clock ms — NIP-98 freshness ties the claim to the actual run. */
+  /** Original run clock. Fresh NIP-98 authorises submission, including retries. */
   started_at: number;
   finished_at: number;
   run_id: string;
@@ -152,7 +149,8 @@ export function parseClaim(body: unknown, now = Date.now()): ParseResult {
   if (claim.started_at >= claim.finished_at || claim.finished_at > now + FUTURE_SLACK_MS) {
     return { ok: false, status: 422, error: 'invalid_run_clock' };
   }
-  if (now - claim.finished_at > STALE_RUN_MS) return { ok: false, status: 422, error: 'stale_run' };
+  // A saved run can be retried days later. Authentication freshness is checked
+  // separately; moving the run's clock forward would lose its original details.
   // Run time can never EXCEED the wall clock (pausing only stretches the wall
   // side), so the check is one-sided with a little skew slack.
   if (claim.duration_s * 1000 > claim.finished_at - claim.started_at + 5000) {

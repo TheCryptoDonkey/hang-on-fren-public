@@ -1,0 +1,28 @@
+{
+  "ok": true,
+  "runAgeDays": 7,
+  "restartRecovery": true,
+  "eventDurableBeforePublish": true,
+  "sameEventRepublished": true,
+  "coherentClockCorrectionKeepsFirstRun": true,
+  "changedRunConflict": true,
+  "concurrentDeduplication": true,
+  "higherScoreTimestampOrdered": true,
+  "lowerScoreCannotReplaceBest": true,
+  "supersededPendingCannotPublish": true,
+  "stoneTourIndependent": true,
+  "freshNip98Required": true,
+  "legacyJournalKeyCompatible": true,
+  "legacyConfirmedNoRepublish": true,
+  "legacyMissingEventFailsClosed": true,
+  "corruptHistoryFailsClosed": true,
+  "eventClaimMismatchFailsClosed": true,
+  "externalNetwork": false,
+  "liveProvider": false,
+  "compiledApiSha256": "574804517b634be06d3ff401edd21ed2969257c8527107ddefd202f79d7a87c5",
+  "sourceFilesSha256": {
+    "server/index.ts": "4bfb72f2e846c362e958314e5ac5b1dbf6607785c3d73c2331f68a0e19ea480c",
+    "server/claim-rules.ts": "aba7f9244a9169ef7d102a0ef25c9fa8c2ec5e103999a537081f2884e8bbb758",
+    "tools/claim-recovery-smoke.mjs": "84c5be79338d2bd075916e49e53a917eb95eaf8c48ef5be3388168d346f5d02d"
+  }
+}

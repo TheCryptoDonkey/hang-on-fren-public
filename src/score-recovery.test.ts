@@ -1,5 +1,5 @@
 import { beforeEach, afterEach, expect, it, vi } from 'vitest';
-import { clearPublishedPersonalScore, pendingPersonalScores, retainPersonalScore, type PendingPersonalScore } from './score-recovery.js';
+import { clearPublishedPersonalScore, discardPersonalScore, pendingPersonalScores, retainPersonalScore, type PendingPersonalScore } from './score-recovery.js';
 const key = 'hangonfren:pending-personal-scores:v1';
 const receipt: PendingPersonalScore = {
   pubkey: 'a'.repeat(64), arcade: true,
@@ -43,7 +43,33 @@ it('does not evict existing receipts when the queue is full', () => {
 it('does not clear a changed receipt when an earlier claim confirms publication', () => {
   retainPersonalScore(receipt);
   const changed = { ...receipt, summary: { ...receipt.summary, score: 200 } };
-  retainPersonalScore(changed);
+  localStorage.setItem(key, JSON.stringify([changed]));
   clearPublishedPersonalScore(receipt.pubkey, receipt.options.runId, receipt);
   expect(pendingPersonalScores()).toEqual([changed]);
+});
+
+it('keeps the first receipt immutable when a duplicate changes the run', () => {
+  retainPersonalScore(receipt);
+  expect(retainPersonalScore({ ...receipt, summary: { ...receipt.summary, score: 200 } })).toBe(false);
+  expect(pendingPersonalScores()).toEqual([receipt]);
+});
+it('preserves malformed storage rather than replacing it with a fresh queue', () => {
+  localStorage.setItem(key, 'unreadable receipt history');
+  expect(retainPersonalScore(receipt)).toBe(false);
+  expect(discardPersonalScore(receipt)).toBe(false);
+  expect(localStorage.getItem(key)).toBe('unreadable receipt history');
+});
+it('removes only the exact selected receipt and preserves other accounts and runs', () => {
+  const otherAccount = { ...receipt, pubkey: 'b'.repeat(64) };
+  const otherRun = { ...receipt, options: { ...receipt.options, runId: 'another-run' } };
+  [receipt, otherAccount, otherRun].forEach(retainPersonalScore);
+  expect(discardPersonalScore({ ...receipt, summary: { ...receipt.summary, score: 200 } })).toBe(false);
+  expect(discardPersonalScore(receipt)).toBe(true);
+  expect(pendingPersonalScores()).toEqual([otherAccount, otherRun]);
+});
+it('reports a failed removal and preserves the receipt when storage cannot change', () => {
+  retainPersonalScore(receipt);
+  vi.spyOn(localStorage, 'removeItem').mockImplementation(() => { throw new Error('blocked'); });
+  expect(discardPersonalScore(receipt)).toBe(false);
+  expect(pendingPersonalScores()).toEqual([receipt]);
 });

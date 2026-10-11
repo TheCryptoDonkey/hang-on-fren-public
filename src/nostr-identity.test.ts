@@ -278,3 +278,44 @@ describe('personal score signing', () => {
   });
 
 });
+
+describe('owner removal of saved runs', () => {
+  it('requires explicit confirmation and the current original account', async () => {
+    const auth = await select(async () => { throw new Error('closed-parent'); });
+    await expect(auth.submitScore(summary, options)).rejects.toThrow();
+    const recovery = await import('./score-recovery.js');
+    const receipt = recovery.pendingPersonalScores()[0];
+    expect(auth.discardSavedPersonalScore(receipt, () => false)).toBe(false);
+    expect(recovery.pendingPersonalScores()).toHaveLength(1);
+    auth.useGuestMode();
+    const confirmation = vi.fn(() => true);
+    expect(auth.discardSavedPersonalScore(receipt, confirmation)).toBe(false);
+    expect(confirmation).not.toHaveBeenCalled();
+    await auth.restoreIdentity();
+    expect(auth.discardSavedPersonalScore(receipt, () => true)).toBe(true);
+    expect(recovery.pendingPersonalScores()).toEqual([]);
+  });
+  it('does not remove a run when the selected session changes during confirmation', async () => {
+    const auth = await select(async () => { throw new Error('closed-parent'); });
+    await expect(auth.submitScore(summary, options)).rejects.toThrow();
+    const recovery = await import('./score-recovery.js');
+    const receipt = recovery.pendingPersonalScores()[0];
+    expect(auth.discardSavedPersonalScore(receipt, () => { auth.useGuestMode(); return true; })).toBe(false);
+    expect(recovery.pendingPersonalScores()).toEqual([receipt]);
+  });
+  it('cannot remove an in-flight claim or open its confirmation', async () => {
+    let release!: () => void; let entered!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const started = new Promise<void>(resolve => { entered = resolve; });
+    const auth = await select(async () => { entered(); await gate; throw new Error('closed-parent'); });
+    const attempt = auth.submitScore(summary, options);
+    await started;
+    const recovery = await import('./score-recovery.js');
+    const receipt = recovery.pendingPersonalScores()[0];
+    const confirmation = vi.fn(() => true);
+    expect(auth.discardSavedPersonalScore(receipt, confirmation)).toBe(false);
+    expect(confirmation).not.toHaveBeenCalled();
+    release(); await expect(attempt).rejects.toThrow();
+    expect(recovery.pendingPersonalScores()).toEqual([receipt]);
+  });
+});
