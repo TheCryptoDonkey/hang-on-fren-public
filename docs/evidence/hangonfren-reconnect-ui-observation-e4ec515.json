@@ -1,0 +1,79 @@
+{
+  "actualMySignet": true,
+  "physicalDevice": false,
+  "failedPhase": "reconnect-selected-account-hang-on-fren",
+  "errorType": "TimeoutError",
+  "normallyEarnedRuns": 0,
+  "diagnostics": [
+    {
+      "label": "signer",
+      "origin": "https://mysignet.app",
+      "headings": [
+        "Security & Backup"
+      ],
+      "signerStatuses": [],
+      "outgoing": {
+        "REQ": 22,
+        "CLOSE": 22,
+        "EVENT:30078": 1
+      },
+      "incoming": {
+        "EOSE": 21
+      }
+    },
+    {
+      "label": "approval",
+      "origin": "https://mysignet.app",
+      "headings": [
+        "Sign In",
+        "Signed in"
+      ],
+      "signerStatuses": [],
+      "outgoing": {
+        "REQ": 10,
+        "CLOSE": 9,
+        "EVENT:24133": 8,
+        "EVENT:1059": 1
+      },
+      "incoming": {
+        "EOSE": 8,
+        "EVENT:24133": 8,
+        "OK": 9
+      }
+    },
+    {
+      "label": "arcade",
+      "origin": "https://arcade.600.wtf",
+      "headings": [
+        "Hang On, Fren",
+        "GAMESTR.IO LEADERBOARD"
+      ],
+      "signerStatuses": [
+        "SIGNER CONNECTED"
+      ],
+      "outgoing": {
+        "REQ": 19,
+        "EVENT:24133": 18,
+        "CLOSE": 7
+      },
+      "incoming": {
+        "EVENT:30762": 52,
+        "EOSE": 13,
+        "OK": 15,
+        "EVENT:24133": 22,
+        "EVENT:5555": 471,
+        "EVENT:1059": 1
+      }
+    },
+    {
+      "label": "game",
+      "origin": null,
+      "headings": null,
+      "signerStatuses": null,
+      "outgoing": null,
+      "incoming": null
+    }
+  ],
+  "productCauseEstablished": false,
+  "driverUiReadinessNeedsQualification": true
+}

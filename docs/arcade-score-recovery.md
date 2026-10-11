@@ -199,3 +199,25 @@ Lightning settlement remain open. See
 [API activation](evidence/hangonfren-api-live-e4ec515.json),
 [private checked client](evidence/hangonfren-recovery-checked-e4ec515.json) and
 [checked private API recovery](evidence/hangonfren-api-recovery-checked-e4ec515.json).
+
+
+## Current HOF delayed provider check
+
+The published `e4ec515` client retains a normally earned 4,331-point personal
+receipt after parent closure and through the eleven-minute delay. Explicit
+original-account My Signet reconnect then times out before the game is reopened
+for retry. The approval page remains at Login Request, with no outgoing auth
+messages in its captured traffic; the arcade shows RECONNECTING. A read-only
+API history check confirms no accepted row for this disposable account. This
+neither qualifies delayed live publication nor demonstrates an API age rejection.
+The private seven-day/restart API gate remains qualified separately. The cause
+of the provider reconnect timeout is not established. See
+[bounded live failure evidence](evidence/hangonfren-earned-delayed-recovery-failure-e4ec515.json).
+
+
+A follow-up check stops before gameplay while its captured My Signet UI shows
+Signed in and the arcade shows SIGNER CONNECTED. That observation does not prove
+the failure's cause, but requires checking the driver's readiness assumptions.
+The next bounded driver observes connected, approval and PIN states instead of
+assuming the approval button must remain visible. Its outcome remains pending;
+see [UI observation](evidence/hangonfren-reconnect-ui-observation-e4ec515.json).
