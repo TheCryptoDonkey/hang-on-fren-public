@@ -171,3 +171,31 @@ blocked external network isolate this evidence from live-provider acceptance.
 CI now archives its checked API, exact source/file fingerprints and recovery
 proof alongside the checked client. Deployment and actual long-delay My Signet
 qualification remain outstanding until those artifacts are checked and shipped.
+
+
+## Checked Hang On Fren correction published
+
+Hosted branch run `38121444118` passes at `e4ec515`, as does the separate
+pull-request check. The exact checked client passes a private browser journey
+covering parent closure, reload, wrong-account protection, selected-run retry,
+44px controls at 390px, cancelled and confirmed removal, preservation of other
+accounts, and readable below-best, run-conflict and missing-legacy-event messages.
+Simulated claim responses and seeded public receipts remain explicitly private
+fixtures. Its entry JavaScript matches the now-public file byte for byte.
+
+The checked client and API are published on the new Hetzner box: all 149 static
+files and both API files match the checked artifacts. A read-only preflight loads
+the existing claim history with relay publication disabled. The intentional API
+restart preserves configuration metadata, game authority and all five original
+history rows; its private rollback backup remains available. API health and all
+six public startup/runtime files pass. No DNS configuration was changed.
+
+This supersedes the ten-minute expiry and cached-unconfirmed-replay gap described
+above. Actual long-delay My Signet journeys are now running against this release
+and Neon `046a822`; their outcome is still unqualified. The earlier real HOF
+`328540a` journey remains historical evidence. Physical signers, controllers and
+Lightning settlement remain open. See
+[public client verification](evidence/hangonfren-live-e4ec515.json),
+[API activation](evidence/hangonfren-api-live-e4ec515.json),
+[private checked client](evidence/hangonfren-recovery-checked-e4ec515.json) and
+[checked private API recovery](evidence/hangonfren-api-recovery-checked-e4ec515.json).
