@@ -228,3 +228,25 @@ normal gameplay or a delayed receipt exists. This leaves current HOF delayed
 provider recovery unqualified; no live HOF test remains running. Its cause is
 unestablished and the API is not exercised by this attempt. See
 [initial approval timeout](evidence/hangonfren-initial-approval-timeout-e4ec515.json).
+
+
+## Current actual delayed My Signet recovery
+
+Published client/API `e4ec515` now pass a real desktop My Signet delayed
+recovery journey. A fresh disposable account normally earns 4,732 points
+after the arcade parent closes. Signing failure retains the first receipt
+with zero claim HTTP attempts. The receipt remains byte-for-byte unchanged
+through a 662,518-ms delay (over eleven minutes). Explicit original-account
+My Signet reconnect and selected retry produce one canonical NIP-98 claim,
+HTTP 200 and six of seven relay acknowledgements. Positive publication
+clears the exact receipt; an independent relay read verifies authority,
+player and score. Both fresh arcade edition displays show the correct score
+and attribution. No game or score state is injected. The 600 browser origin
+is forced to Hetzner; physical acceptance and public DNS cutover remain open.
+
+The bounded approval driver observes late PIN, approval and connected states,
+validates the signed account/origin proof and visible menu readiness. Earlier
+failed provider journeys remain recorded; the successful journey does not
+establish every earlier failure's cause. See
+[earned delayed recovery](evidence/hangonfren-earned-delayed-recovery-e4ec515.json)
+and [fresh displays](evidence/hangonfren-earned-delayed-recovery-ui-e4ec515.json).

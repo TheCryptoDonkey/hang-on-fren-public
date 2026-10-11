@@ -1,0 +1,204 @@
+{
+  "origin": "https://arcade.600.wtf",
+  "arcadeRevision": "4aa7661d9d18887021c1b044747980dc091c2bf6",
+  "pubkey": "e6baf3becc95c6242713f8b15e35ba33aa8c007b65bf9f1464eff51898b905bb",
+  "actualMySignet": true,
+  "physicalDevice": false,
+  "forcedHetznerOrigin": true,
+  "complete": true,
+  "explicitReconnectRequestBeforeEachGame": true,
+  "gameOrScoreStateInjected": false,
+  "lightningPaymentTest": false,
+  "closedParent": true,
+  "sameAccountEarnedRetry": true,
+  "receiptNotSeeded": true,
+  "runs": [
+    {
+      "delayedRunAgeMs": 662518,
+      "originalReceiptUnchangedAfterDelay": true,
+      "game": "hang-on-fren",
+      "gameOrigin": "https://hang-on-fren.playechoseven.com",
+      "gameRevision": "e4ec515c37cac48cb114f0314fc53bf9b2948211",
+      "gameRevisionProven": true,
+      "assetFingerprints": [
+        {
+          "path": "/assets/index-C22w-CIe.js",
+          "sha256": "894b596836af817a1c092dbae26aad46e016643a9649f8aeaef4ae844256b591"
+        }
+      ],
+      "playerPubkey": "e6baf3becc95c6242713f8b15e35ba33aa8c007b65bf9f1464eff51898b905bb",
+      "score": 4732,
+      "eventId": "fdd9060438969ff418898f0b045dd36a308fa051f345acf28ff94ff90e176603",
+      "reviewedAuthority": "51312d91ac6fc6e35005c23656b0effa159c89e4b21e56e054d5af52adc7c272",
+      "canonicalNip98Signatures": 1,
+      "fragmentRemoved": true,
+      "openerRemoved": true,
+      "responseProof": [
+        {
+          "status": 200,
+          "ok": true,
+          "eventId": "fdd9060438969ff418898f0b045dd36a308fa051f345acf28ff94ff90e176603",
+          "published": {
+            "ok": 6,
+            "total": 7
+          }
+        }
+      ],
+      "signatureVerified": true,
+      "earnedReceipt": {
+        "pubkey": "e6baf3becc95c6242713f8b15e35ba33aa8c007b65bf9f1464eff51898b905bb",
+        "summary": {
+          "score": 4732,
+          "distanceM": 2399,
+          "fuel": 0,
+          "roses": 0,
+          "overtakes": 6,
+          "nearMisses": 2,
+          "crashes": 4,
+          "bestRoseStreak": 0,
+          "topSpeedKph": 260,
+          "drifts": 0,
+          "bestDriftS": 0,
+          "durationS": 42,
+          "endedBy": "time"
+        },
+        "options": {
+          "runId": "0b14d7d4-89c4-4cf2-9ec9-ba0ec4d3100e",
+          "level": 1,
+          "startedAt": 1791707440916,
+          "finishedAt": 1791707482911,
+          "endedBy": "time",
+          "playerName": "TESTFREN",
+          "tour": "grand",
+          "btcBlock": 970890,
+          "btcUsdCents": 8296100
+        },
+        "arcade": true
+      },
+      "receiptClearedAfterPublication": true,
+      "parentClosedBeforeRun": true,
+      "event": {
+        "content": "TESTFREN scored 4732 points over 2.4 km on Hang On, Fren (level 1).",
+        "created_at": 1791708168,
+        "id": "fdd9060438969ff418898f0b045dd36a308fa051f345acf28ff94ff90e176603",
+        "kind": 30762,
+        "pubkey": "51312d91ac6fc6e35005c23656b0effa159c89e4b21e56e054d5af52adc7c272",
+        "sig": "bcb792fa2965182ce4dd54dc094685f9fc9a6487595301d5b63aafdaf96c8895ee46734867fb4c75504be0eaa8ba6c06f237af1c0cdb6f09b0dc68b3138eba3e",
+        "tags": [
+          [
+            "d",
+            "hangonfren:e6baf3becc95c6242713f8b15e35ba33aa8c007b65bf9f1464eff51898b905bb:1"
+          ],
+          [
+            "game",
+            "hangonfren"
+          ],
+          [
+            "score",
+            "4732"
+          ],
+          [
+            "p",
+            "e6baf3becc95c6242713f8b15e35ba33aa8c007b65bf9f1464eff51898b905bb"
+          ],
+          [
+            "state",
+            "final"
+          ],
+          [
+            "distance",
+            "2399"
+          ],
+          [
+            "roses",
+            "0"
+          ],
+          [
+            "overtakes",
+            "6"
+          ],
+          [
+            "drifts",
+            "0"
+          ],
+          [
+            "crashes",
+            "4"
+          ],
+          [
+            "duration",
+            "42"
+          ],
+          [
+            "top_speed_kph",
+            "260"
+          ],
+          [
+            "ended_by",
+            "time"
+          ],
+          [
+            "title",
+            "Hang On, Fren"
+          ],
+          [
+            "level",
+            "1"
+          ],
+          [
+            "r",
+            "https://hang-on-fren.playechoseven.com/"
+          ],
+          [
+            "source",
+            "hang-on-fren.playechoseven.com"
+          ],
+          [
+            "platform",
+            "web"
+          ],
+          [
+            "t",
+            "arcade"
+          ],
+          [
+            "t",
+            "racer"
+          ],
+          [
+            "t",
+            "hangonfren"
+          ],
+          [
+            "run_id",
+            "0b14d7d4-89c4-4cf2-9ec9-ba0ec4d3100e"
+          ],
+          [
+            "player",
+            "TESTFREN"
+          ],
+          [
+            "playerName",
+            "TESTFREN"
+          ],
+          [
+            "playerMode",
+            "nostr"
+          ],
+          [
+            "btc_block",
+            "970890"
+          ],
+          [
+            "btc_usd_cents",
+            "8296100"
+          ],
+          [
+            "tour",
+            "grand"
+          ]
+        ]
+      }
+    }
+  ]
+}
