@@ -101,3 +101,37 @@ historical live journey, distinct from the new candidate's private in-flight
 check. Physical checks and maintenance of the Actions SSH credential remain
 open. Reliability checks archive the exact client and full revision metadata
 for publication through established stall access.
+
+
+## Current published My Signet recovery
+
+Published client `328540a` now passes an actual My Signet earned-score recovery.
+A fresh disposable account earned 4,331 points through normal keyboard play after
+the arcade parent closed. Signing failure retained its personal receipt without
+a score HTTP attempt. The explicit RECONNECT IN ARCADE control, same-account
+approval and RETRY SCORE produced one canonical NIP-98 signature and HTTP 200
+with five of seven relay acknowledgements. Positive publication cleared the
+receipt. Independent event verification and fresh displays in both editions pass.
+No game state or receipt was seeded. See
+[earned recovery](evidence/hangonfren-earned-recovery-328540a.json) and
+[display checks](evidence/hangonfren-earned-recovery-ui-328540a.json).
+The 600 browser origin was mapped to Hetzner; this does not prove its DNS cutover.
+Physical phones, wallet settlement and a real retry after ten minutes remain open.
+
+The separately running API still rejects finished runs older than ten minutes.
+Its unconfirmed replay returns the cached zero acknowledgements without
+republishing, and lower scores intentionally do not replace a higher score for
+the same player/tour/level. These are separate recovery gaps: a backend correction
+must preserve that per-level leaderboard protection while making retry durable.
+The current client-only deployment has not changed that API policy.
+
+
+A private compiled-API check reproduces these gaps with disposable keys and all
+external network traffic blocked. A seven-day-old run receives `422 stale_run`.
+An unconfirmed fresh claim, followed by process restart and a relay fixture now
+accepting events, still returns zero acknowledgements without another score
+publication. A coherent 500ms shift to both run timestamps creates another
+deduplication key and receives `below_best`. The client recalculates server
+clock offset for each retry, so the replacement policy must account for that
+transport correction while preserving the original accepted run and event.
+See [private API baseline](evidence/hangonfren-claim-gap-baseline-110262e.json).
