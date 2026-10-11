@@ -219,5 +219,12 @@ A follow-up check stops before gameplay while its captured My Signet UI shows
 Signed in and the arcade shows SIGNER CONNECTED. That observation does not prove
 the failure's cause, but requires checking the driver's readiness assumptions.
 The next bounded driver observes connected, approval and PIN states instead of
-assuming the approval button must remain visible. Its outcome remains pending;
+assuming the approval button must remain visible. Current live qualification remains pending;
 see [UI observation](evidence/hangonfren-reconnect-ui-observation-e4ec515.json).
+
+
+The subsequent UI-state check times out at initial real relay approval, before
+normal gameplay or a delayed receipt exists. This leaves current HOF delayed
+provider recovery unqualified; no live HOF test remains running. Its cause is
+unestablished and the API is not exercised by this attempt. See
+[initial approval timeout](evidence/hangonfren-initial-approval-timeout-e4ec515.json).
