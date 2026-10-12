@@ -1,0 +1,73 @@
+{
+  "apiHealth": {
+    "status": 200,
+    "ok": true,
+    "signerConfigured": true,
+    "publishEnabled": true,
+    "claimsSeen": 5
+  },
+  "origin": "https://hang-on-fren.playechoseven.com",
+  "revision": "e4ec515c37cac48cb114f0314fc53bf9b2948211",
+  "version": {
+    "build": "20261011072823",
+    "revision": "e4ec515c37cac48cb114f0314fc53bf9b2948211"
+  },
+  "checkedWorkflowRun": 38121444118,
+  "checkedWorkflowConclusion": "success",
+  "files": [
+    {
+      "path": "/index.html",
+      "sha256": "3ccdf93f76726a995125cdb79ee2b9021572fc3e6cf78e8592b50019e7b64a6c",
+      "status": 200,
+      "cacheControl": "no-cache"
+    },
+    {
+      "path": "/version.json",
+      "sha256": "c268edd42330a9818e4bc04577c8ed0f65656d94ce97fae2c55c1e8c7e38fd0f",
+      "status": 200,
+      "cacheControl": "no-cache"
+    },
+    {
+      "path": "/signet-login.iife.js",
+      "sha256": "237541e0c68dff8bddf84a1c3e7feed1c0753423a832f15adf32e9adb082280a",
+      "status": 200,
+      "cacheControl": null
+    },
+    {
+      "path": "/signet-verify.iife.js",
+      "sha256": "e1e3fbf675428c46cad743debecda96b4ba94de4a2b1930517373f63277d383d",
+      "status": 200,
+      "cacheControl": null
+    },
+    {
+      "path": "/assets/index-C22w-CIe.js",
+      "sha256": "894b596836af817a1c092dbae26aad46e016643a9649f8aeaef4ae844256b591",
+      "status": 200,
+      "cacheControl": "public, max-age=31536000, immutable"
+    },
+    {
+      "path": "/assets/index-BRmZg4AQ.css",
+      "sha256": "aa5b47cdf258e97a55ad61ca108d7706e2b370898355db7c8c9ee4bcf73a688c",
+      "status": 200,
+      "cacheControl": "public, max-age=31536000, immutable"
+    }
+  ],
+  "actualPublicDns": true,
+  "staticClientOnly": false,
+  "apiPid": 1168004,
+  "apiRestarted": true,
+  "apiEnvironmentChanged": false,
+  "apiSha256": "574804517b634be06d3ff401edd21ed2969257c8527107ddefd202f79d7a87c5",
+  "gameAuthorityUnchanged": true,
+  "oldHistoryRowsPreserved": 5,
+  "browserStartup": true,
+  "viewport": {
+    "width": 390,
+    "height": 844
+  },
+  "externalWritesBlocked": true,
+  "actualMySignet": false,
+  "physicalDevice": false,
+  "paymentSettlement": false,
+  "at": "2026-10-11T07:33:33.872Z"
+}

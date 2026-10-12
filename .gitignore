@@ -18,3 +18,4 @@ art-originals/*
 !art-originals/art/
 !art-originals/pickups/
 server-dist/
+/qr-browser-proof.json

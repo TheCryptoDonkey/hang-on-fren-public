@@ -1,0 +1,27 @@
+{
+  "arcadeRevision": "4aa7661d9d18887021c1b044747980dc091c2bf6",
+  "playerPubkey": "c9f620ccd3c50bcfa0faa79cf3311d536752d71807b603b32c5f54a87db21b4a",
+  "physicalDevice": false,
+  "results": [
+    {
+      "origin": "https://arcade.600.wtf",
+      "forcedHetznerOrigin": true,
+      "game": "hang-on-fren",
+      "eventId": "0b8764fe9cf4a5712374999cd0e7850ab0a298cab7fabf57752e5a19f3b03e1e",
+      "playerPubkey": "c9f620ccd3c50bcfa0faa79cf3311d536752d71807b603b32c5f54a87db21b4a",
+      "score": 4331,
+      "attribution": "REVIEWED GAME AUTHORITY",
+      "actualRelayRead": true
+    },
+    {
+      "origin": "https://gamestr.62-238-98-53.sslip.io",
+      "forcedHetznerOrigin": false,
+      "game": "hang-on-fren",
+      "eventId": "0b8764fe9cf4a5712374999cd0e7850ab0a298cab7fabf57752e5a19f3b03e1e",
+      "playerPubkey": "c9f620ccd3c50bcfa0faa79cf3311d536752d71807b603b32c5f54a87db21b4a",
+      "score": 4331,
+      "attribution": "REVIEWED GAME AUTHORITY",
+      "actualRelayRead": true
+    }
+  ]
+}

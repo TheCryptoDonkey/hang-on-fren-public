@@ -1,0 +1,646 @@
+{
+  "revision": "d6ea31b608788b6f64c8693885eff2f559f68697",
+  "origin": "https://hang-on-fren.playechoseven.com",
+  "version": {
+    "build": "20261012021234",
+    "revision": "d6ea31b608788b6f64c8693885eff2f559f68697"
+  },
+  "checkedWorkflowRun": 38194848370,
+  "checkedWorkflowConclusion": "success",
+  "files": [
+    {
+      "path": "art/billboard-donkey-cake.webp",
+      "sha256": "ac5ed748ecc4c7bbbdb37d9f05257ed8ff9039ae768abe032ab4d6dcd05beac6"
+    },
+    {
+      "path": "art/billboard-rose.webp",
+      "sha256": "0d6c0d9a791cb970e7bde2fccf068b3a3ae031e5d7f0b2178a0c92596445ad31"
+    },
+    {
+      "path": "art/car-banger.webp",
+      "sha256": "725291348253ddd343b908528bfbb07290e9b9b86f6d9c3818b449acd1905071"
+    },
+    {
+      "path": "art/car-bentley.webp",
+      "sha256": "8a55ecb915b87cf20b5034b6fbe3e359ec5a6192ee1d86106d77198e5c768a96"
+    },
+    {
+      "path": "art/car-buggy.webp",
+      "sha256": "7e077ff95ddb5e10271823d91165a7466306edea868bc02fa25a70a368562731"
+    },
+    {
+      "path": "art/car-bus.webp",
+      "sha256": "143aa441d908163f46e4be67ea081ed8f639a42cf9c336fe9362f73fc4e4fa25"
+    },
+    {
+      "path": "art/car-camper.webp",
+      "sha256": "7576d449d361f4c4d80b2b7efe6b6541a086e455a3e828fb3d2477e07c84cf0e"
+    },
+    {
+      "path": "art/car-classic.webp",
+      "sha256": "4ec977c93998d7d027331e4aa757f498a83520fef6785a46ac7d6d1c4d3cbd7e"
+    },
+    {
+      "path": "art/car-ferrari.webp",
+      "sha256": "aa0412a256c844252ab7ad5ca369d0d43de7d2e0e041c2f75e0a915af91ecbae"
+    },
+    {
+      "path": "art/car-firetruck.webp",
+      "sha256": "cb4c618890e3615213211a2aece2a3934181cdf93252d5636d5eca1f4903ac32"
+    },
+    {
+      "path": "art/car-jeep.webp",
+      "sha256": "b5914daca051accb431eff09cc4e65fa6b14bf7973c559327a81481f0f7d695d"
+    },
+    {
+      "path": "art/car-lambo.webp",
+      "sha256": "13d9478b9c0fb55f46b087287fa09e9c46a37e9d9ebd395fc6db18d8134a3066"
+    },
+    {
+      "path": "art/car-pickup.webp",
+      "sha256": "b7448569e46e3716e84c1474643fa6ce5d07fd370c2d3ce904d8dbb7be0fc991"
+    },
+    {
+      "path": "art/car-plough.webp",
+      "sha256": "627a12bc8255ba8f38fc7d5139bb51978751182344ddd97c18ec02cf5a377e9c"
+    },
+    {
+      "path": "art/car-police.webp",
+      "sha256": "515e3a2a270993f98bb7747983670ca9c8ea762236adddb1e2fdf60083cf68d5"
+    },
+    {
+      "path": "art/car-porsche.webp",
+      "sha256": "dd984bd7332884ba5fe55ba91625013d02388639a6e7f7a1ba3cbe2283f21abd"
+    },
+    {
+      "path": "art/car-taxi.webp",
+      "sha256": "5989f4cccad5c9ccc3ebfa3c94f2c16816751968d2f0fee114ce25ee20fcea01"
+    },
+    {
+      "path": "art/car-tractor.webp",
+      "sha256": "d69331a52a805c61de749ddc93cca92b2dc01e0f18f7b8d4bf376fb3e1bb16ad"
+    },
+    {
+      "path": "art/car-van.webp",
+      "sha256": "59d39641288278706fe7b4ff5bcd531422a967c545a4c314a67460fbde735919"
+    },
+    {
+      "path": "art/caveman-lean-right.webp",
+      "sha256": "75fcd3785f31a40c09f308f29d2a94fde33e34a4317b726deaee38ea3ddb273c"
+    },
+    {
+      "path": "art/caveman-straight-2.webp",
+      "sha256": "843652c55d24129a0935b5de2ae9b4aa1c2b1f012012f56a07ada1dbb85bc038"
+    },
+    {
+      "path": "art/caveman-straight.webp",
+      "sha256": "fffa4df00d1720740a284d05113e51b106d63519f6b2aebf9702d5d0ce02eba7"
+    },
+    {
+      "path": "art/caveman-wipeout-2.webp",
+      "sha256": "0054397fdfaa3c52815c42a69712a32a6e7dd119bb42ff669fde4dc4bf57cd54"
+    },
+    {
+      "path": "art/caveman-wipeout-3.webp",
+      "sha256": "73ea07d1ae4f4cbe80640d8b959b7c55d5def35ca25ea8fa2b9dbb771711be78"
+    },
+    {
+      "path": "art/caveman-wipeout.webp",
+      "sha256": "ba664143e6943475fcdcbae7db2b71c43e766bca74af65c0d02d3d12572467c6"
+    },
+    {
+      "path": "art/dino-raptor.webp",
+      "sha256": "be0783577adc1d3257edb3815852bbbe48f709ab4f920d1f337c8a2a14b818cd"
+    },
+    {
+      "path": "art/dino-trex.webp",
+      "sha256": "2586a09d4fb23649de06636e6dad47964ff8aff594a9a79d6fc6553efc483353"
+    },
+    {
+      "path": "art/finish-line-cavewomen.webp",
+      "sha256": "f970461e4da25abc868a50c28a776c2367c4a8fef114aa86fb022f12bbbb6590"
+    },
+    {
+      "path": "art/finish-line-girls.webp",
+      "sha256": "8fce1d79a5ec1a95c06c77c8d7e7a34a0b6679e6463bc6f98cae3e55bfbfa6de"
+    },
+    {
+      "path": "art/hazard-hole.webp",
+      "sha256": "d741d3f0c69770cb3a716049d6b7e7ae736c28c1c208b640310fbe3e9b32132b"
+    },
+    {
+      "path": "art/hero-lean-left.webp",
+      "sha256": "08d095e24278909f45696f4534f832e452e7c4ff91639ad582a1a258a8e06d04"
+    },
+    {
+      "path": "art/hero-lean-right.webp",
+      "sha256": "977d9f2dd2af0336b32fc0f490c7dffed1cc19c9918c3069851b1310c76723d8"
+    },
+    {
+      "path": "art/hero-straight.webp",
+      "sha256": "9d693300540b86f1fbaba3abb0c256e8b439c8339c51fe973675d99b5127e649"
+    },
+    {
+      "path": "art/hero-wipeout.webp",
+      "sha256": "5a76b56ba21c42b58b60f380f213b45111cc14a99b6adebbd0bfdefcef69fde0"
+    },
+    {
+      "path": "art/horizon-alpine.webp",
+      "sha256": "2ccb4938cfa75e784875cd2e3ffc2e74a6c0628990495af0198770e99fd76179"
+    },
+    {
+      "path": "art/horizon-autumn.webp",
+      "sha256": "522b5d05f4e66e48f1a17a20180566a6e0977e7bb507388a3794139737170186"
+    },
+    {
+      "path": "art/horizon-beach.webp",
+      "sha256": "08d1e3f7a92d5a835e1ac67cd100598579cd24412cf85227dc0c80712b05171d"
+    },
+    {
+      "path": "art/horizon-city.webp",
+      "sha256": "cbffc26c80e5b2176e418774530264a68fa42f495b9db199b5ef82d5e6e12b6f"
+    },
+    {
+      "path": "art/horizon-day.webp",
+      "sha256": "ed9f8897c29c7c96821f196c5d5eaba786d2e336301dfbf10d121e6ecea59ba8"
+    },
+    {
+      "path": "art/horizon-desert.webp",
+      "sha256": "4ea55db039946cc61beb223fe8bc0949b281ac6ce89799c1454450ab41800b9a"
+    },
+    {
+      "path": "art/horizon-finale.webp",
+      "sha256": "d7305f5d0558811cfddd3b998e940f0c216cfd4412520f67b78d37c1d0d4b8ce"
+    },
+    {
+      "path": "art/horizon-jurassic-eruption.webp",
+      "sha256": "4f66d9229e8f0effcdeda425bac35adf5b25a52e59ecf1a833165924b5ab7b61"
+    },
+    {
+      "path": "art/horizon-jurassic-night.webp",
+      "sha256": "842e0dd300116b680fb550a3999b26da5d3fc8f5253ec7151aec0109d6e00d27"
+    },
+    {
+      "path": "art/horizon-jurassic.webp",
+      "sha256": "c7ad81d95037b4d758db2a7e447b61acedf51623d7233c2a99a98ecfd6c6ee3f"
+    },
+    {
+      "path": "art/horizon-lake.webp",
+      "sha256": "e7f506ea3ac082894220e1aca63987ca66da0bd154a082bd9f01b6c374a4ee04"
+    },
+    {
+      "path": "art/horizon-mallorca.webp",
+      "sha256": "ecb697fae6c1c8b5d261e132a24063e3128103048c663c3d82018c7e8726d964"
+    },
+    {
+      "path": "art/horizon-manchester.webp",
+      "sha256": "3eec4d2f66bdfc2985ae0c411dc4b36198a4a41dff438bad0c09146a469aa61d"
+    },
+    {
+      "path": "art/horizon-prague.webp",
+      "sha256": "2a47330d7d18e58cc041f4ad2070e30829b9ddca1b3055849ea8326fd800bc83"
+    },
+    {
+      "path": "art/horizon-tajmahal.webp",
+      "sha256": "835a09b8fa4e7b3d4515f8c326fd9c7d18dc266f74a069b1ceaf0f00e60f3172"
+    },
+    {
+      "path": "art/horizon-valley.webp",
+      "sha256": "cb0bbeabd8652de8c261f496e0309cf8920b70f05a71e245dff0b4f4d08ceced"
+    },
+    {
+      "path": "art/horizon-volcano.webp",
+      "sha256": "ff9495fc59ad2217e6c48491671c49d1f9e770b0f9770f4c74b174834bdc9219"
+    },
+    {
+      "path": "art/mammoth.webp",
+      "sha256": "10402f8791bdbcf715b3b5e01f08c78e848cf5c3d816a6a936d27611c78d68af"
+    },
+    {
+      "path": "art/pickup-crystal.webp",
+      "sha256": "ba07e86e742f2e0fc645c66a7f635ee6d67927a9c148f736e4a9f5ea45ffe02f"
+    },
+    {
+      "path": "art/pickup-joint.webp",
+      "sha256": "1fb085331d97864ed2b9dc974264e8b9f44298e26e27cd7dbb66f3959e2036fd"
+    },
+    {
+      "path": "art/pickup-petrol.webp",
+      "sha256": "08a91d9a2a98df1f056890723aaca908102ea82cbbf2d9fc809bd9d3a1347c7c"
+    },
+    {
+      "path": "art/pickup-pill.webp",
+      "sha256": "b2d45a34bae4137e245c6d59262a1c73f965f4a29f1224c41db435db4b164088"
+    },
+    {
+      "path": "art/pickup-shield.webp",
+      "sha256": "bed44d59528d9759c42b3ac2b1ed065c4a5eaff8b4695ea36c369fcd0744aa22"
+    },
+    {
+      "path": "art/prop-adobe.webp",
+      "sha256": "f7fc7807caf8331a688a7b18200f71b8e551737fcc02056594dcea1e16fbe033"
+    },
+    {
+      "path": "art/prop-barn.webp",
+      "sha256": "086e6ffdd9e03e32156adad1848cadc98f2895ac7538020aa3cee825e8db76eb"
+    },
+    {
+      "path": "art/prop-beachhut.webp",
+      "sha256": "0837219af7c178eb18fa3f1cc5beed784fa23f281e11744e7cff767a6ad98b32"
+    },
+    {
+      "path": "art/prop-blossom.webp",
+      "sha256": "58d8e0203d15ce8974edbbae57afd2106ca8ee68d149fa2231f768fa042c19e4"
+    },
+    {
+      "path": "art/prop-bones.webp",
+      "sha256": "e39d5e243b6ddf9ba1eec0f465062b8e42d2468dbdc338de8949a065a7433499"
+    },
+    {
+      "path": "art/prop-cactus.webp",
+      "sha256": "a0aae7c6fc6cc338704c527cfaba141c3f98cc03575653f5aa525bd458e25e9b"
+    },
+    {
+      "path": "art/prop-chalet.webp",
+      "sha256": "9efd5ae5e5067a1faa4522379e5645271c5e48bf68c4080dc855f6fbd21a837d"
+    },
+    {
+      "path": "art/prop-clocktower.webp",
+      "sha256": "e9ce27a97a9c573a75070198679a76eb1da7a81104e52ff4a11b2e89501da9f0"
+    },
+    {
+      "path": "art/prop-coconut.webp",
+      "sha256": "72829e8ef90f3cb1f8bb5245ce4936babec9f36188308fa2241a256b93a8f142"
+    },
+    {
+      "path": "art/prop-cypress.webp",
+      "sha256": "a8de85bf763b478a8aed981fc96e329d61170102e7b126480c5417d0a8193998"
+    },
+    {
+      "path": "art/prop-deadtree.webp",
+      "sha256": "33f787ffda08017dd355a4d8d33e0728fc03bfb0e4e1ed1f72201f269ef53f75"
+    },
+    {
+      "path": "art/prop-fern.webp",
+      "sha256": "0d630d57f8f9cd3046917b7b3c410473f951bf54a57391f0244ef91587d15dc6"
+    },
+    {
+      "path": "art/prop-finish-decorated.webp",
+      "sha256": "c3c9690327155aa23e583f0a650c7788bafe815bb4b92f3483b0e794814c0ffe"
+    },
+    {
+      "path": "art/prop-fir.webp",
+      "sha256": "3f6bd368ed7661d99a822cfc5f2f823d0a37e7db0f8a523ec5c524638e81662f"
+    },
+    {
+      "path": "art/prop-flowers.webp",
+      "sha256": "86c6ff4f1ef75c43f1ca8ff04f2881e18b3479c0e1e3775f5e62044de7fab5c6"
+    },
+    {
+      "path": "art/prop-gate.webp",
+      "sha256": "ad60accee10a0690ccb375d39b14db4e72837c5bbc1c5be56090830f8a9432b3"
+    },
+    {
+      "path": "art/prop-lamp.webp",
+      "sha256": "a608dffd146d185ec8c1e2a468e5d17e273983003f2735df3715299363c4859c"
+    },
+    {
+      "path": "art/prop-lavarock.webp",
+      "sha256": "2061ca6815db975eb3d74aea2efa872fda2ef08379580e67e37923a666604055"
+    },
+    {
+      "path": "art/prop-lighthouse.webp",
+      "sha256": "f2cf11e73abccd73613c4d3db1581a339c485c0497dfa889b3c5bcc5ddcac4d0"
+    },
+    {
+      "path": "art/prop-maple.webp",
+      "sha256": "1af84b29b3b0259254438f09de0850e3fa8a7ff26674601ec842933a17e5e2b8"
+    },
+    {
+      "path": "art/prop-mill.webp",
+      "sha256": "d6562b30fbe9199c1534e607131751bc61e2741aab472cd1cd8e0c22240c9df4"
+    },
+    {
+      "path": "art/prop-neon.webp",
+      "sha256": "a82781be1f3a12d505086b23cc4b497f75c1fb7163322902d38b92d5af2e0657"
+    },
+    {
+      "path": "art/prop-pagoda.webp",
+      "sha256": "db435d57f19cf454c48f319436894b07f613a6b2229583321ed91f6bcb4c89c4"
+    },
+    {
+      "path": "art/prop-palm.webp",
+      "sha256": "7146ac22057e655202d29f47fbf5b74f3386af4689bd3f0306a7ad4f73a9c9fc"
+    },
+    {
+      "path": "art/prop-parasol.webp",
+      "sha256": "095bb153af5ac13498a14829ca4539f4c902438287d73c49ba8aa872d5712f26"
+    },
+    {
+      "path": "art/prop-pine.webp",
+      "sha256": "7c377ae54ad19256910f87740a40c1c5fe3061da5a06bf5fe79c2342fadab4a8"
+    },
+    {
+      "path": "art/prop-reed.webp",
+      "sha256": "816c4d60d37ec2211cacc5066b1b85dc9bd5544d57f0c244d507cd0b09666839"
+    },
+    {
+      "path": "art/prop-sign.webp",
+      "sha256": "91187eff5f70d7a02fcc010eb7543d7950799313a9a6613d38f739bfa1bd335a"
+    },
+    {
+      "path": "art/prop-skyscraper.webp",
+      "sha256": "1203e8355c2fc81e380ee653d85196823aca831a7a2055db1a62a0bab863953a"
+    },
+    {
+      "path": "art/prop-tajmahal.webp",
+      "sha256": "d9b5b74f63d07e35e390c6bd7f487d2be1f623f5a7dbcc6627aacd397cea213e"
+    },
+    {
+      "path": "art/prop-villa.webp",
+      "sha256": "51bd8f5a87ebd023f7a9bd8245fac7ee8ed00a425105a043d3cc8a8d92285e79"
+    },
+    {
+      "path": "art/prop-volcano.webp",
+      "sha256": "128cc3830267affbb0105908611619693a838a80cc89068561100635d647ab91"
+    },
+    {
+      "path": "art/prop-windmill.webp",
+      "sha256": "b03006f8ef0aef0c2591084c01600c1d3262f9fba4cc4bd1328b0c90ea7470e0"
+    },
+    {
+      "path": "art/scooter-rival.webp",
+      "sha256": "c6e03293c729dd4b44ed035fc74a3e506158559cec3a6bc26410c8bb62b3e856"
+    },
+    {
+      "path": "art/texture-ash.webp",
+      "sha256": "6092392a2a156134f9464a29d8a3838161dcdd47bd802d3172bfc4ce9371cc6f"
+    },
+    {
+      "path": "art/texture-asphalt.webp",
+      "sha256": "f21a661068a835e6cb0ce11769c6fd2fedf3d7378c3aaedfa4f235f14f246638"
+    },
+    {
+      "path": "art/texture-grass.webp",
+      "sha256": "30cd38fe323f457fb40b70d9033f46ef36d022f20693f50aaae4a9e636e77cf0"
+    },
+    {
+      "path": "art/texture-leaves.webp",
+      "sha256": "c48318415c227e39218bedd12fb41027b1b000b218a47978a03913b89c790bf0"
+    },
+    {
+      "path": "art/texture-rock.webp",
+      "sha256": "7b3fcd59b635f84c80977bd74c53bde8749c053925c2daad8a1bd94cf6dcb3d4"
+    },
+    {
+      "path": "art/texture-sand.webp",
+      "sha256": "541c3c17c39c3266b3950117f5ff9d8213c4fb7424057a1bd81e344cd11787ad"
+    },
+    {
+      "path": "art/texture-snow.webp",
+      "sha256": "107cb46bbb49c890cc5aac4f317974f568725d35550fcc5611624e75cb95b42f"
+    },
+    {
+      "path": "art/texture-tarmac.webp",
+      "sha256": "64994fa33ead922d2b293d831f8471a7827d0a6deebde71e964ef2a3cba1f925"
+    },
+    {
+      "path": "art/texture-water.webp",
+      "sha256": "2807265e5c3a6464e8a3763bee104d5fef7ff0f8c20e9ab23b1602275fa82c7d"
+    },
+    {
+      "path": "art/title-art-orig.webp",
+      "sha256": "d5a62df6e2eb6918ea20e4526dfd6166a64cdeee2bd92847a87e9477e4771130"
+    },
+    {
+      "path": "art/ufo.webp",
+      "sha256": "fe351c1c6dfaccda96fddd9a985d75a2ed5ea95d7119bb670977bd56ea1d8a12"
+    },
+    {
+      "path": "art/victory-cavemen.webp",
+      "sha256": "097ab5fe6fe33f5fcdfaa3d94f87c322e5357abd90acac53783735281eb7f624"
+    },
+    {
+      "path": "assets/index-BiHI3_Ia.js",
+      "sha256": "9e2dbc703bff1a89f9bd8b53e2207109f19e921dae0e01f99f47fe8d8c7a2cef"
+    },
+    {
+      "path": "assets/index-BiHI3_Ia.js.map",
+      "sha256": "1565440a9c91ed0c32d2d5b2e45f94ab6646fd6feae2cac05b21402b966634d4"
+    },
+    {
+      "path": "assets/index-BRmZg4AQ.css",
+      "sha256": "aa5b47cdf258e97a55ad61ca108d7706e2b370898355db7c8c9ee4bcf73a688c"
+    },
+    {
+      "path": "assets/qrcode-TX7ZlNo8.js",
+      "sha256": "51e633e4b769cf2280efa70e37925c1bc8eddefd2e0cc48e5a5c659aee6ac97f"
+    },
+    {
+      "path": "assets/qrcode-TX7ZlNo8.js.map",
+      "sha256": "cc354d29a86c3c0270c544a7a1bb920c27549a97c9277d9152a41adf8bdbc349"
+    },
+    {
+      "path": "icons/apple-touch-icon.png",
+      "sha256": "6e04b825cd6faa4a51adbe96d1764be85ce5a39376a2590393fc4eb4b9d7527e"
+    },
+    {
+      "path": "icons/favicon-32.png",
+      "sha256": "43b99fe1c650b14bbba4692e73b5397c3a3ec7b87f0750f35d9f602a9d04d404"
+    },
+    {
+      "path": "icons/icon-192.png",
+      "sha256": "6ffffd1b55c30706789e71509c1b5fc45a0d9cd0b32f8c9eab3ec940ecb1f480"
+    },
+    {
+      "path": "icons/icon-512.png",
+      "sha256": "236e6291596a5eb1d0902df89053e0ebd8370d40daedcc874021d538e33dc5e9"
+    },
+    {
+      "path": "index.html",
+      "sha256": "b5219ba41703208f8c81b5b24e6a28f8e2b535457e4238c5abeec80673fa9955"
+    },
+    {
+      "path": "manifest.webmanifest",
+      "sha256": "a2aa108b3a3e781e38652c2a1ae6e608001984242f6d304ec41d82f689e9bae6"
+    },
+    {
+      "path": "memes/donkey-thankz.webp",
+      "sha256": "83d5d6ecdd4d637404092650d6bc8861095f02e334668ea485a82aae8e36bf41"
+    },
+    {
+      "path": "music/amalfi-coast-coastal-velocity.m4a",
+      "sha256": "fb4ca27994a62419d3cb6a9607d3cd56d24ec6077ebff98f54f3438d449be628"
+    },
+    {
+      "path": "music/dawn-of-everything.m4a",
+      "sha256": "5ae9bec4723cc462982d5342215c96ab10b10b2447412f43cf74d66b2a3bcef4"
+    },
+    {
+      "path": "music/dusk-of-the-dinosaurs.m4a",
+      "sha256": "e05f29a4c2c8c7d78590f99e9a9107682610726b2fde8d3bd3caaef397f7ba23"
+    },
+    {
+      "path": "music/old-mallorca-tramuntana-motion.m4a",
+      "sha256": "f8b824566386b38efd4cd2b9db0bd802ab731cd0f02dc0aea8e4e8915c6976f4"
+    },
+    {
+      "path": "music/old-manchester-loose-gears.m4a",
+      "sha256": "e61e9d9538c1be4a8c37188e9252e72e16546e3e3ead0ec0021f5208d1222d34"
+    },
+    {
+      "path": "music/old-prague-allegretto.m4a",
+      "sha256": "f3c40f09b5ca24758afda08470293c5093eb61f5bcf6bc454ac4d9ac7e1f507d"
+    },
+    {
+      "path": "music/taj-mahal-roses-at-dawn.m4a",
+      "sha256": "386c56678466c782d86d76b7cdcf396e5ab8a1872fa49e956fe9aee6b27770df"
+    },
+    {
+      "path": "music/the-crooked-time-machine.m4a",
+      "sha256": "662ea2deda117b7c5c9d55ec4a2598b85945b510c3680e5768420bb42d88c85e"
+    },
+    {
+      "path": "music/the-descent.m4a",
+      "sha256": "a0787ea98fed5ecc08de99b1d804f6a0a6feccdb11b76c582e913933397ea80c"
+    },
+    {
+      "path": "music/the-longest-night.m4a",
+      "sha256": "e937d2818244b2a7091f4efd125bdf2750a5db5a8c706c93199a03dea7e88654"
+    },
+    {
+      "path": "music/timeline-restored.m4a",
+      "sha256": "cc9cb2fd211faa35586c87aa3579bed90cbc96d9f6965249f80ab7e723c33a10"
+    },
+    {
+      "path": "music/two-cavemen-one-broken-timeline.m4a",
+      "sha256": "43b802f04b2cd1e0e0db19431881187951a765c29747d2061bfa9e3c63446f55"
+    },
+    {
+      "path": "pickups/600b/cake-piece-1.webp",
+      "sha256": "844fc338703751aa03f6a3062833f40043178d9473ae4267634f26e8db498349"
+    },
+    {
+      "path": "pickups/600b/rose.webp",
+      "sha256": "4d2d1897abcc1db14083ccd13f9b7ea71eadc17aa05c2b422736b33ab312840f"
+    },
+    {
+      "path": "pickups/600b/sacred-stone.webp",
+      "sha256": "9361de8398dbb9a6c1401c7477db2220bdfb0836c51de224e5dc9de67caf8522"
+    },
+    {
+      "path": "pickups/600b/whole-cake.webp",
+      "sha256": "f0c57d5db2acf9aa6e093125f6c31fdd6062b18caeb575939f84ec72dc6a2b71"
+    },
+    {
+      "path": "qr-lightning.svg",
+      "sha256": "0aa60dd03fc002a0e82a590fd7224778fbbf8b8e8740541fdbb7d9f3d330c463"
+    },
+    {
+      "path": "qr-onchain.svg",
+      "sha256": "9bfb013b634870424c1f23301f5321ad66080c9a7c000618d7fdfa865ac65aad"
+    },
+    {
+      "path": "qr-silent.svg",
+      "sha256": "9f438b5729cbc6a3a5edb8ead8079380c4e01125959aab83394392ca044962b4"
+    },
+    {
+      "path": "sfx/600b-all-time-high.m4a",
+      "sha256": "6211409687a4675fe1dca0601462df88abad3db0009872cb2b60e3e19acd75b4"
+    },
+    {
+      "path": "sfx/600b-fiat-nam.m4a",
+      "sha256": "33b87dc748a5798c18ff1799072e91d1aa541ec2dc9a134d1374560a7e8bc5ef"
+    },
+    {
+      "path": "sfx/600b-meme.m4a",
+      "sha256": "0e328a6da5336a75032ef8817ca34f467a381c72c00eb7e00de742f1d096380b"
+    },
+    {
+      "path": "sfx/600b-time-lock.m4a",
+      "sha256": "a45046277c3f1aa990aa2e41bbcfeaf9868d74032b182d000e7bd484f52435ab"
+    },
+    {
+      "path": "sfx/four-twenty.m4a",
+      "sha256": "fc7cec30c77368a440b527a4e6c69ceed55172b886d8e4807704627913a9cede"
+    },
+    {
+      "path": "sfx/slice-of-cake.m4a",
+      "sha256": "7db0982825a79442db1d295bea56f4edf690fba45a218758dda0c67759b1a7d2"
+    },
+    {
+      "path": "sfx/sting-whoo.m4a",
+      "sha256": "2ea322587692cf77736d9b4f8f75462f24e48b6c36934db2e8b035a4f7ebdf9d"
+    },
+    {
+      "path": "sfx/sting-wuh.m4a",
+      "sha256": "c2052518a6eadf7681d8e4478a7cf609dfd05bac7428e60f5b8552aeb60f70ce"
+    },
+    {
+      "path": "sfx/thanks-fren.m4a",
+      "sha256": "046b05988de0a6cb65651df76547877d3c194c1b783d0b2ecca4b026b5f6d7ca"
+    },
+    {
+      "path": "sfx/thanks-legend.m4a",
+      "sha256": "6d477f727a7f17978d3a44388d925789d317d5bedfec89f0d3446c3157be0322"
+    },
+    {
+      "path": "sfx/want-rose-fren.m4a",
+      "sha256": "ee8b64d86e1d660da095ac4b492d18ab260efd19840bd25e18b364e5af88f954"
+    },
+    {
+      "path": "sfx/whole-cake-sir.m4a",
+      "sha256": "4d1cdcd9f8e9b7fc93b1d793f82f25f8200a9b2deec84aa9d55cd19c400e40b1"
+    },
+    {
+      "path": "signet-login.iife.js",
+      "sha256": "237541e0c68dff8bddf84a1c3e7feed1c0753423a832f15adf32e9adb082280a"
+    },
+    {
+      "path": "signet-verify.iife.js",
+      "sha256": "e1e3fbf675428c46cad743debecda96b4ba94de4a2b1930517373f63277d383d"
+    },
+    {
+      "path": "support.html",
+      "sha256": "5bedea8dc0bf416042357f47b94f992b1e727b3034084e1a15b593fdf4c14145"
+    },
+    {
+      "path": "sw.js",
+      "sha256": "0b102a86a9916410477142de848d3882b59e6cad47b8804b5f92f3dff39aed0f"
+    },
+    {
+      "path": "version.json",
+      "sha256": "197a4945b6a6fd4045d79f996b536654a52e372f5bd74966bc9a8c462cb38c21"
+    }
+  ],
+  "all151CheckedFilesMatch": true,
+  "apiHealth": {
+    "ok": true,
+    "service": "hang-on-fren-claim",
+    "game": "hangonfren",
+    "score_kind": 30762,
+    "signer_configured": true,
+    "publish_enabled": true,
+    "game_pubkey": "51312d91ac6fc6e35005c23656b0effa159c89e4b21e56e054d5af52adc7c272",
+    "expected_game_npub": "npub12ycjmydvdlrwx5q9cgm9dv80lg2eez0ykg09dcz56kh49tw8cfeqnap6qw",
+    "max_distance_m": 43000,
+    "max_speed_m_per_s": 207.2,
+    "write_relays": [
+      "wss://main.relay.gamestr.io",
+      "wss://relay.trotters.cc",
+      "wss://nos.lol",
+      "wss://relay.damus.io",
+      "wss://relay.nostr.band",
+      "wss://relay.primal.net",
+      "wss://relay.ditto.pub"
+    ],
+    "claims_seen": 9,
+    "best_scores_tracked": 11
+  },
+  "actualPublicDns": true,
+  "apiNotRestarted": true,
+  "gameplayTest": false,
+  "actualMySignet": false,
+  "physicalDevice": false,
+  "at": "2026-10-12T02:26:53.228Z"
+}

@@ -1,0 +1,74 @@
+{
+  "actualMySignet": true,
+  "physicalDevice": false,
+  "failedPhase": "wait-real-relay-approval",
+  "errorType": "TimeoutError",
+  "normallyEarnedRuns": 0,
+  "causeEstablished": false,
+  "diagnostics": [
+    {
+      "label": "signer",
+      "origin": "https://mysignet.app",
+      "headings": [
+        "Security & Backup"
+      ],
+      "signerStatuses": [],
+      "outgoing": {
+        "REQ": 31,
+        "CLOSE": 31,
+        "EVENT:30078": 2
+      },
+      "incoming": {
+        "EOSE": 31
+      }
+    },
+    {
+      "label": "approval",
+      "origin": "https://mysignet.app",
+      "headings": [
+        "Login Request"
+      ],
+      "signerStatuses": [],
+      "outgoing": {
+        "REQ": 27,
+        "CLOSE": 26,
+        "EVENT:30078": 1
+      },
+      "incoming": {
+        "EOSE": 27
+      }
+    },
+    {
+      "label": "arcade",
+      "origin": "https://arcade.600.wtf",
+      "headings": [
+        "Four games. One enormous number.",
+        "ARCADE FLOOR",
+        "Pallasite",
+        "Neon Sentinel",
+        "Hang On, Fren",
+        "Take Me To Your Ledger",
+        "One manifest. Global discovery. No permission slip.",
+        "Open My Signet"
+      ],
+      "signerStatuses": [],
+      "outgoing": {
+        "REQ": 15,
+        "CLOSE": 4
+      },
+      "incoming": {
+        "EVENT:30762": 52,
+        "EOSE": 7,
+        "EVENT:5555": 471
+      }
+    },
+    {
+      "label": "game",
+      "origin": null,
+      "headings": null,
+      "signerStatuses": null,
+      "outgoing": null,
+      "incoming": null
+    }
+  ]
+}

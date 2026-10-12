@@ -17,7 +17,7 @@
 //   HANGONFREN_WRITE_RELAYS    comma-separated relay override
 
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { appendFile, mkdir, readFile } from 'node:fs/promises';
+import { open, mkdir, readFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { finalizeEvent, getPublicKey, verifyEvent } from 'nostr-tools/pure';
 import type { VerifiedEvent } from 'nostr-tools/core';
@@ -33,7 +33,7 @@ import {
 } from 'nostr-tools/nip98';
 import { buildScoreEvent, scoreLevelKey, GAME_ID, GAME_PUBKEY, SCORE_KIND, type RunSummary } from '../src/scoring.js';
 import { DEFAULT_WRITE_RELAYS } from '../src/relays.js';
-import { parseClaim, cleanPlayerName, MAX_DISTANCE_M, MAX_SPEED_M_PER_S, STALE_RUN_MS, type ClaimInput } from './claim-rules.js';
+import { parseClaim, cleanPlayerName, MAX_DISTANCE_M, MAX_SPEED_M_PER_S, type ClaimInput } from './claim-rules.js';
 import { seedHistoricBestScores } from './historic-scores.js';
 
 const WRITE_RELAYS = loadWriteRelays();
@@ -46,7 +46,6 @@ const EXPECTED_GAME_NPUB = process.env.HANGONFREN_GAME_NPUB
   ?? 'npub12ycjmydvdlrwx5q9cgm9dv80lg2eez0ykg09dcz56kh49tw8cfeqnap6qw';
 const SITE_URL = process.env.HANGONFREN_SITE_URL ?? 'https://hang-on-fren.playechoseven.com/';
 const MAX_BODY_BYTES = 64 * 1024;
-const CLAIM_DEDUP_TTL_MS = STALE_RUN_MS * 3;
 const CLAIM_RATE_LIMIT = { limit: 6, windowMs: 60_000 };
 const RATE_LIMIT_MAX_TRACKED_IPS = 10_000;
 const RELAY_PUBLISH_TIMEOUT_MS = 5000;
@@ -64,13 +63,16 @@ interface StoredClaim {
   published: { ok: number; total: number };
   accepted_at: string;
   finished_at: number;
+  claim: ClaimInput;
+  event?: VerifiedEvent;
+  publishable?: boolean;
 }
 
 const gameSecret = loadGameSecret();
 const expectedGamePubkey = decodeNpub(EXPECTED_GAME_NPUB);
 const gamePubkey = resolveGamePubkey(gameSecret);
-const { claims, bestScores } = await loadClaims();
-pruneStaleClaims();
+const { claims, bestScores, eventTimes } = await loadClaims();
+let claimTail: Promise<void> = Promise.resolve();
 const claimRateLimiter = createRateLimiter(CLAIM_RATE_LIMIT.limit, CLAIM_RATE_LIMIT.windowMs);
 
 if (expectedGamePubkey && expectedGamePubkey !== GAME_PUBKEY) {
@@ -198,53 +200,57 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
   }
 
   const claim = parsed.claim;
-  const key = `${auth.pubkey}:${claim.run_id}:${claim.started_at}:${claim.finished_at}`;
-  const replay = claims.get(key);
-  if (replay) {
-    console.log(`[api] claim replay pubkey=${auth.pubkey.slice(0, 8)} run=${claim.run_id}`);
+  // Serialize durable acceptance and publication: duplicate approvals share one
+  // event, and a delayed lower run cannot race a newer per-level best score.
+  await withClaimLock(async () => {
+    const key = `${auth.pubkey}:${claim.run_id}`;
+    const bestKey = `${auth.pubkey}:${scoreLevelKey(claim.tour, claim.level)}`;
+    let stored = claims.get(key);
+    if (stored && canonicalClaim(stored.claim) !== canonicalClaim(claim)) {
+      sendJson(res, 409, { ok: false, error: 'run_conflict' }, req);
+      return;
+    }
+    if (!stored) {
+      const improves = claim.score > (bestScores.get(bestKey) ?? 0);
+      const template = buildGameSignedScore(claim, auth.pubkey);
+      // Addressable events with equal timestamps are resolved by event ID, not
+      // score. A newer improvement must have a later timestamp even when two
+      // runs are accepted in the same second.
+      template.created_at = Math.max(template.created_at, (eventTimes.get(bestKey) ?? 0) + 1);
+      const event = finalizeEvent(template, gameSecret!);
+      stored = {
+        key, pubkey: auth.pubkey, run_id: claim.run_id, score_event_id: event.id,
+        published: { ok: 0, total: WRITE_RELAYS.length },
+        accepted_at: new Date().toISOString(), finished_at: claim.finished_at,
+        claim: { ...claim }, event, publishable: improves,
+      };
+      // Persist the exact signed event before any relay can see it. Only update
+      // memory and best-score protection once durable acceptance succeeds.
+      await appendClaim(stored);
+      claims.set(key, stored);
+      eventTimes.set(bestKey, event.created_at);
+      if (improves) bestScores.set(bestKey, claim.score);
+    }
+    const belowBest = stored.publishable === false || stored.claim.score < (bestScores.get(bestKey) ?? 0);
+    if (stored.published.ok === 0 && !belowBest) {
+      if (!stored.event) {
+        // Older history recorded only an ID. Never invent another event for it.
+        sendJson(res, 409, { ok: false, error: 'recovery_event_missing' }, req);
+        return;
+      }
+      const published = await publishSignedScore(stored.event);
+      const updated = { ...stored, published };
+      await appendClaim(updated);
+      stored = updated;
+      claims.set(key, stored);
+    }
     sendJson(res, 200, {
-      ok: true,
-      score_event_id: replay.score_event_id,
-      status: 'accepted',
-      published: replay.published,
+      ok: true, score_event_id: stored.score_event_id,
+      status: stored.published.ok > 0 ? 'published' : 'accepted',
+      published: stored.published,
+      ...(belowBest && stored.published.ok === 0 ? { reason: 'below_best' } : {}),
     }, req);
-    return;
-  }
-
-  // Kind 30762 is addressable: the `d` tag is game:player:levelKey, so
-  // publishing a worse run would REPLACE the player's better score for that
-  // level on the relays. Sign and log every accepted claim, but only publish
-  // improvements. The level key is tour-namespaced (scoreLevelKey) so the
-  // secret stone tour can never displace a road-tour score.
-  const bestKey = `${auth.pubkey}:${scoreLevelKey(claim.tour, claim.level)}`;
-  const improves = claim.score > (bestScores.get(bestKey) ?? 0);
-  if (improves) bestScores.set(bestKey, claim.score);
-
-  const signed = finalizeEvent(buildGameSignedScore(claim, auth.pubkey), gameSecret);
-  const published = improves
-    ? await publishSignedScore(signed)
-    : { ok: 0, total: WRITE_RELAYS.length };
-  const stored: StoredClaim = {
-    key,
-    pubkey: auth.pubkey,
-    run_id: claim.run_id,
-    score_event_id: signed.id,
-    published,
-    accepted_at: new Date().toISOString(),
-    finished_at: claim.finished_at,
-  };
-  claims.set(key, stored);
-  pruneStaleClaims();
-  await appendClaim(stored, claim);
-
-  console.log(`[api] claim accepted pubkey=${auth.pubkey.slice(0, 8)} run=${claim.run_id} level=${claim.level} score=${claim.score} improves=${improves} published=${published.ok}/${published.total} ip=${ip}`);
-  sendJson(res, 200, {
-    ok: true,
-    score_event_id: signed.id,
-    status: published.ok > 0 ? 'published' : 'accepted',
-    published,
-    ...(improves ? {} : { reason: 'below_best' }),
-  }, req);
+  });
 }
 
 /** Reuse the client's tested event builder — one source of truth for the
@@ -373,66 +379,95 @@ function publishToRelay(relay: string, event: VerifiedEvent): Promise<boolean> {
   });
 }
 
-async function appendClaim(stored: StoredClaim, claim: ClaimInput): Promise<void> {
-  await mkdir(dirname(CLAIM_LOG), { recursive: true });
-  await appendFile(CLAIM_LOG, `${JSON.stringify({ ...stored, claim })}\n`, { encoding: 'utf8' });
+async function withClaimLock(action: () => Promise<void>): Promise<void> {
+  const previous = claimTail;
+  let release!: () => void;
+  claimTail = new Promise<void>(resolve => { release = resolve; });
+  await previous;
+  try { await action(); } finally { release(); }
 }
 
-async function loadClaims(): Promise<{ claims: Map<string, StoredClaim>; bestScores: Map<string, number> }> {
-  const map = new Map<string, StoredClaim>();
-  // Best accepted score per `${pubkey}:${level}` — the publish gate for the
-  // per-level addressable events. Rebuilt from the full append-only log and
-  // curated pre-service board so a restart can never let a worse run replace a
-  // better one on the relays.
-  const best = new Map<string, number>();
+function canonicalClaim(claim: ClaimInput): string {
+  // The client obtains a new server clock offset on every submission. Both
+  // timestamps may shift together; keep the first accepted clock immutable and
+  // compare the unchanged wall interval plus all signed run details instead.
+  return JSON.stringify({
+    game: claim.game, run_id: claim.run_id, score: claim.score,
+    distance_m: claim.distance_m, duration_s: claim.duration_s,
+    wall_duration_ms: claim.finished_at - claim.started_at,
+    roses: claim.roses, overtakes: claim.overtakes, crashes: claim.crashes,
+    top_speed_kph: claim.top_speed_kph, drifts: claim.drifts ?? 0,
+    level: claim.level, ended_by: claim.ended_by, tour: claim.tour ?? 'grand',
+    player_name: cleanPlayerName(claim.player_name),
+    player_mode: claim.player_mode === 'nostr' ? 'nostr' : 'guest',
+    btc_block: claim.btc_block, btc_usd_cents: claim.btc_usd_cents,
+  });
+}
+
+async function appendClaim(stored: StoredClaim): Promise<void> {
+  await mkdir(dirname(CLAIM_LOG), { recursive: true });
+  const file = await open(CLAIM_LOG, 'a', 0o600);
   try {
-    const raw = await readFile(CLAIM_LOG, 'utf8');
-    for (const line of raw.split('\n')) {
-      if (!line.trim()) continue;
-      try {
-        const parsed = JSON.parse(line) as Partial<StoredClaim> & { claim?: { score?: unknown; level?: unknown; tour?: unknown } };
-        if (typeof parsed.key === 'string' && typeof parsed.score_event_id === 'string') {
-          const acceptedAt = String(parsed.accepted_at ?? '');
-          const pubkey = String(parsed.pubkey ?? '');
-          map.set(parsed.key, {
-            key: parsed.key,
-            pubkey,
-            run_id: String(parsed.run_id ?? ''),
-            score_event_id: parsed.score_event_id,
-            published: isPublished(parsed.published) ? parsed.published : { ok: 0, total: WRITE_RELAYS.length },
-            accepted_at: acceptedAt,
-            finished_at: typeof parsed.finished_at === 'number' ? parsed.finished_at : Date.parse(acceptedAt) || 0,
-          });
-          const score = parsed.claim?.score;
-          const level = parsed.claim?.level;
-          const tour = typeof parsed.claim?.tour === 'string' ? parsed.claim.tour : undefined;
-          if (pubkey && typeof score === 'number' && typeof level === 'number') {
-            const key = `${pubkey}:${scoreLevelKey(tour, level)}`;
-            if (score > (best.get(key) ?? 0)) best.set(key, score);
-          }
-        }
-      } catch {
-        // Ignore malformed audit rows; future writes remain append-only.
-      }
+    // Retain the timestamp-based disk key for compatibility with API rollback.
+    const key = `${stored.pubkey}:${stored.run_id}:${stored.claim.started_at}:${stored.claim.finished_at}`;
+    await file.writeFile(`${JSON.stringify({ ...stored, key })}\n`, { encoding: 'utf8' });
+    await file.sync();
+  } finally { await file.close(); }
+}
+
+async function loadClaims(): Promise<{
+  claims: Map<string, StoredClaim>; bestScores: Map<string, number>; eventTimes: Map<string, number>;
+}> {
+  const map = new Map<string, StoredClaim>();
+  const best = new Map<string, number>();
+  const times = new Map<string, number>();
+  let raw: string;
+  try { raw = await readFile(CLAIM_LOG, 'utf8'); }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    raw = '';
+  }
+  for (const line of raw.split('\n')) {
+    if (!line.trim()) continue;
+    // A corrupt durable index must not silently permit another acceptance.
+    const parsed = JSON.parse(line) as StoredClaim;
+    const validClaim = parseClaim(parsed.claim, Math.max(Date.now(), parsed.claim?.finished_at ?? 0));
+    if (!/^[0-9a-f]{64}$/.test(parsed.pubkey) || !validClaim.ok ||
+        parsed.run_id !== validClaim.claim.run_id || !/^[0-9a-f]{64}$/.test(parsed.score_event_id) ||
+        !isPublished(parsed.published) || !Number.isFinite(Date.parse(parsed.accepted_at)) ||
+        (parsed.publishable !== undefined && typeof parsed.publishable !== 'boolean')) {
+      throw new Error('invalid_claim_history');
     }
-  } catch {
-    // First deploy starts with no claim log.
+    const claim = validClaim.claim;
+    if (parsed.event && (!verifyEvent(parsed.event) || parsed.event.id !== parsed.score_event_id ||
+        parsed.event.pubkey !== gamePubkey || parsed.event.kind !== SCORE_KIND ||
+        !parsed.event.tags.some(tag => tag[0] === 'p' && tag[1] === parsed.pubkey) ||
+        !parsed.event.tags.some(tag => tag[0] === 'run_id' && tag[1] === claim.run_id) ||
+        !parsed.event.tags.some(tag => tag[0] === 'score' && tag[1] === String(claim.score)) ||
+        !parsed.event.tags.some(tag => tag[0] === 'd' && tag[1] === `${GAME_ID}:${parsed.pubkey}:${scoreLevelKey(claim.tour, claim.level)}`))) {
+      throw new Error('invalid_claim_history_event');
+    }
+    const key = `${parsed.pubkey}:${claim.run_id}`;
+    const bestKey = `${parsed.pubkey}:${scoreLevelKey(claim.tour, claim.level)}`;
+    best.set(bestKey, Math.max(best.get(bestKey) ?? 0, claim.score));
+    times.set(bestKey, Math.max(times.get(bestKey) ?? 0,
+      parsed.event?.created_at ?? Math.floor(Date.parse(parsed.accepted_at) / 1000)));
+    const prior = map.get(key);
+    // Legacy logs may have several clock-offset keys for the same run. Preserve
+    // the first acceptance; only matching-event acknowledgement updates replace it.
+    if (prior && (prior.score_event_id !== parsed.score_event_id ||
+        canonicalClaim(prior.claim) !== canonicalClaim(claim))) continue;
+    map.set(key, { ...parsed, key, claim });
   }
   seedHistoricBestScores(best);
-  return { claims: map, bestScores: best };
-}
-
-function pruneStaleClaims(): void {
-  const cutoff = Date.now() - CLAIM_DEDUP_TTL_MS;
-  for (const [key, stored] of claims) {
-    if (stored.finished_at < cutoff) claims.delete(key);
-  }
+  return { claims: map, bestScores: best, eventTimes: times };
 }
 
 function isPublished(value: unknown): value is { ok: number; total: number } {
   if (!value || typeof value !== 'object') return false;
   const parsed = value as { ok?: unknown; total?: unknown };
-  return typeof parsed.ok === 'number' && typeof parsed.total === 'number';
+  return Number.isInteger(parsed.ok) && Number.isInteger(parsed.total) &&
+    Number(parsed.ok) >= 0 && Number(parsed.total) >= Number(parsed.ok);
 }
 
 function loadGameSecret(): Uint8Array | null {

@@ -18,6 +18,8 @@ import { GAME_ID, GAME_PUBKEY, GAME_TITLE, SCORE_KIND, type RunSummary } from '.
 import { assetUrl } from './asset-url.js';
 import { DEFAULT_READ_RELAYS, DEFAULT_WRITE_RELAYS } from './relays.js';
 import { consumeArcadeHandoff } from './arcade-handoff.js';
+import { observeLoginQr } from './login-qr.js';
+import { retainPersonalScore, discardPersonalScore, clearPublishedPersonalScore, pendingPersonalScores, type PendingPersonalScore } from './score-recovery.js';
 
 const GUEST_KEY = 'hangonfren:guest:v1';
 const MODE_KEY = 'hangonfren:identity-mode:v1';
@@ -91,6 +93,9 @@ declare global {
 const SIGNET_AUTH_RELAY = 'wss://relay.trotters.cc';
 let signetLoadPromise: Promise<boolean> | null = null;
 let signetSession: SignetSession | null = null;
+let arcadeSession: SignetSession | null = null;
+let identityEpoch = 0;
+let currentMode: IdentityMode | null = null;
 
 function loadScript(src: string, id: string): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -142,6 +147,7 @@ function sessionCanSign(session: SignetSession | null): boolean {
 // ---- identity ---------------------------------------------------------------
 
 export function loadIdentityMode(): IdentityMode {
+  if (currentMode !== null) return currentMode;
   try {
     return localStorage.getItem(MODE_KEY) === 'nostr' ? 'nostr' : 'guest';
   } catch {
@@ -150,6 +156,7 @@ export function loadIdentityMode(): IdentityMode {
 }
 
 export function saveIdentityMode(mode: IdentityMode): void {
+  currentMode = mode;
   try { localStorage.setItem(MODE_KEY, mode); } catch { /* private mode */ }
 }
 
@@ -235,49 +242,73 @@ function safePubkey(nsecHex: string): string | null {
  *  bunker / nsec / Amber — works on phones). Resolves the pubkey, or null if
  *  the SDK failed to load or the player dismissed the dialog. */
 export async function connectNostr(): Promise<string | null> {
-  if (!(await ensureSignetLoaded()) || !window.Signet) return null;
+  const epoch = ++identityEpoch;
+  if (!(await ensureSignetLoaded()) || !window.Signet || epoch !== identityEpoch) return null;
+  let stopQr: (() => void) | undefined;
   try {
+    // Keep the SDK's link and other login methods available if the optional
+    // QR drawing module cannot load.
+    stopQr = await observeLoginQr().catch(err => {
+      console.warn('[gamestr] QR rendering enhancement unavailable:', err);
+      return undefined;
+    });
+    if (epoch !== identityEpoch) return null;
     const session = await window.Signet.login({
       appName: GAME_TITLE,
       theme: 'dark',
       relayUrl: SIGNET_AUTH_RELAY,
     });
     if (!session) return null;
+    if (epoch !== identityEpoch) { void session.signer.close?.().catch(() => undefined); return null; }
+    const previous = signetSession;
     signetSession = session;
+    if (previous && previous !== session) void previous.signer.close?.().catch(() => undefined);
     saveIdentityMode('nostr');
     return session.pubkey;
   } catch (err) {
     console.warn('[gamestr] nostr sign-in failed:', err);
     return null;
+  } finally {
+    stopQr?.();
   }
 }
 
 /** Restore the persisted identity mode on boot (quietly resumes the Signet
  *  session, and consumes a redirect-mode callback if one is in the URL). */
 export async function restoreIdentity(): Promise<Identity> {
-  const arcadeSession = await consumeArcadeHandoff(GAME_ID);
-  if (arcadeSession) {
-    signetSession = arcadeSession;
+  const epoch = ++identityEpoch;
+  const handoff = await consumeArcadeHandoff(GAME_ID);
+  if (epoch !== identityEpoch) {
+    if (handoff) void handoff.signer.close?.().catch(() => undefined);
+    return getIdentity();
+  }
+  if (handoff) {
+    signetSession = handoff;
+    rememberArcadeSession(handoff);
     saveIdentityMode('nostr');
     return getIdentity();
   }
   if (loadIdentityMode() === 'nostr') {
-    if (await ensureSignetLoaded() && window.Signet) {
+    let restored: SignetSession | null = null;
+    if (await ensureSignetLoaded() && window.Signet && epoch === identityEpoch) {
       try {
         const callback = await window.Signet.handleRedirectCallback?.({ waitForBunker: true });
-        signetSession = (callback?.kind === 'session' && callback.session)
-          ? callback.session
-          : await window.Signet.restoreSession();
-      } catch {
-        signetSession = null;
-      }
+        restored = (callback?.kind === 'session' && callback.session)
+          ? callback.session : await window.Signet.restoreSession();
+      } catch { restored = null; }
     }
+    if (epoch !== identityEpoch) {
+      if (restored) void restored.signer.close?.().catch(() => undefined);
+      return getIdentity();
+    }
+    signetSession = restored;
     if (!signetSession) saveIdentityMode('guest');
   }
   return getIdentity();
 }
 
 export function useGuestMode(): void {
+  identityEpoch++;
   saveIdentityMode('guest');
   const session = signetSession;
   signetSession = null;
@@ -303,45 +334,60 @@ async function publishGuestProfile(stored: StoredGuest): Promise<void> {
   await publishToRelays(event);
 }
 
-/** Who actually signed: the nostr session, the guest key by choice, or the
- *  guest key because the nostr session couldn't sign (auth-only proof, closed
- *  arcade port, declined or timed-out signer). */
-export type SignedAs = 'nostr' | 'guest' | 'guest-fallback';
+/** The selected identity that authenticated a claim. */
+export type SignedAs = 'nostr' | 'guest';
 
-/**
- * Sign an arbitrary event template with the active identity. A nostr session
- * that cannot sign — an auth-only QR proof, an arcade signer whose port has
- * closed, a declined or timed-out prompt — FALLS BACK to the local guest key
- * rather than returning nothing: a finished run must never silently stay off
- * the board because of session state the rider can't see. The caller learns
- * who signed via `signedAs` and owns telling the rider.
- */
+export class ScoreSigningError extends Error {
+  constructor(readonly saved = true) {
+    super(saved ? 'Personal score not sent: reconnect the original Nostr account and retry.'
+      : 'Personal score not sent: this browser could not save a retry receipt.');
+    this.name = 'ScoreSigningError';
+  }
+}
+
+function rememberArcadeSession(session: SignetSession): void { arcadeSession = session; }
+
+function selectedSessionIsCurrent(identity: Identity, session: SignetSession | null, epoch: number): boolean {
+  return epoch === identityEpoch && identity.mode === 'nostr' && session !== null && signetSession === session
+    && loadIdentityMode() === 'nostr' && session.pubkey === identity.pubkey;
+}
+
+/** Personal claims never fall back to another identity. Pin the selected
+ * session across asynchronous signing and verify its canonical response. */
 async function signWithIdentity(template: {
   kind: number;
   created_at: number;
   tags: string[][];
   content: string;
-}, guestNameHint?: string, forceGuest = false): Promise<{ event: SignedEvent; signedAs: SignedAs } | null> {
-  const identity = getIdentity();
-  if (!forceGuest && identity.mode === 'nostr' && signetSession) {
-    if (sessionCanSign(signetSession)) {
-      try {
-        const signed = await Promise.race([
-          signetSession.signer.signEvent(template),
-          new Promise<never>((_, reject) => {
-            setTimeout(() => reject(new Error('signer-timeout')), SIGN_TIMEOUT_MS);
-          }),
-        ]);
-        return { event: signed as SignedEvent, signedAs: 'nostr' };
-      } catch (err) {
-        console.warn('[gamestr] nostr signer failed — falling back to the guest key:', err);
-      }
-    } else {
-      console.warn('[gamestr] nostr session is auth-only (no live signer) — falling back to the guest key');
+}, identity: Identity, session: SignetSession | null, epoch: number, guestNameHint?: string): Promise<{ event: SignedEvent; signedAs: SignedAs }> {
+  if (identity.mode === 'nostr') {
+    if (!selectedSessionIsCurrent(identity, session, epoch) || !sessionCanSign(session)) throw new ScoreSigningError();
+    const requested = JSON.parse(JSON.stringify(template)) as typeof template;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const response = await Promise.race([
+        session!.signer.signEvent(JSON.parse(JSON.stringify(requested))),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new ScoreSigningError()), SIGN_TIMEOUT_MS);
+        }),
+      ]);
+      if (!selectedSessionIsCurrent(identity, session, epoch) || typeof response !== 'object' || response === null) throw new ScoreSigningError();
+      // Copy only event fields; never trust provider caches or mutable objects.
+      const returned = response as SignedEvent;
+      const event = { kind: returned.kind, created_at: returned.created_at,
+        tags: returned.tags, content: returned.content, pubkey: returned.pubkey,
+        id: returned.id, sig: returned.sig };
+      if (event.pubkey !== identity.pubkey || event.kind !== requested.kind
+        || event.created_at !== requested.created_at || event.content !== requested.content
+        || JSON.stringify(event.tags) !== JSON.stringify(requested.tags) || !verifyEvent(event)) throw new ScoreSigningError();
+      return { event, signedAs: 'nostr' };
+    } catch {
+      throw new ScoreSigningError();
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
     }
-    const guest = loadOrCreateGuest(guestNameHint ?? 'FREN');
-    return { event: finalizeEvent(template, hexToBytes(guest.nsecHex)) as SignedEvent, signedAs: 'guest-fallback' };
   }
+  if (getIdentity().mode !== 'guest' || getIdentity().pubkey !== identity.pubkey) throw new ScoreSigningError();
   const guest = loadOrCreateGuest(guestNameHint ?? 'FREN');
   return { event: finalizeEvent(template, hexToBytes(guest.nsecHex)) as SignedEvent, signedAs: 'guest' };
 }
@@ -373,8 +419,9 @@ export interface PublishOutcome {
   status: 'published' | 'accepted' | 'rejected';
   /** Service refusal reason, only on 'rejected' (e.g. 'implausible_score'). */
   error?: string;
-  /** Which key authenticated the claim — 'guest-fallback' means the nostr
-   *  session couldn't sign and the local guest key carried the run instead. */
+  /** An accepted run may be superseded by a better run. */
+  reason?: string;
+  /** Which selected identity authenticated the claim. */
   signedAs: SignedAs;
 }
 
@@ -393,11 +440,33 @@ export function clockOffsetMs(dateHeader: string | null, localNowMs: number): nu
  *  (the claim POST would fail anyway). */
 async function fetchServerClockOffset(): Promise<number> {
   try {
-    const res = await fetch(`${CLAIM_API}/health`, { cache: 'no-store' });
+    const res = await withClaimDeadline(FETCH_TIMEOUT_MS,
+      signal => fetch(`${CLAIM_API}/health`, { cache: 'no-store', signal }));
     return clockOffsetMs(res.headers.get('date'), Date.now());
   } catch {
     return 0;
   }
+}
+
+const CLAIM_TIMEOUT_MS = 15_000;
+const personalClaims = new Map<string, Promise<PublishOutcome | null>>();
+
+function personalClaimKey(pubkey: string, runId: string): string {
+  return `${pubkey}:${runId}`;
+}
+
+export function personalScoreIsPending(pubkey: string, runId: string): boolean {
+  return personalClaims.has(personalClaimKey(pubkey, runId));
+}
+
+async function withClaimDeadline<T>(milliseconds: number, operation: (signal: AbortSignal) => Promise<T>): Promise<T> {
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => { controller.abort(); reject(new Error('claim-timeout')); }, milliseconds);
+  });
+  try { return await Promise.race([operation(controller.signal), timeout]); }
+  finally { clearTimeout(timer); }
 }
 
 /**
@@ -409,22 +478,35 @@ async function fetchServerClockOffset(): Promise<number> {
  * server said no" and "the server never heard about it" must never wear the
  * same message again (that disguise hid a three-day outage in July 2026).
  */
-export async function submitScore(summary: RunSummary, opts: SubmitScoreOptions): Promise<PublishOutcome | null> {
+export function submitScore(summary: RunSummary, opts: SubmitScoreOptions, identity = getIdentity()): Promise<PublishOutcome | null> {
+  const key = identity.mode === 'nostr' && identity.pubkey
+    ? personalClaimKey(identity.pubkey, opts.runId) : null;
+  const pending = key ? personalClaims.get(key) : undefined;
+  if (pending) return pending;
+  const claim = submitScoreAttempt(structuredClone(summary), structuredClone(opts), { ...identity });
+  if (!key) return claim;
+  const tracked = claim.finally(() => {
+    if (personalClaims.get(key) === tracked) personalClaims.delete(key);
+  });
+  personalClaims.set(key, tracked);
+  return tracked;
+}
+
+async function submitScoreAttempt(summary: RunSummary, opts: SubmitScoreOptions, identity: Identity): Promise<PublishOutcome | null> {
   if (summary.score <= 0) return null; // boards ignore zero scores
-  const identity = getIdentity();
+  const session = signetSession;
+  const epoch = identityEpoch;
+  const retained = identity.mode !== 'nostr' || !identity.pubkey
+    || retainPersonalScore({ pubkey: identity.pubkey, summary, options: opts, arcade: session === arcadeSession });
   // Shift the run's wall-clock bounds and the auth timestamp into server time;
   // both bounds move together, so the duration/wall-clock relation the service
   // checks is preserved.
   const clockOffset = await fetchServerClockOffset();
 
-  // The claim body carries player_mode and is hash-bound into the NIP-98 auth,
-  // so the signing identity must be decided BEFORE the body is built. A nostr
-  // session that can't sign (auth-only proof, closed arcade port) is known now;
-  // a live signer that fails mid-flight retries once with the guest key.
-  const sessionReady = identity.mode === 'nostr' && signetSession !== null && sessionCanSign(signetSession);
-  const attempt = async (mode: IdentityMode): Promise<{ bodyJson: string; auth: SignedEvent; signedAs: SignedAs } | null> => {
-    // mode 'guest' pins the guest key outright (forceGuest) so a retry can
-    // never bounce back to a flaky session signer and de-cohere the body.
+  // Pin identity before awaiting either the clock or the signer. A personal
+  // claim that cannot sign stays local and asks for the original account.
+  const mode = identity.mode;
+  const attempt = async (): Promise<{ bodyJson: string; auth: SignedEvent; signedAs: SignedAs }> => {
     const claim = {
       game: GAME_ID,
       score: summary.score,
@@ -457,39 +539,36 @@ export async function submitScore(summary: RunSummary, opts: SubmitScoreOptions)
         ['method', 'POST'],
         ['payload', await sha256Hex(bodyJson)],
       ],
-    }, opts.playerName, mode === 'guest');
-    if (!signed) return null;
-    // The template said 'nostr' but the guest key signed (live signer died
-    // mid-flight): the body's player_mode no longer matches the auth key.
-    // Rebuild both as guest so the claim is coherent.
-    if (mode === 'nostr' && signed.signedAs !== 'nostr') return attempt('guest');
+    }, identity, session, epoch, opts.playerName);
     return { bodyJson, auth: signed.event, signedAs: signed.signedAs };
   };
-  const prepared = await attempt(sessionReady ? 'nostr' : 'guest');
-  if (!prepared) return null;
-  const signedAs: SignedAs = identity.mode === 'nostr' && prepared.signedAs !== 'nostr' ? 'guest-fallback' : prepared.signedAs;
+  const prepared = await attempt().catch(error => {
+    if (error instanceof ScoreSigningError && !retained) throw new ScoreSigningError(false);
+    throw error;
+  });
+  if (identity.mode === 'nostr' && !selectedSessionIsCurrent(identity, session, epoch)) throw new ScoreSigningError();
+  const signedAs = prepared.signedAs;
 
-  let res: Response;
+  let response: { res: Response; data: unknown };
   try {
-    res = await fetch(CLAIM_API, {
-      method: 'POST',
-      headers: {
-        authorization: `Nostr ${utf8Base64(JSON.stringify(prepared.auth))}`,
-        'content-type': 'application/json',
-      },
-      body: prepared.bodyJson,
+    response = await withClaimDeadline(CLAIM_TIMEOUT_MS, async signal => {
+      const res = await fetch(CLAIM_API, {
+        method: 'POST',
+        headers: {
+          authorization: `Nostr ${utf8Base64(JSON.stringify(prepared.auth))}`,
+          'content-type': 'application/json',
+        },
+        body: prepared.bodyJson,
+        signal,
+      });
+      return { res, data: await res.json() as unknown };
     });
   } catch {
     return null; // no claim service reachable — score stays local
   }
-  let data: unknown;
-  try {
-    data = await res.json();
-  } catch {
-    return null;
-  }
+  const { res, data } = response;
   if (typeof data !== 'object' || data === null) return null;
-  const result = data as { ok?: unknown; error?: unknown; published?: { ok?: unknown; total?: unknown }; status?: unknown };
+  const result = data as { ok?: unknown; error?: unknown; published?: { ok?: unknown; total?: unknown }; status?: unknown; reason?: unknown };
   if (result.ok !== true) {
     console.warn('[gamestr] claim rejected:', data);
     return {
@@ -502,7 +581,29 @@ export async function submitScore(summary: RunSummary, opts: SubmitScoreOptions)
   }
   const ok = typeof result.published?.ok === 'number' ? result.published.ok : 0;
   const total = typeof result.published?.total === 'number' ? result.published.total : 0;
-  return { ok, total, status: ok > 0 ? 'published' : 'accepted', signedAs };
+  if (ok > 0 && identity.mode === 'nostr' && identity.pubkey) clearPublishedPersonalScore(identity.pubkey, opts.runId, { summary, options: opts });
+  return { ok, total, status: ok > 0 ? 'published' : 'accepted', signedAs,
+    ...(typeof result.reason === 'string' ? { reason: result.reason } : {}) };
+}
+
+/** Confirmation must still belong to the same selected account and session. */
+export function discardSavedPersonalScore(receipt: PendingPersonalScore, confirmRemoval: () => boolean): boolean {
+  const identity = getIdentity();
+  const epoch = identityEpoch;
+  if (identity.mode !== 'nostr' || identity.pubkey !== receipt.pubkey ||
+      personalScoreIsPending(receipt.pubkey, receipt.options.runId)) return false;
+  if (!confirmRemoval()) return false;
+  const current = getIdentity();
+  if (identityEpoch !== epoch || current.mode !== 'nostr' || current.pubkey !== receipt.pubkey ||
+      personalScoreIsPending(receipt.pubkey, receipt.options.runId)) return false;
+  return discardPersonalScore(receipt);
+}
+
+export async function retryPersonalScore(receipt: PendingPersonalScore): Promise<PublishOutcome | null> {
+  const identity = getIdentity();
+  const saved = pendingPersonalScores().find(item => item.pubkey === receipt.pubkey && item.options.runId === receipt.options.runId);
+  if (!saved || identity.mode !== 'nostr' || identity.pubkey !== saved.pubkey) throw new ScoreSigningError();
+  return submitScore(saved.summary, saved.options);
 }
 
 async function sha256Hex(input: string): Promise<string> {

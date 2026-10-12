@@ -1,0 +1,93 @@
+{
+  "complete": true,
+  "sourceRevision": "d6ea31b608788b6f64c8693885eff2f559f68697",
+  "build": "20261012021234",
+  "productionDeployment": true,
+  "actualPublisherOriginWithLocalBuiltAssets": false,
+  "externalGetRequestsOnly": true,
+  "physicalAcceptance": false,
+  "results": [
+    {
+      "viewport": 320,
+      "method": "remote-signet",
+      "rawExactPayload": true,
+      "paintedExactPayload": true,
+      "backingPixels": 420,
+      "paintedPixels": 210,
+      "wholeQrFits": true,
+      "publicWritesBlocked": true,
+      "actualSdkDialog": true,
+      "physicalCamera": false
+    },
+    {
+      "viewport": 320,
+      "method": "nostrconnect",
+      "rawExactPayload": true,
+      "paintedExactPayload": true,
+      "backingPixels": 276,
+      "paintedPixels": 208,
+      "wholeQrFits": true,
+      "publicWritesBlocked": true,
+      "actualSdkDialog": true,
+      "physicalCamera": false
+    },
+    {
+      "viewport": 390,
+      "method": "remote-signet",
+      "rawExactPayload": true,
+      "paintedExactPayload": true,
+      "backingPixels": 420,
+      "paintedPixels": 211,
+      "wholeQrFits": true,
+      "publicWritesBlocked": true,
+      "actualSdkDialog": true,
+      "physicalCamera": false
+    },
+    {
+      "viewport": 390,
+      "method": "nostrconnect",
+      "rawExactPayload": true,
+      "paintedExactPayload": true,
+      "backingPixels": 276,
+      "paintedPixels": 277,
+      "wholeQrFits": true,
+      "publicWritesBlocked": true,
+      "actualSdkDialog": true,
+      "physicalCamera": false
+    },
+    {
+      "viewport": 1180,
+      "method": "remote-signet",
+      "rawExactPayload": true,
+      "paintedExactPayload": true,
+      "backingPixels": 420,
+      "paintedPixels": 316,
+      "wholeQrFits": true,
+      "publicWritesBlocked": true,
+      "actualSdkDialog": true,
+      "physicalCamera": false
+    },
+    {
+      "viewport": 1180,
+      "method": "nostrconnect",
+      "rawExactPayload": true,
+      "paintedExactPayload": true,
+      "backingPixels": 276,
+      "paintedPixels": 346,
+      "wholeQrFits": true,
+      "publicWritesBlocked": true,
+      "actualSdkDialog": true,
+      "physicalCamera": false
+    },
+    {
+      "viewport": 390,
+      "method": "remote-signet",
+      "optionalEncoderUnavailable": true,
+      "blockedEncoderRequests": 1,
+      "publishedApprovalLinkAvailable": true,
+      "qrScanQualified": false,
+      "actualSdkDialog": true,
+      "physicalCamera": false
+    }
+  ]
+}

@@ -1,0 +1,113 @@
+{
+  "gameRevision": "e4ec515c37cac48cb114f0314fc53bf9b2948211",
+  "actualMySignet": true,
+  "physicalDevice": false,
+  "gameOrScoreStateInjected": false,
+  "receiptSeeded": false,
+  "normallyEarnedScore": 4331,
+  "pubkey": "5c766d83753fdc3df0e7d77af3e196735fbf6e6d8c55f8fd82d43951d914ac27",
+  "earnedReceipt": {
+    "pubkey": "5c766d83753fdc3df0e7d77af3e196735fbf6e6d8c55f8fd82d43951d914ac27",
+    "summary": {
+      "score": 4331,
+      "distanceM": 2436,
+      "fuel": 0,
+      "roses": 0,
+      "overtakes": 5,
+      "nearMisses": 2,
+      "crashes": 4,
+      "bestRoseStreak": 0,
+      "topSpeedKph": 260,
+      "drifts": 0,
+      "bestDriftS": 0,
+      "durationS": 42,
+      "endedBy": "time"
+    },
+    "options": {
+      "runId": "aeaeb539-c821-4ae7-9776-765aabc412de",
+      "level": 1,
+      "startedAt": 1791704125838,
+      "finishedAt": 1791704167831,
+      "endedBy": "time",
+      "playerName": "TESTFREN",
+      "tour": "grand",
+      "btcBlock": 970885,
+      "btcUsdCents": 8299100
+    },
+    "arcade": true
+  },
+  "minimumHeldAgeMs": 660000,
+  "failedPhase": "reconnect-selected-account-hang-on-fren",
+  "errorType": "TimeoutError",
+  "acceptedBackendRowsForTestAccount": 0,
+  "actualDelayedPublicationQualified": false,
+  "causeEstablished": false,
+  "diagnostics": [
+    {
+      "label": "signer",
+      "origin": "https://mysignet.app",
+      "headings": [
+        "Security & Backup"
+      ],
+      "signerStatuses": [],
+      "outgoing": {
+        "REQ": 83,
+        "CLOSE": 81,
+        "EVENT:30078": 18
+      },
+      "incoming": {
+        "EOSE": 82
+      },
+      "relayOpenCount": 90,
+      "relayCloseCount": 98
+    },
+    {
+      "label": "approval",
+      "origin": "https://mysignet.app",
+      "headings": [
+        "Login Request"
+      ],
+      "signerStatuses": [],
+      "outgoing": {},
+      "incoming": {},
+      "relayOpenCount": 3,
+      "relayCloseCount": 1
+    },
+    {
+      "label": "arcade",
+      "origin": "https://arcade.600.wtf",
+      "headings": [
+        "Hang On, Fren",
+        "GAMESTR.IO LEADERBOARD",
+        "Open My Signet"
+      ],
+      "signerStatuses": [
+        "RECONNECTING\u2026"
+      ],
+      "outgoing": {
+        "REQ": 13,
+        "EVENT:24133": 3,
+        "CLOSE": 9
+      },
+      "incoming": {
+        "EVENT:30762": 1050,
+        "EOSE": 13,
+        "EVENT:0": 2,
+        "EVENT:5555": 472,
+        "OK": 3
+      },
+      "relayOpenCount": 13,
+      "relayCloseCount": 14
+    },
+    {
+      "label": "game",
+      "origin": null,
+      "headings": null,
+      "signerStatuses": null,
+      "outgoing": null,
+      "incoming": null,
+      "relayOpenCount": 0,
+      "relayCloseCount": 0
+    }
+  ]
+}

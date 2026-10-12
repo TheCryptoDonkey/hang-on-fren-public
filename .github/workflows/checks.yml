@@ -1,0 +1,68 @@
+name: Reliability checks
+on:
+  workflow_call:
+  pull_request:
+    branches: [main, master]
+  push:
+    branches: [main, master, 'fix/arcade-score-identity', 'fix/independent-signet-qr-recovery']
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.0
+      - uses: actions/setup-node@v6.4.0
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - name: Build exact client revision
+        env:
+          HOF_SOURCE_REVISION: ${{ github.sha }}
+        run: npm run build
+      - name: Fingerprint checked client
+        env:
+          HOF_SOURCE_REVISION: ${{ github.sha }}
+        run: node tools/client-manifest.mjs
+      - name: Test deployment command boundary
+        run: python3 -m unittest discover -s tools -p "test_deploy_remote.py"
+      - name: Archive checked client
+        uses: actions/upload-artifact@v6.0.0
+        with:
+          name: checked-client
+          include-hidden-files: true
+          path: dist
+          retention-days: 14
+          if-no-files-found: error
+      - name: Install QR browser
+        run: npx playwright install --with-deps chromium
+      - name: Decode actual SDK QR dialogs at mobile and desktop sizes
+        run: npm run test:qr
+      - name: Archive QR browser proof
+        uses: actions/upload-artifact@v6.0.0
+        with:
+          name: checked-client-qr
+          path: qr-browser-proof.json
+          retention-days: 14
+          if-no-files-found: error
+      - run: npm run build:server
+      - name: Qualify delayed API recovery without external network
+        run: node tools/claim-recovery-smoke.mjs | tee claim-recovery-proof.json
+      - name: Fingerprint checked API
+        run: node tools/api-manifest.mjs
+      - name: Archive checked API
+        uses: actions/upload-artifact@v6.0.0
+        with:
+          name: checked-api
+          path: server-dist
+          retention-days: 14
+          if-no-files-found: error
+      - name: Archive private recovery proof
+        uses: actions/upload-artifact@v6.0.0
+        with:
+          name: checked-api-recovery
+          path: claim-recovery-proof.json
+          retention-days: 14
+          if-no-files-found: error

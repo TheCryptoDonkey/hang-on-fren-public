@@ -1,0 +1,49 @@
+{
+  "origin": "https://hang-on-fren.playechoseven.com",
+  "sourceRevision": "2c6716fe9d607870adf02cbe9b22b0ea6c0ed93e",
+  "build": "20261010224313",
+  "artifactRunId": 38092435973,
+  "publication": "Tested GitHub client artifact deployed through existing authorised stall SSH access after the Actions deployment key was rejected. Only the static client release symlink changed.",
+  "files": [
+    {
+      "path": "/",
+      "sha256": "2fb18a9cb7c94808b6e54d48ce726694656d199cec1ebdef14f232d5bec0a1d3",
+      "bytes": 7724,
+      "cacheControl": "no-cache"
+    },
+    {
+      "path": "/version.json",
+      "sha256": "0a081d26d34f9a72bdd4a3124a6acb68bddf7b18b4859bc06e399aa797f9a46c",
+      "bytes": 81,
+      "cacheControl": "no-cache"
+    },
+    {
+      "path": "/assets/index-DmfiqwBA.js",
+      "sha256": "bc21b325ed2f334d85b1e1b7eddfee8d3ec326e16e961808dee3e50d5e9ee13f",
+      "bytes": 249606,
+      "cacheControl": "public, max-age=31536000, immutable"
+    },
+    {
+      "path": "/assets/index-BRmZg4AQ.css",
+      "sha256": "aa5b47cdf258e97a55ad61ca108d7706e2b370898355db7c8c9ee4bcf73a688c",
+      "bytes": 6708,
+      "cacheControl": "public, max-age=31536000, immutable"
+    },
+    {
+      "path": "/signet-verify.iife.js",
+      "sha256": "e1e3fbf675428c46cad743debecda96b4ba94de4a2b1930517373f63277d383d",
+      "bytes": 99270,
+      "cacheControl": null
+    },
+    {
+      "path": "/signet-login.iife.js",
+      "sha256": "237541e0c68dff8bddf84a1c3e7feed1c0753423a832f15adf32e9adb082280a",
+      "bytes": 348299,
+      "cacheControl": null
+    }
+  ],
+  "apiConfigurationChanged": false,
+  "apiRestarted": false,
+  "physicalDevice": false,
+  "actualMySignet": false
+}

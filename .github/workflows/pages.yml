@@ -1,66 +1,43 @@
 name: Deploy
-
 on:
   push:
-    branches:
-      - main
-      - master
+    branches: [main, master]
   workflow_dispatch:
     inputs:
-      migrate_scores:
-        description: Reconcile historic best scores onto both Gamestr relays
+      client_only:
+        description: Publish the checked custom-domain client without Pages changes
         required: false
         default: false
         type: boolean
-      migrate_target:
-        description: Relay target for score recovery (normally both)
-        required: false
-        default: both
-        type: choice
-        options:
-          - both
-          - main
-          - test
-
 permissions:
   contents: read
   pages: write
   id-token: write
-
 concurrency:
   group: deploy
   cancel-in-progress: false
-
 jobs:
+  qualify:
+    uses: ./.github/workflows/checks.yml
   build-pages:
+    if: ${{ !inputs.client_only }}
+    needs: qualify
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v7.0.0
-
-      - name: Setup Node
-        uses: actions/setup-node@v6.4.0
+      - uses: actions/checkout@v7.0.0
+      - uses: actions/setup-node@v6.4.0
         with:
           node-version: 22
           cache: npm
-
-      - name: Install
-        run: npm ci
-
-      - name: Test
-        run: npm test
-
-      - name: Build
+      - run: npm ci
+      - name: Build Pages client
+        env:
+          HOF_SOURCE_REVISION: ${{ github.sha }}
         run: npm run build -- --base "/${{ github.event.repository.name }}/"
-
-      - name: Configure Pages
-        uses: actions/configure-pages@v6.0.0
-
-      - name: Upload artifact
-        uses: actions/upload-pages-artifact@v5.0.0
+      - uses: actions/configure-pages@v6.0.0
+      - uses: actions/upload-pages-artifact@v5.0.0
         with:
           path: dist
-
   deploy-pages:
     needs: build-pages
     runs-on: ubuntu-latest
@@ -71,103 +48,7 @@ jobs:
       - name: Deploy
         id: deployment
         uses: actions/deploy-pages@v5.0.0
-
-  deploy-custom-domain:
-    needs: build-pages
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7.0.0
-
-      - name: Setup Node
-        uses: actions/setup-node@v6.4.0
-        with:
-          node-version: 22
-          cache: npm
-
-      - name: Install
-        run: npm ci
-
-      - name: Build for custom domain
-        run: npm run build
-
-      - name: Build score-claim service
-        run: npm run build:server
-
-      - name: Build historic-score migration
-        if: github.event_name == 'workflow_dispatch' && inputs.migrate_scores == true
-        run: npm run build:migrate
-
-      - name: Configure SSH
-        env:
-          DEPLOY_HOST: ${{ secrets.HOF_DEPLOY_HOST }}
-          DEPLOY_SSH_KEY: ${{ secrets.HOF_DEPLOY_SSH_KEY }}
-        run: |
-          install -m 700 -d ~/.ssh
-          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/hang-on-fren-deploy
-          chmod 600 ~/.ssh/hang-on-fren-deploy
-          ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts
-
-      - name: Publish release
-        env:
-          DEPLOY_HOST: ${{ secrets.HOF_DEPLOY_HOST }}
-          DEPLOY_ROOT: ${{ secrets.HOF_DEPLOY_ROOT }}
-          DEPLOY_USER: ${{ secrets.HOF_DEPLOY_USER }}
-        run: |
-          set -euo pipefail
-          release="$(date -u +%Y%m%d%H%M%S)"
-          remote="$DEPLOY_ROOT/releases/$release"
-          ssh -i ~/.ssh/hang-on-fren-deploy "$DEPLOY_USER@$DEPLOY_HOST" "mkdir -p '$remote'"
-          rsync -az --delete -e "ssh -i ~/.ssh/hang-on-fren-deploy" dist/ "$DEPLOY_USER@$DEPLOY_HOST:$remote/"
-          ssh -i ~/.ssh/hang-on-fren-deploy "$DEPLOY_USER@$DEPLOY_HOST" "ln -sfn '$remote' '$DEPLOY_ROOT/current'"
-
-      - name: Publish score-claim service
-        env:
-          DEPLOY_HOST: ${{ secrets.HOF_DEPLOY_HOST }}
-          DEPLOY_USER: ${{ secrets.HOF_DEPLOY_USER }}
-        run: |
-          set -euo pipefail
-          staged="/tmp/hangonfren-api-${GITHUB_SHA}.js"
-          rsync -az -e "ssh -i ~/.ssh/hang-on-fren-deploy" server-dist/index.js "$DEPLOY_USER@$DEPLOY_HOST:$staged"
-          ssh -i ~/.ssh/hang-on-fren-deploy "$DEPLOY_USER@$DEPLOY_HOST" "STAGED='$staged' bash -se" <<'REMOTE'
-          set -euo pipefail
-          api_entry="$(sudo systemctl cat hangonfren-api.service \
-            | awk '/^ExecStart=/ { for (i = 1; i <= NF; i += 1) if ($i ~ /\.js$/) print $i }' \
-            | tail -n 1)"
-          test -n "$api_entry"
-          test -f "$api_entry"
-          sudo install -m 0644 "$STAGED" "${api_entry}.next"
-          sudo mv "${api_entry}.next" "$api_entry"
-          rm -f "$STAGED"
-          sudo sed -i \
-            -e 's#wss://test\.relay\.gamestr\.io,##g' \
-            -e 's#,wss://test\.relay\.gamestr\.io##g' \
-            -e 's#wss://test\.relay\.gamestr\.io##g' \
-            /etc/hangonfren-api.env
-          sudo systemctl restart hangonfren-api.service
-          curl --retry 8 --retry-delay 1 --retry-connrefused --retry-all-errors \
-            -fsS http://127.0.0.1:3191/healthz
-          REMOTE
-
-      - name: Reconcile and verify historic scores
-        if: github.event_name == 'workflow_dispatch' && inputs.migrate_scores == true
-        env:
-          DEPLOY_HOST: ${{ secrets.HOF_DEPLOY_HOST }}
-          DEPLOY_USER: ${{ secrets.HOF_DEPLOY_USER }}
-          MIGRATE_TARGET: ${{ inputs.migrate_target }}
-        run: |
-          set -euo pipefail
-          case "$MIGRATE_TARGET" in
-            main) migration_relays="wss://main.relay.gamestr.io" ;;
-            test) migration_relays="wss://test.relay.gamestr.io" ;;
-            both) migration_relays="wss://main.relay.gamestr.io,wss://test.relay.gamestr.io" ;;
-            *) echo "invalid migrate_target: $MIGRATE_TARGET" >&2; exit 2 ;;
-          esac
-          staged="/tmp/hangonfren-migrate-${GITHUB_SHA}.js"
-          rsync -az -e "ssh -i ~/.ssh/hang-on-fren-deploy" server-dist/migrate-gamestr.js "$DEPLOY_USER@$DEPLOY_HOST:$staged"
-          ssh -i ~/.ssh/hang-on-fren-deploy "$DEPLOY_USER@$DEPLOY_HOST" "STAGED='$staged' MIGRATION_RELAYS='$migration_relays' bash -se" <<'REMOTE'
-          set -euo pipefail
-          trap 'rm -f "$STAGED"' EXIT
-          sudo bash -c 'set -euo pipefail; set -a; . "$1"; set +a; export HANGONFREN_WRITE_RELAYS="$3"; node "$2"' \
-            _ /etc/hangonfren-api.env "$STAGED" "$MIGRATION_RELAYS"
-          REMOTE
+  deploy-client:
+    needs: qualify
+    uses: ./.github/workflows/deploy-client.yml
+    secrets: inherit

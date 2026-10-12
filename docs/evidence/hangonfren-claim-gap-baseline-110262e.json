@@ -1,0 +1,29 @@
+{
+  "baselineConfirmed": true,
+  "delayedRun": {
+    "ageDays": 7,
+    "status": 422,
+    "error": "stale_run"
+  },
+  "unconfirmedRestartRetry": {
+    "status": 200,
+    "published": {
+      "ok": 0,
+      "total": 1
+    },
+    "scorePublicationsBefore": 1,
+    "scorePublicationsAfter": 1
+  },
+  "coherentClockCorrection": {
+    "shiftMs": 500,
+    "newDeduplicationKey": true,
+    "reason": "below_best"
+  },
+  "externalNetwork": false,
+  "liveProvider": false,
+  "liveClaims": false,
+  "disposableKeys": true,
+  "sourceRevision": "110262e9649610a28cf66552a1c2329cbf6fcfc0",
+  "compiledApiSha256": "7cf753c689d39e90bec5e023dacc336b24da7e7f12aabceebaf53465b7b4cae1",
+  "probeSha256": "d3a18474cf52f1db13a22a6bc4459878f8d139d80faf0386e8b327da2cffe0a0"
+}

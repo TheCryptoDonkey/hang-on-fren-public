@@ -19,7 +19,8 @@ import { initMusic, preloadMusic, startMusic, currentMusicUrl } from './music.js
 import { paletteAt, stageAt, stageIndexAt, sceneryKitAt, terrainAt, timeOfDayAt, marketPhaseAt, setActiveTour, getActiveTour, levelCount, finishDistanceM, roseRichAt, CHECKPOINT_BONUS, STAGE_M, TOUR_TITLES, type TourId } from './stages.js';
 import { loadSelectedTour, saveSelectedTour } from './progress.js';
 import { appendChar, backspace, cleanName, layout as nameLayout, keyAt as nameKeyAt, drawNameEntry } from './nameentry.js';
-import { connectNostr, fetchGlobalBoard, getIdentity, renameGuest, restoreIdentity, submitScore, useGuestMode, type GlobalScore } from './nostr.js';
+import { connectNostr, fetchGlobalBoard, getIdentity, renameGuest, restoreIdentity, submitScore, retryPersonalScore, discardSavedPersonalScore, personalScoreIsPending, ScoreSigningError, useGuestMode, type GlobalScore, type Identity } from './nostr.js';
+import { pendingPersonalScores } from './score-recovery.js';
 import { MODES, loadModeIndex, saveModeIndex } from './difficulty.js';
 import { approach, clamp } from './util.js';
 import { isSteeringCode, KeyboardDriveState } from './keyboard-drive.js';
@@ -281,6 +282,7 @@ const state = {
   qualifies: false,
   // --- gamestr (nostr) layer ---
   runId: '',
+  runIdentity: null as Identity | null,
   runStartedAt: 0, // wall-clock ms — the claim service sanity-checks the run window
   runFinishedAt: 0,
   submitted: false, // this run's score has been handed to the claim service
@@ -1451,6 +1453,7 @@ function beginRun(tour: TourId = selectedTour): void {
   state.runId = typeof crypto.randomUUID === 'function'
     ? crypto.randomUUID()
     : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+  state.runIdentity = getIdentity();
   state.runStartedAt = Date.now();
   state.runFinishedAt = 0;
   state.submitted = false;
@@ -1499,39 +1502,36 @@ function submitRunScore(playerName?: string): void {
     return;
   }
   state.submitted = true;
-  const identity = getIdentity();
+  const identity = state.runIdentity ?? getIdentity();
   const name = playerName ?? identity.name;
   if (identity.mode === 'guest' && playerName) renameGuest(playerName);
   state.submitStatus = 'CLAIMING ON GAMESTR…';
   const summary = state.summary;
-  // Wait for the chain snapshot (bounded by its own fetch timeout) so the
-  // claim carries the block height + price the run finished at.
+  // Capture this completed run before any asynchronous work or a new run.
+  const options = {
+    runId: state.runId,
+    playerName: name,
+    level: stageIndexAt(summary.distanceM) + 1,
+    tour: state.tour,
+    startedAt: state.runStartedAt,
+    finishedAt: state.runFinishedAt || Date.now(),
+    endedBy: state.outcome,
+  };
   void (btcFetch ?? Promise.resolve<BtcSnapshot>({}))
     .then(btc => submitScore(summary, {
-      runId: state.runId,
-      playerName: name,
-      level: stageIndexAt(summary.distanceM) + 1,
-      // A prehistoric run claims TAGGED (tour=stone + its own d-tag namespace),
-      // so it can never mix with — or replace — a road-tour score.
-      tour: state.tour,
-      startedAt: state.runStartedAt,
-      finishedAt: state.runFinishedAt || Date.now(),
-      endedBy: state.outcome,
-      btcBlock: btc.block,
-      btcUsdCents: btc.usdCents,
-    }))
+      ...options, btcBlock: btc.block, btcUsdCents: btc.usdCents,
+    }, identity))
     .then(result => {
       // Each outcome gets its own words: "the service refused", "the service
       // never heard about it" and "published as a different key" are different
       // failures, and blurring them cost days of silent score loss once.
-      const asGuest = result?.signedAs === 'guest-fallback' ? ' — AS GUEST (NOSTR SIGNER OFFLINE)' : '';
       state.submitStatus = result === null
         ? 'SCORE KEPT LOCAL — NO CLAIM SERVICE'
         : result.status === 'rejected'
           ? `GAMESTR REFUSED THE RUN — ${(result.error ?? 'rejected').toUpperCase()}`
           : result.status === 'published'
-            ? `SCORE ON GAMESTR ✓  ${result.ok}/${result.total} relays${state.stoneAge ? ' — BC BOARD' : ''}${asGuest}`
-            : `SCORE ACCEPTED — PUBLISHING SOON${asGuest}`;
+            ? `SCORE ON GAMESTR ✓  ${result.ok}/${result.total} relays${state.stoneAge ? ' — BC BOARD' : ''}`
+            : 'SCORE ACCEPTED — PUBLISHING SOON';
       setTitleNotice(state.submitStatus);
       if (result !== null && result.status !== 'rejected') {
         void fetchGlobalBoard(5, true)
@@ -1539,11 +1539,128 @@ function submitRunScore(playerName?: string): void {
           .catch(() => undefined);
       }
     })
-    .catch(() => {
-      state.submitStatus = 'SCORE KEPT LOCAL';
+    .catch((error: unknown) => {
+      state.submitStatus = error instanceof ScoreSigningError
+        ? error.saved ? 'PERSONAL SCORE KEPT LOCAL — RECONNECT NOSTR' : 'PERSONAL SCORE LOCAL — RETRY COULD NOT BE SAVED'
+        : 'SCORE KEPT LOCAL';
       setTitleNotice(state.submitStatus);
     });
 }
+
+// Saved public receipts stay with their original account across reloads.
+const recoveryPanel = document.createElement('section');
+recoveryPanel.id = 'personal-score-recovery';
+recoveryPanel.setAttribute('aria-label', 'Saved personal score');
+recoveryPanel.style.cssText = 'position:fixed;top:12px;left:50%;transform:translateX(-50%);z-index:20;width:min(520px,calc(100vw - 24px));box-sizing:border-box;padding:10px;background:#071423;color:#fff;border:1px solid #9fd0ff;border-radius:8px;font:14px system-ui;text-align:center;';
+const recoveryText = document.createElement('p');
+recoveryText.style.cssText = 'margin:0 0 8px;';
+recoveryText.setAttribute('role', 'status');
+const savedRunSelect = document.createElement('select');
+savedRunSelect.setAttribute('aria-label', 'Saved personal run');
+savedRunSelect.style.cssText = 'min-height:44px;max-width:100%;padding:8px;margin:2px;background:#10273e;color:white;border:1px solid #9fd0ff;font:inherit;';
+let selectedSavedRun = '';
+savedRunSelect.addEventListener('change', () => { selectedSavedRun = savedRunSelect.value; refreshRecoveryControls(); });
+const retryButton = document.createElement('button');
+retryButton.textContent = 'RETRY SCORE';
+const reconnectButton = document.createElement('button');
+const removeButton = document.createElement('button');
+removeButton.textContent = 'REMOVE SELECTED RUN';
+for (const button of [retryButton, reconnectButton, removeButton]) button.style.cssText = 'min-height:44px;padding:8px 12px;margin:2px;border-radius:5px;background:#10273e;color:white;border:1px solid #9fd0ff;font:inherit;cursor:pointer;';
+recoveryPanel.append(recoveryText, savedRunSelect, retryButton, reconnectButton, removeButton);
+recoveryPanel.hidden = true;
+recoveryPanel.addEventListener('keydown', event => event.stopPropagation());
+document.body.append(recoveryPanel);
+let recoveryBusy = false;
+let recoveryRefreshAt = 0;
+let recoveryNotice: { pubkey: string; runId: string; text: string } | null = null;
+function refreshRecoveryControls(): void {
+  const receipts = pendingPersonalScores();
+  const identity = getIdentity();
+  const ownReceipts = receipts.filter(receipt => identity.mode === 'nostr' && receipt.pubkey === identity.pubkey);
+  const own = ownReceipts.find(receipt => receipt.options.runId === selectedSavedRun) ?? ownReceipts[0];
+  selectedSavedRun = own?.options.runId ?? '';
+  const optionsKey = JSON.stringify(ownReceipts.map(receipt => [receipt.options.runId, receipt.summary.score]));
+  if (savedRunSelect.dataset.options !== optionsKey) {
+    savedRunSelect.replaceChildren(...ownReceipts.map(receipt => {
+      const option = document.createElement('option');
+      option.value = receipt.options.runId;
+      option.textContent = `${receipt.summary.score.toLocaleString()} points · ${new Date(receipt.options.finishedAt).toLocaleString()}`;
+      return option;
+    }));
+    savedRunSelect.dataset.options = optionsKey;
+  }
+  savedRunSelect.value = selectedSavedRun;
+  savedRunSelect.hidden = ownReceipts.length < 2;
+  savedRunSelect.disabled = recoveryBusy;
+  recoveryPanel.hidden = receipts.length === 0 || (state.phase !== 'title' && state.phase !== 'gameover') || state.qualifies || isV4vOpen();
+  retryButton.hidden = !own;
+  const pending = !!own && personalScoreIsPending(own.pubkey, own.options.runId);
+  retryButton.disabled = recoveryBusy || pending;
+  removeButton.hidden = !own;
+  removeButton.disabled = recoveryBusy || pending;
+  reconnectButton.disabled = recoveryBusy;
+  reconnectButton.textContent = (own ?? receipts[0])?.arcade ? 'RECONNECT IN ARCADE' : 'RECONNECT NOSTR';
+  if (!recoveryBusy) recoveryText.textContent = pending
+    ? 'PERSONAL SCORE SUBMISSION IN PROGRESS — finish the current approval or wait for its result.'
+    : own && recoveryNotice?.pubkey === own.pubkey && recoveryNotice.runId === own.options.runId
+    ? recoveryNotice.text
+    : own
+    ? `PERSONAL SCORE ${own.summary.score.toLocaleString()} WAITING — retry with this account.`
+    : 'PERSONAL SCORE WAITING — reconnect its original Nostr account.';
+}
+retryButton.addEventListener('click', () => {
+  if (recoveryBusy) return;
+  const identity = getIdentity();
+  const receipts = pendingPersonalScores().filter(item => identity.mode === 'nostr' && item.pubkey === identity.pubkey);
+  const receipt = receipts.find(item => item.options.runId === selectedSavedRun) ?? receipts[0];
+  if (!receipt || personalScoreIsPending(receipt.pubkey, receipt.options.runId)) return;
+  recoveryBusy = true;
+  refreshRecoveryControls();
+  recoveryText.textContent = 'PUBLISHING PERSONAL SCORE…';
+  void retryPersonalScore(receipt).then(result => {
+    const rejectionNotice = result?.status === 'rejected'
+      ? ({ run_conflict: 'This run differs from its first accepted details. Its saved copy is kept; you can remove it if you no longer need it.',
+          recovery_event_missing: 'The older server record cannot be retried safely. Its saved copy is kept; you can remove it if you no longer need it.' } as Record<string, string>)[result.error ?? '']
+      : undefined;
+    recoveryNotice = rejectionNotice
+      ? { pubkey: receipt.pubkey, runId: receipt.options.runId, text: rejectionNotice }
+      : result?.reason === 'below_best'
+      ? { pubkey: receipt.pubkey, runId: receipt.options.runId, text: 'A better run is already accepted. This run cannot replace it. You can remove its saved retry copy.' }
+      : null;
+    setTitleNotice(result?.status === 'published' ? 'PERSONAL SCORE ON GAMESTR ✓'
+      : result?.status === 'rejected' ? `PERSONAL SCORE REFUSED — ${result.error ?? 'REJECTED'}`
+      : 'PERSONAL SCORE STILL WAITING');
+  }).catch(() => setTitleNotice('PERSONAL SCORE WAITING — RECONNECT THE ORIGINAL ACCOUNT'))
+    .finally(() => { recoveryBusy = false; refreshRecoveryControls(); });
+});
+removeButton.addEventListener('click', () => {
+  if (recoveryBusy) return;
+  const identity = getIdentity();
+  const receipt = pendingPersonalScores().find(item => identity.mode === 'nostr' && item.pubkey === identity.pubkey
+    && item.options.runId === selectedSavedRun);
+  if (!receipt) return;
+  let confirmed = false;
+  const removed = discardSavedPersonalScore(receipt, () => confirmed = window.confirm(
+    `Remove this saved ${receipt.summary.score.toLocaleString()}-point run?\n\nThis removes its retry copy from this device and cannot be undone. Any published score stays on the leaderboard.`));
+  if (removed) recoveryNotice = null;
+  else if (confirmed) recoveryNotice = { pubkey: receipt.pubkey, runId: receipt.options.runId,
+    text: 'The saved run could not be removed. Its retry copy is still kept on this device.' };
+  refreshRecoveryControls();
+});
+reconnectButton.addEventListener('click', () => {
+  if (recoveryBusy) return;
+  const identity = getIdentity();
+  const receipts = pendingPersonalScores();
+  const receipt = receipts.find(item => identity.mode === 'nostr' && item.pubkey === identity.pubkey) ?? receipts[0];
+  if (!receipt) return;
+  if (receipt.arcade) {
+    window.location.assign('https://arcade.600.wtf/game/hang-on-fren');
+    return;
+  }
+  recoveryBusy = true;
+  refreshRecoveryControls();
+  void connectNostr().finally(() => { recoveryBusy = false; refreshRecoveryControls(); });
+});
 
 /** Toggle guest ↔ nostr identity from the title screen (N or tap). The nostr
  *  path opens the signet-login picker (extension / QR / bunker / nsec /
@@ -3117,6 +3234,7 @@ function frame(now: number): void {
       update(SIM_DT);
     }
     syncDomState();
+    if (now >= recoveryRefreshAt) { recoveryRefreshAt = now + 500; refreshRecoveryControls(); }
     if (!isTouch || now - lastRenderAt >= 12) {
       lastRenderAt = now;
       resize();

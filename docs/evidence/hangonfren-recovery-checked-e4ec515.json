@@ -1,0 +1,69 @@
+{
+  "assetFingerprint": {
+    "path": "/assets/index-C22w-CIe.js",
+    "sha256": "894b596836af817a1c092dbae26aad46e016643a9649f8aeaef4ae844256b591"
+  },
+  "mobileViewport": {
+    "width": 390,
+    "height": 844
+  },
+  "mobileControls": [
+    {
+      "label": "RETRY SCORE",
+      "height": 44,
+      "left": 39.328125,
+      "right": 159.25
+    },
+    {
+      "label": "RECONNECT IN ARCADE",
+      "height": 44,
+      "left": 163.25,
+      "right": 350.671875
+    },
+    {
+      "label": "REMOVE SELECTED RUN",
+      "height": 44,
+      "left": 100.265625,
+      "right": 289.71875
+    }
+  ],
+  "fixture": "Exact hosted checked client served under the publisher origin with a private arcade parent. Seeded public receipts, not earned gameplay. External network writes and relay sockets blocked; claim responses and account signing simulated locally, not real publication.",
+  "pubkey": "61cd6f895ccee35900f9127e60ec11b4345c17c964a352025fd8c590378a8d14",
+  "elapsedMs": 30134,
+  "closedParentReceiptRetained": true,
+  "closedParentClaimAttempts": 0,
+  "reloadReceiptRetained": true,
+  "reconnectDestination": "https://arcade.600.wtf/game/hang-on-fren",
+  "wrongAccountRetryHidden": true,
+  "canonicalSameAccountRetry": {
+    "pubkey": "61cd6f895ccee35900f9127e60ec11b4345c17c964a352025fd8c590378a8d14",
+    "runId": "3d795fa0-59d0-47fe-82e1-52c6c9beb28e",
+    "score": 100,
+    "kind": 27235,
+    "canonicalSignature": true,
+    "payloadHashBound": true
+  },
+  "selectedRunRetry": {
+    "pubkey": "61cd6f895ccee35900f9127e60ec11b4345c17c964a352025fd8c590378a8d14",
+    "runId": "2c6b46b8-92b6-4729-88c5-3c63f38b9684",
+    "score": 100,
+    "kind": 27235,
+    "canonicalSignature": true,
+    "payloadHashBound": true
+  },
+  "queueSelectionRetainsOtherReceipt": true,
+  "wrongAccountRemoveHidden": true,
+  "removalCancelKeepsReceipt": true,
+  "confirmedRemovalOnlySelected": true,
+  "otherAccountPreserved": true,
+  "removalMakesNoClaim": true,
+  "belowBestExplainedAndRetained": true,
+  "legacyMissingEventExplained": true,
+  "runConflictExplained": true,
+  "clearedAfterSimulatedPublication": true,
+  "physicalDevice": false,
+  "actualMySignet": false,
+  "sourceRevision": "e4ec515c37cac48cb114f0314fc53bf9b2948211",
+  "checkedWorkflowRun": 38121444118,
+  "checkedWorkflowConclusion": "success"
+}

@@ -1,0 +1,40 @@
+name: Deploy checked client
+on:
+  workflow_call:
+permissions:
+  contents: read
+jobs:
+  deploy-client:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v6.0.0
+        with:
+          name: checked-client
+          path: dist
+      - uses: actions/download-artifact@v6.0.0
+        with:
+          name: checked-api
+          path: dist/api
+      - name: Configure scoped SSH credential
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.HOF_DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.HOF_DEPLOY_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/hang-on-fren-deploy
+          chmod 600 ~/.ssh/hang-on-fren-deploy
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+      - name: Publish checked client and verify unchanged API
+        env:
+          DEPLOY_HOST: ${{ secrets.HOF_DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.HOF_DEPLOY_USER }}
+        run: |
+          set -euo pipefail
+          release="arcade-${GITHUB_SHA}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          ssh_options="-i $HOME/.ssh/hang-on-fren-deploy -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o BatchMode=yes"
+          ssh $ssh_options "$DEPLOY_USER@$DEPLOY_HOST" "hof-deploy prepare $release"
+          rsync -az -e "ssh $ssh_options" dist/ "$DEPLOY_USER@$DEPLOY_HOST:$release/"
+          ssh $ssh_options "$DEPLOY_USER@$DEPLOY_HOST" "hof-deploy verify-api $release"
+          ssh $ssh_options "$DEPLOY_USER@$DEPLOY_HOST" "hof-deploy activate $release"
+          curl --retry 5 --retry-delay 2 --fail --silent --show-error https://hang-on-fren.playechoseven.com/version.json > version.json
+          node -e 'const v=require("./version.json");if(v.revision!==process.env.GITHUB_SHA)throw Error("Public revision mismatch")'

@@ -1,0 +1,66 @@
+{
+  "assetFingerprint": {
+    "path": "/assets/index-DmfiqwBA.js",
+    "sha256": "bc21b325ed2f334d85b1e1b7eddfee8d3ec326e16e961808dee3e50d5e9ee13f"
+  },
+  "mobileViewport": {
+    "width": 390,
+    "height": 844
+  },
+  "mobileControls": [
+    {
+      "label": "RETRY SCORE",
+      "height": 44,
+      "left": 39.328125,
+      "right": 159.25
+    },
+    {
+      "label": "RECONNECT IN ARCADE",
+      "height": 44,
+      "left": 163.25,
+      "right": 350.671875
+    }
+  ],
+  "fixture": "Locally built Hang On Fren replacement served under the public consumer origin with a private arcade parent. Seeded public receipt, not earned gameplay. All external network writes and relay sockets blocked; claim response simulated locally, not real publication.",
+  "pubkey": "5ba4b9923ebf04f01e1465dc40a1801055ead3602f390f7fd8c3f7fadc8f4eb2",
+  "elapsedMs": 30090,
+  "closedParentReceiptRetained": true,
+  "closedParentClaimAttempts": 0,
+  "reloadReceiptRetained": true,
+  "reconnectDestination": "https://arcade.600.wtf/game/hang-on-fren",
+  "wrongAccountRetryHidden": true,
+  "canonicalSameAccountRetry": {
+    "pubkey": "5ba4b9923ebf04f01e1465dc40a1801055ead3602f390f7fd8c3f7fadc8f4eb2",
+    "runId": "d478de38-7f2c-4b24-ae53-9d5f18faf82e",
+    "score": 100,
+    "kind": 27235,
+    "canonicalSignature": true,
+    "payloadHashBound": true
+  },
+  "selectedRunRetry": {
+    "pubkey": "5ba4b9923ebf04f01e1465dc40a1801055ead3602f390f7fd8c3f7fadc8f4eb2",
+    "runId": "78c422f3-ea1e-452b-b5c8-10f005540130",
+    "score": 100,
+    "kind": 27235,
+    "canonicalSignature": true,
+    "payloadHashBound": true
+  },
+  "queueSelectionRetainsOtherReceipt": true,
+  "clearedAfterSimulatedPublication": true,
+  "physicalDevice": false,
+  "actualMySignet": false,
+  "sourceRevision": "e7fc17b6bbbdf08e55db9618f8ba9b8ad8ad74ef",
+  "unitQualification": {
+    "baselineIdentityTests": {
+      "passed": 1,
+      "failed": 5
+    },
+    "replacementTests": {
+      "passed": 206,
+      "failed": 0
+    },
+    "typecheck": true,
+    "clientBuild": true,
+    "serverBuild": true
+  }
+}
