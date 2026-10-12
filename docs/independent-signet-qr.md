@@ -1,0 +1,9 @@
+# Independent Signet QR rendering
+
+The current published Hang On Fren QR does not decode with jsQR at its rendered 360px backing size. An independent OpenCV observation detects the corners but cannot decode the screenshot. A control redraw of the identical approval link with whole-pixel cells and a complete four-cell quiet zone decodes successfully. Approval-link login itself succeeds with a fresh verified account proof; that does not qualify QR scanning.
+
+The application now observes the SDK's existing My Signet and NostrConnect canvases while a login dialog is open. It redraws each unchanged SDK payload with whole-pixel cells and a four-cell quiet zone, and fits it to available dialog width. It changes no challenge, account, signer, relay or authentication storage. The observer stops when login finishes or is cancelled. A failed optional encoder load preserves the SDK's approval link and other login methods.
+
+`npm run test:qr` checks the actual built game and SDK dialogs at 320px, 390px and desktop widths. It decodes both backing pixels and displayed screenshots to each exact current payload and checks that the entire QR fits. A separate control actually blocks the optional encoder request and requires the SDK approval link to remain available. Public HTTP and WebSocket traffic is intercepted; no real login, public event, score or payment is submitted. The workflow retains the original unit, client-build and durable API gates and adds this browser gate and its proof artifact.
+
+The local built-code proof is [independent-qr-local.json](evidence/independent-qr-local.json). Its source revision is null because it was produced before committing the correction. Exact hosted artifact and published browser verification are still required. None of these checks substitutes for a physical camera or independent signer-app test.

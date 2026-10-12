@@ -18,6 +18,7 @@ import { GAME_ID, GAME_PUBKEY, GAME_TITLE, SCORE_KIND, type RunSummary } from '.
 import { assetUrl } from './asset-url.js';
 import { DEFAULT_READ_RELAYS, DEFAULT_WRITE_RELAYS } from './relays.js';
 import { consumeArcadeHandoff } from './arcade-handoff.js';
+import { observeLoginQr } from './login-qr.js';
 import { retainPersonalScore, discardPersonalScore, clearPublishedPersonalScore, pendingPersonalScores, type PendingPersonalScore } from './score-recovery.js';
 
 const GUEST_KEY = 'hangonfren:guest:v1';
@@ -243,7 +244,15 @@ function safePubkey(nsecHex: string): string | null {
 export async function connectNostr(): Promise<string | null> {
   const epoch = ++identityEpoch;
   if (!(await ensureSignetLoaded()) || !window.Signet || epoch !== identityEpoch) return null;
+  let stopQr: (() => void) | undefined;
   try {
+    // Keep the SDK's link and other login methods available if the optional
+    // QR drawing module cannot load.
+    stopQr = await observeLoginQr().catch(err => {
+      console.warn('[gamestr] QR rendering enhancement unavailable:', err);
+      return undefined;
+    });
+    if (epoch !== identityEpoch) return null;
     const session = await window.Signet.login({
       appName: GAME_TITLE,
       theme: 'dark',
@@ -259,6 +268,8 @@ export async function connectNostr(): Promise<string | null> {
   } catch (err) {
     console.warn('[gamestr] nostr sign-in failed:', err);
     return null;
+  } finally {
+    stopQr?.();
   }
 }
 

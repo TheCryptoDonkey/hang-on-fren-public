@@ -28,6 +28,17 @@ jobs:
           path: dist
           retention-days: 14
           if-no-files-found: error
+      - name: Install QR browser
+        run: npx playwright install --with-deps chromium
+      - name: Decode actual SDK QR dialogs at mobile and desktop sizes
+        run: npm run test:qr
+      - name: Archive QR browser proof
+        uses: actions/upload-artifact@v6.0.0
+        with:
+          name: checked-client-qr
+          path: qr-browser-proof.json
+          retention-days: 14
+          if-no-files-found: error
       - run: npm run build:server
       - name: Qualify delayed API recovery without external network
         run: node tools/claim-recovery-smoke.mjs | tee claim-recovery-proof.json
