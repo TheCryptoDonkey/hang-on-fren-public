@@ -1,9 +1,10 @@
 name: Reliability checks
 on:
+  workflow_call:
   pull_request:
     branches: [main, master]
   push:
-    branches: ['fix/arcade-score-identity']
+    branches: [main, master, 'fix/arcade-score-identity', 'fix/independent-signet-qr-recovery']
 permissions:
   contents: read
 jobs:
@@ -21,10 +22,17 @@ jobs:
         env:
           HOF_SOURCE_REVISION: ${{ github.sha }}
         run: npm run build
+      - name: Fingerprint checked client
+        env:
+          HOF_SOURCE_REVISION: ${{ github.sha }}
+        run: node tools/client-manifest.mjs
+      - name: Test deployment command boundary
+        run: python3 -m unittest discover -s tools -p "test_deploy_remote.py"
       - name: Archive checked client
         uses: actions/upload-artifact@v6.0.0
         with:
           name: checked-client
+          include-hidden-files: true
           path: dist
           retention-days: 14
           if-no-files-found: error

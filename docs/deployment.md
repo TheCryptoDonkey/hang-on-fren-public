@@ -1,0 +1,11 @@
+# Checked Hang On Fren deployment
+
+Main/master publication and the manual client-only workflow run the complete reliability gate first: 219 units, types/builds, actual SDK QR decoding including encoder failure, private delayed/restart API recovery and deployment command boundary checks. The custom hostname receives those exact archived client and API artifacts, not another build. Pages receives its own checked build with the repository base path.
+
+The Actions credential is restricted to Hang On Fren release uploads and activation through the root-owned `tools/deploy-remote.py` forced command. It cannot execute an arbitrary shell, forward ports or change the API/configuration. SSH trusts a pinned host key instead of trusting a deployment-time key scan. Install the handler at `/usr/local/libexec/hof-deploy` and add the dedicated public key to the deployment account with `restrict,command="/usr/local/libexec/hof-deploy"`. Never use an operator's existing private key for Actions.
+
+Each release has a unique source/run/attempt directory. Before atomically switching `current`, the handler verifies every client-manifest hash, the source revision, the version stamp, live API health and byte equivalence of the checked API entry with the running API file. A changed API fails before activation and requires a separate checked API rollout. This deliberately replaces the old unattended API overwrite/restart and relay-configuration rewrite. Historic-score migration remains an explicit operator action using `server/migrate-gamestr.ts`; it is not an ordinary client release step.
+
+Required repository secrets: `HOF_DEPLOY_HOST`, `HOF_DEPLOY_USER`, `HOF_DEPLOY_SSH_KEY`, and `HOF_DEPLOY_KNOWN_HOSTS`. Release-root confinement is set in the installed handler. The legacy `HOF_DEPLOY_ROOT` secret is unused.
+
+For a rollback, retain the previous release and use the operator's existing host access to atomically restore its `current` link. No release deletes older releases, edits the signing authority, rewrites relays or changes score history. Confirm `/version.json`, all manifest hashes and `/api/healthz` after publication. Physical camera/signer, controller and real paid-wallet acceptance remain separate.
