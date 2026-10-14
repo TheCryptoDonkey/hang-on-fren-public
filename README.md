@@ -67,3 +67,5 @@ compressed `.m4a` copies from `public/music/`).
 ## License
 
 MIT. See [LICENSE](LICENSE).
+
+The publisher-owned `game.json` defines game metadata, scoring, capabilities and `controller.profile`. The game reads its phone control defaults from that file; the same file is published at `/game.json` for Gamestr catalogues. The game definition extension is proposed and is not yet adopted by gamestr.io.
