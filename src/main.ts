@@ -1,10 +1,9 @@
 import {installArcadeGameController} from '@forgesworn/joystick-protocol/browser';
-installArcadeGameController({
-  allowedOrigins:['https://gamestr.62-238-98-53.sslip.io','https://arcade.600.wtf'],
-  profile:{version:1,name:'Hang On, Fren',theme:{background:'#13211f',accent:'#ffd76b'},slots:{joyL:{mode:'xy',label:'Steer',colour:'#80efcf'},A:{label:'Brake / Begin',icon:'◉',colour:'#ffd76b'},start:{label:'Continue',icon:'▶'}},layout:{version:1,
-    portrait:{joyL:{x:.24,y:.78,size:144,zone:{x:0,y:.28,width:.52,height:.72}},A:{x:.78,y:.78,size:88},start:{x:.5,y:.12,size:48,shape:'rounded'}},
-    landscape:{joyL:{x:.16,y:.68,size:144,zone:{x:0,y:.2,width:.4,height:.8}},A:{x:.85,y:.68,size:88},start:{x:.5,y:.15,size:48,shape:'rounded'}}}}
-});
+import {controllerProfileFromGameDefinition} from '@forgesworn/joystick-protocol';
+import gameDefinition from '../game.json';
+const controllerProfile=controllerProfileFromGameDefinition(gameDefinition);
+if (!controllerProfile) throw new Error('Invalid game controller definition');
+installArcadeGameController({allowedOrigins:['https://gamestr.62-238-98-53.sslip.io','https://arcade.600.wtf'],profile:controllerProfile});
 // Hang On, Fren — bootstrap, game states, main loop and input. Orchestrates the
 // road (road.ts), dynamic world (world.ts), clock economy (timer.ts), scoring
 // (scoring.ts), audio (audio.ts), rendering (render.ts) and HUD (hud.ts).

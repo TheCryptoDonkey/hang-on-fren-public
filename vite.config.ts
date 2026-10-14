@@ -1,4 +1,5 @@
 import { defineConfig, type Plugin } from 'vite';
+import {readFileSync} from 'node:fs';
 
 // Build stamp baked into the bundle and published as /version.json so a running
 // tab can detect a newer deploy. Mirrors neon-sentinel's convention.
@@ -14,6 +15,7 @@ function versionStamp(): Plugin {
     name: 'hang-on-fren-version-stamp',
     apply: 'build',
     generateBundle() {
+      this.emitFile({type:'asset',fileName:'game.json',source:readFileSync(new URL('./game.json',import.meta.url),'utf8')});
       this.emitFile({ type: 'asset', fileName: 'version.json', source: `${JSON.stringify({ build: BUILD_ID, ...(SOURCE_REVISION ? { revision: SOURCE_REVISION } : {}) })}\n` });
     },
   };
