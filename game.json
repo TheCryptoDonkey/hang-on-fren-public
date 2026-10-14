@@ -35,63 +35,12 @@
         },
         "A": {
           "label": "Brake / Begin",
-          "icon": "\u25c9",
+          "icon": "◉",
           "colour": "#ffd76b"
         },
         "start": {
           "label": "Continue",
-          "icon": "\u25b6"
-        }
-      },
-      "layout": {
-        "version": 1,
-        "portrait": {
-          "joyL": {
-            "x": 0.24,
-            "y": 0.78,
-            "size": 144,
-            "zone": {
-              "x": 0,
-              "y": 0.28,
-              "width": 0.52,
-              "height": 0.72
-            }
-          },
-          "A": {
-            "x": 0.78,
-            "y": 0.78,
-            "size": 88
-          },
-          "start": {
-            "x": 0.5,
-            "y": 0.12,
-            "size": 48,
-            "shape": "rounded"
-          }
-        },
-        "landscape": {
-          "joyL": {
-            "x": 0.16,
-            "y": 0.68,
-            "size": 144,
-            "zone": {
-              "x": 0,
-              "y": 0.2,
-              "width": 0.4,
-              "height": 0.8
-            }
-          },
-          "A": {
-            "x": 0.85,
-            "y": 0.68,
-            "size": 88
-          },
-          "start": {
-            "x": 0.5,
-            "y": 0.15,
-            "size": 48,
-            "shape": "rounded"
-          }
+          "icon": "▶"
         }
       }
     }
