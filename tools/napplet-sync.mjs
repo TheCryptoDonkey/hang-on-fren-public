@@ -2,15 +2,19 @@
 // Copy the napplet build into a soyLI project for publishing on napplet.soy.
 //
 //   npm run build:napplet
-//   node tools/napplet-sync.mjs ../hang-on-fren-napplet
+//   node tools/napplet-sync.mjs [soyli-project-dir] [--check]
+//
+// npm run napplet:release does the build, the sync and `soyli check` in one go.
+// The project defaults to $HOF_NAPPLET_PROJECT, then ../hang-on-fren-napplet.
 //
 // The project is a separate Git repository made with `soyli new`: soyLI
 // publishes the project's whole Git tree, which must stay small, so it holds
 // only the built index.html and the external assets. This script copies the
 // HTML, registers each file in dist-napplet-assets/ as an external soyLI asset
 // (replacing ones whose bytes changed and removing ones no longer built) and
-// points napplet.json at the single-file entry. It never commits or publishes;
-// review, then `soyli checkpoint` and `soyli publish` in the project.
+// points napplet.json at the single-file entry, then with --check runs
+// `soyli check` there. It never commits or publishes; review, then
+// `soyli checkpoint` and `soyli publish` in the project.
 import { execFileSync } from 'node:child_process';
 import { copyFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -20,11 +24,9 @@ const BUILD_HTML = join(ROOT, 'dist-napplet/index.html');
 const ASSETS_DIR = join(ROOT, 'dist-napplet-assets');
 const SOYLI = process.env.SOYLI ?? 'soyli';
 
-const target = process.argv[2];
-if (!target) {
-  console.error('Usage: node tools/napplet-sync.mjs <soyli-project-dir>');
-  process.exit(2);
-}
+const args = process.argv.slice(2);
+const check = args.includes('--check');
+const target = args.find(arg => !arg.startsWith('--')) ?? process.env.HOF_NAPPLET_PROJECT ?? join(ROOT, '../hang-on-fren-napplet');
 const project = resolve(target);
 const configPath = join(project, 'napplet.json');
 if (!existsSync(configPath)) throw new Error(`${project} is not a soyLI project (no napplet.json)`);
@@ -57,4 +59,5 @@ for (const asset of built) {
 
 const total = built.reduce((sum, asset) => sum + asset.bytes, 0);
 console.log(`Synced index.html and ${built.length} external assets (${(total / 1048576).toFixed(1)} MiB) into ${project}.`);
-console.log('Next, in the project: soyli check, soyli dev, then soyli checkpoint and soyli publish.');
+if (check) soyli('check');
+console.log(`Next, in ${project}: ${check ? '' : 'soyli check, '}soyli dev to try it, then soyli checkpoint "…" and soyli publish.`);
