@@ -2,6 +2,8 @@
 // data — world.ts consumes density/speed as traffic mods, scoring.ts applies
 // the score multiplier — so the modes stay trivially testable.
 
+import { kv } from './kv.js';
+
 export interface DifficultyMode {
   id: 'cruise' | 'classic' | 'degen';
   label: string;
@@ -24,7 +26,7 @@ const STORAGE_KEY = 'hangonfren:difficulty:v1';
 
 export function loadModeIndex(): number {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = kv.getItem(STORAGE_KEY);
     if (raw === null) return 1; // nothing saved yet → CLASSIC (Number(null) is 0!)
     const i = Number(raw);
     return Number.isInteger(i) && i >= 0 && i < MODES.length ? i : 1;
@@ -35,7 +37,7 @@ export function loadModeIndex(): number {
 
 export function saveModeIndex(index: number): void {
   try {
-    localStorage.setItem(STORAGE_KEY, String(index));
+    kv.setItem(STORAGE_KEY, String(index));
   } catch {
     /* private mode — selection just won't persist */
   }

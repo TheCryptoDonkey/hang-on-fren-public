@@ -2,6 +2,8 @@
 // persistence is a thin localStorage wrapper. This is also the seam where an
 // online Nostr leaderboard would later plug in (see scoring.buildScoreEvent).
 
+import { kv } from './kv.js';
+
 export interface HighScore {
   name: string;
   score: number;
@@ -47,7 +49,7 @@ export function rankOf(board: HighScore[], score: number): number {
 
 export function loadBoard(): HighScore[] {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = kv.getItem(STORAGE_KEY);
     if (!raw) return [...DEFAULT_BOARD];
     const parsed = JSON.parse(raw) as HighScore[];
     if (!Array.isArray(parsed) || parsed.length === 0) return [...DEFAULT_BOARD];
@@ -62,7 +64,7 @@ export function loadBoard(): HighScore[] {
 
 export function saveBoard(board: HighScore[]): void {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(board));
+    kv.setItem(STORAGE_KEY, JSON.stringify(board));
   } catch {
     /* private mode — board is session-only */
   }

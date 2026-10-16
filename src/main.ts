@@ -38,6 +38,10 @@ import { RIVAL_TOUR_FINISH_M, resolveRivalResult, type RivalResult } from './riv
 import { gradeStage, overallGrade, type StageResult } from './grade.js';
 import { initV4v, isBlessed, isV4vOpen, openV4v, shouldAskV4v } from './v4v.js';
 
+// The napplet edition (vite.napplet.config.ts) is a local-only guest build: no
+// nostr sign-in, no gamestr claims, no service worker.
+const NAPPLET = (import.meta as { env?: { MODE?: string } }).env?.MODE === 'napplet';
+
 // Voice one-liners lifted from Neon Sentinel for the special treat pickups.
 const VOICE: Partial<Record<PickupKind, string>> = {
   rose: assetUrl('sfx/want-rose-fren.m4a'),
@@ -1282,7 +1286,9 @@ interface PadState {
 
 function readGamepad(): PadState {
   const out: PadState = { steer: 0, brake: false, menu: false, left: false, right: false };
-  const pads = typeof navigator.getGamepads === 'function' ? navigator.getGamepads() : [];
+  let pads: readonly (Gamepad | null)[] = [];
+  // getGamepads throws SecurityError inside frames without the gamepad permission.
+  try { if (typeof navigator.getGamepads === 'function') pads = navigator.getGamepads(); } catch { /* no pads */ }
   for (const pad of pads) {
     if (!pad || !pad.connected) continue;
     const x = pad.axes[0] ?? 0;
@@ -1672,6 +1678,10 @@ reconnectButton.addEventListener('click', () => {
  *  path opens the signet-login picker (extension / QR / bunker / nsec /
  *  Amber), so it works on phones with no extension. */
 function toggleIdentity(): void {
+  if (NAPPLET) {
+    setTitleNotice('NOSTR SIGN-IN LIVES IN THE WEB VERSION');
+    return;
+  }
   if (getIdentity().mode === 'guest') {
     setTitleNotice('SIGN IN WITH NOSTR — PICK A METHOD…', 180);
     void connectNostr().then(pk => {
@@ -2904,6 +2914,7 @@ function renderTitleContents(store: SpriteStore): void {
     const id = getIdentity();
     const label = id.mode === 'nostr'
       ? `RIDING AS  NOSTR · ${id.name}   —   N / TAP FOR GUEST`
+      : NAPPLET ? `RIDING AS  GUEST · ${id.name}`
       : `RIDING AS  GUEST · ${id.name}   —   N / TAP FOR NOSTR`;
     outlinedText(label, W / 2, identY, '#9fd0ff', u, 4);
   }
@@ -3325,8 +3336,9 @@ if ((import.meta as { env?: { DEV?: boolean } }).env?.DEV) {
 async function boot(): Promise<void> {
   resize();
   // Offline/PWA support in production builds only — the service worker would
-  // fight Vite's dev-server module graph.
-  if ('serviceWorker' in navigator && !(import.meta as { env?: { DEV?: boolean } }).env?.DEV) {
+  // fight Vite's dev-server module graph. Napplets run in an opaque-origin
+  // sandbox with no service workers.
+  if (!NAPPLET && 'serviceWorker' in navigator && !(import.meta as { env?: { DEV?: boolean } }).env?.DEV) {
     navigator.serviceWorker.register(assetUrl('sw.js')).catch(() => undefined);
   }
   initMusic(MUSIC_URL);

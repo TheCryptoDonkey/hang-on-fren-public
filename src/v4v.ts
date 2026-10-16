@@ -3,6 +3,8 @@
 // gives no payment callback, so the rider self-confirms with I PAID. Patrons
 // ride blessed for 24 hours: HODL shield armed and nitro lit at launch.
 
+import { kv } from './kv.js';
+
 const LIGHTNING_ADDRESS = 'profusemeat89@walletofsatoshi.com';
 const STORE_KEY = 'hangonfren:v4v:v1';
 
@@ -13,14 +15,14 @@ interface V4vState {
 
 function loadState(): V4vState {
   try {
-    const raw = localStorage.getItem(STORE_KEY);
+    const raw = kv.getItem(STORE_KEY);
     if (raw) return { declines: 0, paidAt: 0, ...JSON.parse(raw) };
   } catch { /* ignore */ }
   return { declines: 0, paidAt: 0 };
 }
 
 function saveState(s: V4vState): void {
-  try { localStorage.setItem(STORE_KEY, JSON.stringify(s)); } catch { /* ignore */ }
+  try { kv.setItem(STORE_KEY, JSON.stringify(s)); } catch { /* ignore */ }
 }
 
 const NUDGES = [

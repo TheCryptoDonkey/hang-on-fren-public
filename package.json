@@ -10,6 +10,8 @@
     "build": "npm run typecheck && vite build",
     "build:server": "vite build --config vite.server.config.ts",
     "build:migrate": "vite build --config vite.migrate.config.ts",
+    "build:napplet": "tsc --noEmit && vite build --config vite.napplet.config.ts",
+    "test:napplet": "napplet-conformance ./dist-napplet",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit && tsc --noEmit --project tsconfig.server.json",
     "test": "vitest run",
@@ -17,6 +19,8 @@
     "gen:art": "node tools/gen-art.mjs"
   },
   "devDependencies": {
+    "@napplet/conformance-cli": "0.3.4",
+    "@napplet/vite-plugin": "0.16.1",
     "@types/node": "^22.20.1",
     "jsqr": "1.4.0",
     "nostr-tools": "^2.23.9",
@@ -28,7 +32,7 @@
   },
   "license": "MIT",
   "dependencies": {
-    "qrcode-generator": "1.5.2",
-    "@forgesworn/joystick-protocol": "file:vendor/joystick/joystick-protocol-0.4.2-613408c2b830.tgz"
+    "@forgesworn/joystick-protocol": "file:vendor/joystick/joystick-protocol-0.4.2-613408c2b830.tgz",
+    "qrcode-generator": "1.5.2"
   }
 }

@@ -19,3 +19,4 @@ art-originals/*
 !art-originals/pickups/
 server-dist/
 /qr-browser-proof.json
+dist-napplet

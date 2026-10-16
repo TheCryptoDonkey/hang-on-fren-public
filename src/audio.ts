@@ -3,6 +3,9 @@
 // settings, a continuous engine oscillator whose pitch tracks speed, and a
 // cached voice-clip player for the reused "Want rose, fren?" line.
 
+import { kv } from './kv.js';
+import { loadAssetBytes } from './asset-url.js';
+
 type ToneKind = 'rose' | 'crash' | 'wipeout' | 'skid' | 'tick' | 'milestone' | 'overtake' | 'nearMiss' | 'combo' | 'rev';
 
 interface AudioSettings {
@@ -593,8 +596,7 @@ const voiceClips = new Map<string, AudioBuffer | 'loading' | 'failed'>();
 export function preloadVoiceClip(url: string): void {
   if (!audioCtx || voiceClips.has(url)) return;
   voiceClips.set(url, 'loading');
-  fetch(url)
-    .then(r => (r.ok ? r.arrayBuffer() : Promise.reject(new Error(`voice ${r.status}`))))
+  loadAssetBytes(url)
     .then(bytes => audioCtx!.decodeAudioData(bytes))
     .then(buffer => voiceClips.set(url, buffer))
     .catch(() => voiceClips.set(url, 'failed'));
@@ -938,11 +940,11 @@ function createVespaWave(ctx: AudioContext): PeriodicWave {
 
 function loadSettings(): AudioSettings {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = kv.getItem(STORAGE_KEY);
     if (!raw) {
       // Preserve only the user's mute choice across the v2 rebalance. Carrying
       // the old gain defaults forward would defeat the quieter new mix.
-      const legacy = localStorage.getItem(LEGACY_STORAGE_KEY);
+      const legacy = kv.getItem(LEGACY_STORAGE_KEY);
       if (!legacy) return { ...DEFAULTS };
       const previous = JSON.parse(legacy) as Partial<AudioSettings>;
       return { ...DEFAULTS, muted: typeof previous.muted === 'boolean' ? previous.muted : DEFAULTS.muted };
@@ -961,7 +963,7 @@ function loadSettings(): AudioSettings {
 
 function saveSettings(): void {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
+    kv.setItem(STORAGE_KEY, JSON.stringify(settings));
   } catch {
     /* private mode — runtime audio still works */
   }

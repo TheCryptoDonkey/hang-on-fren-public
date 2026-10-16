@@ -20,6 +20,7 @@ import { DEFAULT_READ_RELAYS, DEFAULT_WRITE_RELAYS } from './relays.js';
 import { consumeArcadeHandoff } from './arcade-handoff.js';
 import { observeLoginQr } from './login-qr.js';
 import { retainPersonalScore, discardPersonalScore, clearPublishedPersonalScore, pendingPersonalScores, type PendingPersonalScore } from './score-recovery.js';
+import { kv } from './kv.js';
 
 const GUEST_KEY = 'hangonfren:guest:v1';
 const MODE_KEY = 'hangonfren:identity-mode:v1';
@@ -149,7 +150,7 @@ function sessionCanSign(session: SignetSession | null): boolean {
 export function loadIdentityMode(): IdentityMode {
   if (currentMode !== null) return currentMode;
   try {
-    return localStorage.getItem(MODE_KEY) === 'nostr' ? 'nostr' : 'guest';
+    return kv.getItem(MODE_KEY) === 'nostr' ? 'nostr' : 'guest';
   } catch {
     return 'guest';
   }
@@ -157,7 +158,7 @@ export function loadIdentityMode(): IdentityMode {
 
 export function saveIdentityMode(mode: IdentityMode): void {
   currentMode = mode;
-  try { localStorage.setItem(MODE_KEY, mode); } catch { /* private mode */ }
+  try { kv.setItem(MODE_KEY, mode); } catch { /* private mode */ }
 }
 
 export function cleanGuestName(name: string): string {
@@ -167,7 +168,7 @@ export function cleanGuestName(name: string): string {
 
 function readGuest(): StoredGuest | null {
   try {
-    const raw = localStorage.getItem(GUEST_KEY);
+    const raw = kv.getItem(GUEST_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as Partial<StoredGuest>;
     if (typeof parsed.nsecHex !== 'string' || !/^[0-9a-f]{64}$/i.test(parsed.nsecHex)) return null;
@@ -184,7 +185,7 @@ function readGuest(): StoredGuest | null {
 }
 
 function writeGuest(record: StoredGuest): void {
-  try { localStorage.setItem(GUEST_KEY, JSON.stringify(record)); } catch { /* ignore */ }
+  try { kv.setItem(GUEST_KEY, JSON.stringify(record)); } catch { /* ignore */ }
 }
 
 /** Create (or restore) the guest keypair. Freshly-created guests publish a
@@ -679,7 +680,7 @@ interface BoardCache {
 
 function readBoardCache(): BoardCache | null {
   try {
-    const raw = localStorage.getItem(BOARD_CACHE_KEY);
+    const raw = kv.getItem(BOARD_CACHE_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as Partial<BoardCache>;
     if (!Array.isArray(parsed.entries) || typeof parsed.fetchedAt !== 'number') return null;
@@ -736,7 +737,7 @@ export async function fetchGlobalBoard(limit = 5, force = false): Promise<Global
   }
   const entries = Array.from(bestByPlayer.values()).sort((a, b) => b.score - a.score).slice(0, 20);
   if (entries.length || !cached) {
-    try { localStorage.setItem(BOARD_CACHE_KEY, JSON.stringify({ entries, fetchedAt: Date.now() })); } catch { /* ignore */ }
+    try { kv.setItem(BOARD_CACHE_KEY, JSON.stringify({ entries, fetchedAt: Date.now() })); } catch { /* ignore */ }
   }
   const out = entries.length ? entries : cached?.entries ?? [];
   return out.slice(0, limit);
