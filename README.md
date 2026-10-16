@@ -75,14 +75,16 @@ leaves music out) is a separate external file fetched when first needed. The
 shell serves them from Blossom by sha256.
 
 To publish, keep a separate soyLI project (made with `soyli new`) holding only
-the build, because soyLI publishes the project's whole Git tree:
+the build, because soyLI publishes the project's whole Git tree. With the
+project at `../hang-on-fren-napplet` (or `HOF_NAPPLET_PROJECT`):
 
 ```sh
-node tools/napplet-sync.mjs ../hang-on-fren-napplet
+npm run napplet:release   # build, copy into the project, soyli check
 ```
 
-The script copies `index.html` and registers the external assets; then run
-`soyli check`, `soyli checkpoint` and `soyli publish` in that project.
+Then, in the project, `soyli dev` to try it, `soyli checkpoint "…"` and
+`soyli publish`. Keep the project's `napplet.json`: its `identifier` decides
+which listing a publish updates.
 
 Differences in the napplet edition:
 

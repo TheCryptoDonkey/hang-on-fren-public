@@ -12,6 +12,7 @@
     "build:migrate": "vite build --config vite.migrate.config.ts",
     "build:napplet": "tsc --noEmit && vite build --config vite.napplet.config.ts",
     "test:napplet": "napplet-conformance ./dist-napplet",
+    "napplet:release": "npm run build:napplet && node tools/napplet-sync.mjs --check",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit && tsc --noEmit --project tsconfig.server.json",
     "test": "vitest run",
