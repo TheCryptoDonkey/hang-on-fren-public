@@ -5,12 +5,13 @@
 // difficulty.ts / highscore.ts.
 
 import type { TourId } from './stages.js';
+import { kv } from './kv.js';
 
 const TOUR_KEY = 'hangonfren:tour:v1';
 
 export function loadSelectedTour(): TourId {
   try {
-    const stored = localStorage.getItem(TOUR_KEY);
+    const stored = kv.getItem(TOUR_KEY);
     return stored === 'world' || stored === 'stone' ? stored : 'grand';
   } catch {
     return 'grand';
@@ -19,7 +20,7 @@ export function loadSelectedTour(): TourId {
 
 export function saveSelectedTour(tour: TourId): void {
   try {
-    localStorage.setItem(TOUR_KEY, tour);
+    kv.setItem(TOUR_KEY, tour);
   } catch {
     /* private mode — selection just won't persist */
   }

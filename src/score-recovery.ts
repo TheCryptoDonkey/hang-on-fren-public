@@ -1,5 +1,6 @@
 import type { RunSummary } from './scoring.js';
 import type { SubmitScoreOptions } from './nostr.js';
+import { kv } from './kv.js';
 
 const KEY = 'hangonfren:pending-personal-scores:v1';
 const MAX_BYTES = 128_000;
@@ -52,7 +53,7 @@ function parseReceipt(value: unknown): PendingPersonalScore | null {
 
 function readReceipts(): PendingPersonalScore[] | null {
   try {
-    const raw = localStorage.getItem(KEY);
+    const raw = kv.getItem(KEY);
     if (raw === null) return [];
     if (raw.length > MAX_BYTES) return null;
     const items: unknown = JSON.parse(raw);
@@ -79,7 +80,7 @@ export function retainPersonalScore(receipt: PendingPersonalScore): boolean {
   items.push(safe);
   const serialized = JSON.stringify(items);
   if (serialized.length > MAX_BYTES || items.length > 64) return false;
-  try { localStorage.setItem(KEY, serialized); return true; } catch { return false; }
+  try { kv.setItem(KEY, serialized); return true; } catch { return false; }
 }
 
 /** Remove only the exact public receipt the owner reviewed. */
@@ -93,8 +94,8 @@ export function discardPersonalScore(expected: PendingPersonalScore): boolean {
   if (index < 0) return false;
   items.splice(index, 1);
   try {
-    if (items.length) localStorage.setItem(KEY, JSON.stringify(items));
-    else localStorage.removeItem(KEY);
+    if (items.length) kv.setItem(KEY, JSON.stringify(items));
+    else kv.removeItem(KEY);
     return true;
   } catch { return false; }
 }

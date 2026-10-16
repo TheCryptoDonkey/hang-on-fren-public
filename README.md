@@ -56,6 +56,28 @@ SSH keys, server IPs, Caddy config, or Cloudflare origin details.
 
 Private deployment topology belongs outside this repo.
 
+## Napplet edition
+
+The same game also builds as a [NIP-5D](https://github.com/nostr-protocol/nips/pull/2303)
+napplet: one self-contained `index.html` that runs in a sandboxed iframe on
+napplet shells such as [napplet.soy](https://napplet.soy).
+
+```sh
+npm run build:napplet   # writes dist-napplet/index.html and .nip5a-manifest.json
+npm run test:napplet    # napplet conformance checks in headless Chromium
+```
+
+`vite.napplet.config.ts` swaps the modules that need network access, browser
+storage or the arcade window for the versions in `src/napplet/`, and inlines
+every asset the game loads. The web build is unaffected. Differences in the
+napplet edition:
+
+- Saved state uses the shell's storage NAP instead of `localStorage`.
+- Riders play as local guests. There is no Nostr sign-in, no gamestr score
+  claims or global board, and no phone controller pairing.
+- Music is re-encoded as 96 kbps stereo AAC by default (needs `ffmpeg`). Set
+  `HOF_NAPPLET_MUSIC=full` for the original files or `none` to leave it out.
+
 ## Art Sources
 
 The shipped game art lives under `public/`. Local source/reference material in
