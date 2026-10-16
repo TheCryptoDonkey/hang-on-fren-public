@@ -20,3 +20,4 @@ art-originals/*
 server-dist/
 /qr-browser-proof.json
 dist-napplet
+dist-napplet-assets

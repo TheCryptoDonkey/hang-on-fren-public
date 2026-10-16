@@ -6,6 +6,7 @@
 // top whenever it takes over.
 
 import { getMusicDestination, getMusicGain } from './audio.js';
+import { createAudio } from './asset-url.js';
 
 let defaultUrl = '';
 const tracks = new Map<string, HTMLAudioElement>();
@@ -20,7 +21,7 @@ let currentUrl: string | null = null;
 function ensureTrack(url: string): HTMLAudioElement {
   let el = tracks.get(url);
   if (!el) {
-    el = new Audio(url);
+    el = createAudio(url);
     el.loop = true;
     el.preload = 'none';
     el.crossOrigin = 'anonymous';

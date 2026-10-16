@@ -59,24 +59,36 @@ Private deployment topology belongs outside this repo.
 ## Napplet edition
 
 The same game also builds as a [NIP-5D](https://github.com/nostr-protocol/nips/pull/2303)
-napplet: one self-contained `index.html` that runs in a sandboxed iframe on
-napplet shells such as [napplet.soy](https://napplet.soy).
+napplet for napplet shells such as [napplet.soy](https://napplet.soy).
 
 ```sh
-npm run build:napplet   # writes dist-napplet/index.html and .nip5a-manifest.json
+npm run build:napplet   # dist-napplet/index.html + dist-napplet-assets/
 npm run test:napplet    # napplet conformance checks in headless Chromium
 ```
 
 `vite.napplet.config.ts` swaps the modules that need network access, browser
-storage or the arcade window for the versions in `src/napplet/`, and inlines
-every asset the game loads. The web build is unaffected. Differences in the
-napplet edition:
+storage or the arcade window for the versions in `src/napplet/`. The web build
+is unaffected. The napplet is a small single HTML file; its art, pickups and
+sound effects travel in one external pack loaded before the title screen, and
+each music bed (96 kbps stereo AAC, needs `ffmpeg`; `HOF_NAPPLET_MUSIC=none`
+leaves music out) is a separate external file fetched when first needed. The
+shell serves them from Blossom by sha256.
+
+To publish, keep a separate soyLI project (made with `soyli new`) holding only
+the build, because soyLI publishes the project's whole Git tree:
+
+```sh
+node tools/napplet-sync.mjs ../hang-on-fren-napplet
+```
+
+The script copies `index.html` and registers the external assets; then run
+`soyli check`, `soyli checkpoint` and `soyli publish` in that project.
+
+Differences in the napplet edition:
 
 - Saved state uses the shell's storage NAP instead of `localStorage`.
 - Riders play as local guests. There is no Nostr sign-in, no gamestr score
   claims or global board, and no phone controller pairing.
-- Music is re-encoded as 96 kbps stereo AAC by default (needs `ffmpeg`). Set
-  `HOF_NAPPLET_MUSIC=full` for the original files or `none` to leave it out.
 
 ## Art Sources
 
