@@ -5,7 +5,7 @@
 // in src/napplet/, and inlines every asset the game passes to assetUrl().
 //
 // HOF_NAPPLET_MUSIC chooses the soundtrack: 'lite' (default) re-encodes the
-// beds as small mono AAC with ffmpeg, 'full' inlines the originals (~22 MB
+// beds as 96 kbps stereo AAC with ffmpeg, 'full' inlines the originals (~22 MB
 // before base64), 'none' ships the game without music.
 import { defineConfig, type Plugin } from 'vite';
 import { nip5aManifest } from '@napplet/vite-plugin';
@@ -65,12 +65,19 @@ function referencedAssets(): string[] {
   return [...paths].filter(path => INLINED_DIRS.some(dir => path.startsWith(dir))).sort();
 }
 
+// Apple's AudioToolbox AAC encoder sounds better than ffmpeg's built-in one at
+// this bitrate; use it where ffmpeg was built with it.
+const AAC_ENCODER = (() => {
+  try { return execFileSync('ffmpeg', ['-hide_banner', '-encoders'], { encoding: 'utf8' }).includes(' aac_at ') ? 'aac_at' : 'aac'; }
+  catch { return 'aac'; }
+})();
+
 function liteMusic(file: string): string {
   mkdirSync(MUSIC_CACHE, { recursive: true });
-  const out = join(MUSIC_CACHE, `${basename(file, '.m4a')}-${statSync(file).mtimeMs}.m4a`);
+  const out = join(MUSIC_CACHE, `${basename(file, '.m4a')}-${AAC_ENCODER}-96k-${statSync(file).mtimeMs}.m4a`);
   if (!existsSync(out)) {
     try {
-      execFileSync('ffmpeg', ['-v', 'error', '-y', '-i', file, '-vn', '-ac', '1', '-c:a', 'aac', '-b:a', '40k', out]);
+      execFileSync('ffmpeg', ['-v', 'error', '-y', '-i', file, '-vn', '-c:a', AAC_ENCODER, '-b:a', '96k', out]);
     } catch (error) {
       throw new Error(`HOF_NAPPLET_MUSIC=lite needs ffmpeg on PATH (or set HOF_NAPPLET_MUSIC=full|none): ${String(error)}`);
     }

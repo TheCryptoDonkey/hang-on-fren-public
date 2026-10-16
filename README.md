@@ -75,7 +75,7 @@ napplet edition:
 - Saved state uses the shell's storage NAP instead of `localStorage`.
 - Riders play as local guests. There is no Nostr sign-in, no gamestr score
   claims or global board, and no phone controller pairing.
-- Music is re-encoded as small mono AAC by default (needs `ffmpeg`). Set
+- Music is re-encoded as 96 kbps stereo AAC by default (needs `ffmpeg`). Set
   `HOF_NAPPLET_MUSIC=full` for the original files or `none` to leave it out.
 
 ## Art Sources
