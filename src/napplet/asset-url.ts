@@ -31,6 +31,7 @@ export function assetUrl(path: string): string {
     return '';
   }
   const blob = decode(entry.base64, entry.mime);
+  delete assets[key]; // keep the Blob, drop the base64 copy
   const url = URL.createObjectURL(blob);
   blobs.set(url, blob);
   urls.set(key, url);

@@ -115,11 +115,14 @@ function nappletHtml(): Plugin {
     transformIndexHtml: {
       order: 'pre',
       handler(html) {
-        return html
+        const out = html
           .replace('src="/src/main.ts"', 'src="/src/napplet/boot.ts"')
           .replace(/\s*<link rel="(?:manifest|icon|apple-touch-icon)"[^>]*>/g, '')
           .replace(/<meta name="(?:apple-mobile-web-app-[a-z-]+|mobile-web-app-capable)"[^>]*>\s*/g, '')
-          .replace(/%BASE_URL%(qr-[a-z]+\.svg)/g, (_m, path: string) => dataUri(path));
+          .replace(/(<img\b[^>]*\bsrc=")%BASE_URL%([^"]+)"/g, (_m, tag: string, path: string) => `${tag}${dataUri(path)}"`);
+        const left = out.match(/%BASE_URL%[^"]*/g);
+        if (left) throw new Error(`index.html still loads from public/ in the napplet build: ${left.join(', ')}`);
+        return out;
       },
     },
   };

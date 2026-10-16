@@ -30,11 +30,11 @@ function background(write: (storage: ShellStorage) => Promise<void>): void {
 
 async function readAll(storage: ShellStorage): Promise<void> {
   const keys = await storage.keys();
-  const values = await Promise.all(keys.map(key => storage.getItem(key)));
-  keys.forEach((key, i) => {
-    const value = values[i];
-    if (typeof value === 'string') memory.set(key, value);
-  });
+  // One slow or failed key loses that key, not the whole save.
+  await Promise.allSettled(keys.map(async key => {
+    const value = await storage.getItem(key);
+    if (typeof value === 'string' && !memory.has(key)) memory.set(key, value);
+  }));
 }
 
 /** Copy the napplet's saved keys into memory. Never rejects; gives up after a
