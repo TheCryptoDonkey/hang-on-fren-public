@@ -19,7 +19,7 @@ import { renderScene, drawTitleArt } from './render.js';
 import { spawnSmoke, updateSmoke, type Smoke } from './smoke.js';
 import { setPickupScale } from './geometry.js';
 import { riderSize } from './rider.js';
-import { drawHud, addPopup, updatePopups, type HudState, type Popup } from './hud.js';
+import { drawHud, addPopup, updatePopups, type HudState, type Popup, type Rect } from './hud.js';
 import { loadBoard, saveBoard, insertScore, qualifies, rankOf, topScore, type HighScore } from './highscore.js';
 import { unlockAudio, updateEngine, updateRumble, updateScreech, updateTurbo, updateTraffic, silenceTraffic, updateEcho, playSfx, playPassBy, playVoiceClip, preloadVoiceClip, resetGearbox, currentGear, toggleMuted, isMuted } from './audio.js';
 import { initMusic, preloadMusic, startMusic, currentMusicUrl } from './music.js';
@@ -863,6 +863,25 @@ function disarmQuit(): void {
     quitBtn.textContent = QUIT_LABEL;
     quitBtn.classList.remove('is-armed');
   }
+}
+/** Where the touch pause button sits, in canvas px, so popups keep clear of it.
+ *  Measured once per buffer size: the button only moves when the screen does. */
+let pauseKeepOut: { key: string; rects: Rect[] } | null = null;
+function pauseButtonKeepOut(): readonly Rect[] | undefined {
+  if (!isTouch || !pauseBtn) return undefined;
+  const key = `${W}|${H}|${renderScale}`;
+  if (pauseKeepOut?.key === key) return pauseKeepOut.rects;
+  const r = pauseBtn.getBoundingClientRect();
+  if (r.width === 0) return undefined; // not laid out yet
+  const c = canvas.getBoundingClientRect();
+  const sx = W / (c.width || 1);
+  const sy = H / (c.height || 1);
+  const m = 6 * renderScale;
+  pauseKeepOut = {
+    key,
+    rects: [{ x0: (r.left - c.left) * sx - m, y0: (r.top - c.top) * sy - m, x1: (r.right - c.left) * sx + m, y1: (r.bottom - c.top) * sy + m }],
+  };
+  return pauseKeepOut.rects;
 }
 /** Pause or resume the run, dropping any held input either way. */
 function setPaused(on: boolean): void {
@@ -2851,7 +2870,7 @@ function render(): void {
       rivalResultTime: state.rivalResultTime,
       popups: state.popups,
     };
-    drawHud(ctx, W, H, hud, { bottomInset: mobileHudBottomInset(), scale: uiScale() });
+    drawHud(ctx, W, H, hud, { bottomInset: mobileHudBottomInset(), scale: uiScale(), keepOut: pauseButtonKeepOut() });
   }
 
   if (state.phase === 'playing' && state.paused) renderPaused();

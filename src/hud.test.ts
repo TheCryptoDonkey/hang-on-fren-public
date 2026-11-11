@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  addPopup, updatePopups, placePopups, popupY, POPUP_RISE,
+  addPopup, updatePopups, placePopups, popupY, rivalCardRect, rivalCardY, POPUP_RISE,
   type Popup, type PopupEnv, type Rect,
 } from './hud.js';
 
@@ -104,10 +104,10 @@ describe('placePopups', () => {
   });
 
   it('holds a popup that has no free row, then places it when one frees up, losing none', () => {
-    // A screen with room for about two rows.
+    // A screen with room for about two rows, and too narrow for a second column.
     const list: Popup[] = [];
-    for (let i = 0; i < 5; i += 1) addPopup(list, `MSG ${i}`, 200, 90, '#fff', 1);
-    const e = env(400, 130);
+    for (let i = 0; i < 5; i += 1) addPopup(list, `MSG ${i}`, 50, 90, '#fff', 1);
+    const e = env(100, 130);
     placePopups(list, e);
     const shown = list.filter(p => !p.held);
     expect(shown.length).toBeGreaterThan(0);
@@ -128,6 +128,30 @@ describe('placePopups', () => {
     expect(list.length).toBe(0);
     expect(seen.size).toBe(5);
     for (const text of heldBefore) expect(seen.has(text)).toBe(true);
+  });
+
+  it('steps a popup sideways when its column is full, instead of holding it', () => {
+    // Room for about two rows down the middle, and width to spare either side.
+    const list: Popup[] = [];
+    for (let i = 0; i < 5; i += 1) addPopup(list, `MSG ${i}`, 200, 90, '#fff', 1);
+    const e = env(400, 130);
+    placePopups(list, e);
+    expect(list.every(p => !p.held && p.ly !== undefined)).toBe(true);
+    expect(list.some(p => p.lx !== 200)).toBe(true);
+    for (const age of [0, 0.5, 1]) {
+      for (let i = 0; i < list.length; i += 1) {
+        expect(box(list[i], age).x0).toBeGreaterThanOrEqual(0);
+        expect(box(list[i], age).x1).toBeLessThanOrEqual(400);
+        for (let j = i + 1; j < list.length; j += 1) expect(overlap(box(list[i], age), box(list[j], age))).toBe(false);
+      }
+    }
+  });
+
+  it('keeps a popup in its own column while that column has a free row', () => {
+    const list: Popup[] = [];
+    for (let i = 0; i < 3; i += 1) addPopup(list, `MSG ${i}`, 400, 300, '#fff', 1);
+    placePopups(list, env(800, 600));
+    expect(list.every(p => p.lx === 400)).toBe(true);
   });
 
   it('re-places every popup when the buffer size or scale changes', () => {
@@ -188,5 +212,28 @@ describe('popup list', () => {
     expect(list.length).toBe(1);
     updatePopups(list, 0.3);
     expect(list.length).toBe(0);
+  });
+});
+
+describe('rival card', () => {
+  it('is centred at 82% of the width when nothing shares its rows', () => {
+    const c = rivalCardRect(1000, 600, 1);
+    expect(c.w).toBe(620);
+    expect(c.x + c.w / 2).toBe(500);
+    expect(c.y).toBe(rivalCardY(600, 1));
+  });
+
+  it('narrows, still centred, to stop short of a keep-out on its rows', () => {
+    const y = rivalCardY(320, 0.6);
+    const pause: Rect = { x0: 500, y0: y + 4, x1: 560, y1: y + 40 };
+    const c = rivalCardRect(568, 320, 0.6, [pause]);
+    expect(c.x + c.w).toBeLessThanOrEqual(500);
+    expect(c.x + c.w / 2).toBeCloseTo(284);
+  });
+
+  it('ignores a keep-out above or below it', () => {
+    const y = rivalCardY(320, 0.6);
+    const above: Rect = { x0: 500, y0: 0, x1: 560, y1: y - 1 };
+    expect(rivalCardRect(568, 320, 0.6, [above]).w).toBe(rivalCardRect(568, 320, 0.6).w);
   });
 });

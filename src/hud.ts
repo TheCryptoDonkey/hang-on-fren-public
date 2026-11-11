@@ -56,6 +56,9 @@ export interface HudOptions {
   /** UI scale override (main.ts uiScale() — floored on touch devices so the
    *  labels stay readable on phones). Defaults to the raw diagonal scale. */
   scale?: number;
+  /** Extra areas, in canvas px, that popups must stay out of (DOM controls
+   *  drawn over the canvas, such as the touch pause button). */
+  keepOut?: readonly Rect[];
 }
 
 const PANEL = 'rgba(8, 26, 36, 0.72)';
@@ -176,8 +179,9 @@ function label(
 // other popup and no HUD readout occupies, and keeps it for its whole life, so
 // a burst (the checkpoint block, a rose + overtake + flow-tier pile-up) reads
 // as a stack instead of one smear. All popups float up at the same speed, so
-// rows placed apart stay apart. If the screen has no free row, the popup waits
-// (its clock held) until one frees up: every message still shows.
+// rows placed apart stay apart. If its column has no free row the popup steps
+// sideways into a free one; only if the whole screen is full does it wait (its
+// clock held) until a row frees up: every message still shows.
 
 export interface Rect { x0: number; y0: number; x1: number; y1: number }
 
@@ -198,7 +202,7 @@ export const POPUP_RISE = 10;
 const ASC = 0.8; // glyph height above the baseline, plus outline, in em
 const DESC = 0.28; // …and below it
 const ROW = 1.2; // baseline-to-baseline distance of stacked rows, in em
-const SIDE_GAP = 6; // horizontal clearance between popups sharing a row, × u
+const SIDE_GAP = 16; // horizontal clearance between popups sharing a row, × u: wide enough that neighbours read as two messages
 
 /** The baseline the popup is drawn at, `age` seconds into its life. */
 export function popupY(p: Popup, u: number): number {
@@ -262,15 +266,36 @@ export function placePopups(list: Popup[], env: PopupEnv): void {
       cands.push(popupY(q, u) + ROW * Math.max(px, q.px as number), popupY(q, u) - ROW * Math.max(px, q.px as number));
     }
     const want = p.y - POPUP_RISE * u * age;
+    const home = p.lx;
     let best = Number.NaN;
     let bestCost = Infinity;
-    for (const c of cands) {
-      const cost = c >= want ? c - want : (want - c) * 1.5;
-      if (cost < bestCost && fits(p, c, others, env)) {
-        best = c;
-        bestCost = cost;
+    let bestX = home;
+    const tryColumn = (lx: number, shift: number): void => {
+      p.lx = lx;
+      for (const c of cands) {
+        const cost = (c >= want ? c - want : (want - c) * 1.5) + shift;
+        if (cost < bestCost && fits(p, c, others, env)) {
+          best = c;
+          bestCost = cost;
+          bestX = lx;
+        }
+      }
+    };
+    tryColumn(home, 0);
+    if (bestCost === Infinity) {
+      // Its own column is full (a checkpoint block on a short phone screen fills
+      // it for a second or two). Step sideways, just clear of a popup already
+      // there, rather than show the message late.
+      const lo = wid / 2 + 12 * u;
+      const hi = w - wid / 2 - 12 * u;
+      for (const q of others) {
+        const gap = (wid + (q.wid as number)) / 2 + SIDE_GAP * u + 0.5;
+        for (const lx of [(q.lx as number) - gap, (q.lx as number) + gap]) {
+          if (lx >= lo && lx <= hi) tryColumn(lx, Math.abs(lx - home));
+        }
       }
     }
+    p.lx = bestX;
     if (bestCost === Infinity) {
       p.held = true;
       continue;
@@ -294,6 +319,26 @@ function pill(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h:
   ctx.arcTo(x, y, x + w, y, r);
   ctx.closePath();
   ctx.fill();
+}
+
+/** Top of the rival card: 17% down, but never over the TIME digits and rose
+ *  streak, which reach 126u and on a short phone screen come further down than that. */
+export function rivalCardY(h: number, u: number): number {
+  return Math.max(h * 0.17, 130 * u);
+}
+
+/** The rival card: centred, and narrowed on a small screen so it stops short of
+ *  anything in `keepOut` that shares its rows (the touch pause button). */
+export function rivalCardRect(w: number, h: number, u: number, keepOut: readonly Rect[] = []): { x: number; y: number; w: number; h: number } {
+  const y = rivalCardY(h, u);
+  const cardH = 84 * u;
+  let cardW = Math.min(w * 0.82, 620 * u);
+  for (const z of keepOut) {
+    if (z.y1 <= y || z.y0 >= y + cardH) continue;
+    if (z.x0 >= w / 2) cardW = Math.min(cardW, 2 * (z.x0 - w / 2));
+    else if (z.x1 <= w / 2) cardW = Math.min(cardW, 2 * (w / 2 - z.x1));
+  }
+  return { x: (w - cardW) / 2, y, w: cardW, h: cardH };
 }
 
 export function drawHud(ctx: CanvasRenderingContext2D, w: number, h: number, s: HudState, options: HudOptions = {}): void {
@@ -430,11 +475,9 @@ export function drawHud(ctx: CanvasRenderingContext2D, w: number, h: number, s: 
   // Rival introduction/result cards are authored beats, not ordinary popups.
   if (s.rivalIntro > 0 || (s.rivalResult && s.rivalResultTime > 0)) {
     const result = s.rivalResult && s.rivalResultTime > 0 ? s.rivalResult : null;
-    const cardW = Math.min(w * 0.82, 620 * u);
-    const cardH = 84 * u;
-    const cardX = (w - cardW) / 2;
-    const cardY = h * 0.17;
-    pill(ctx, cardX, cardY, cardW, cardH, 'rgba(5,16,26,0.86)');
+    const card = rivalCardRect(w, h, u, options.keepOut);
+    const cardY = card.y;
+    pill(ctx, card.x, card.y, card.w, card.h, 'rgba(5,16,26,0.86)');
     ctx.textAlign = 'center';
     ctx.font = `900 ${25 * u}px 'Trebuchet MS', sans-serif`;
     ctx.fillStyle = result ? (result.won ? GOLD : '#ff8a8a') : GOLD;
@@ -480,9 +523,10 @@ export function drawHud(ctx: CanvasRenderingContext2D, w: number, h: number, s: 
         { x0: (w - 220 * u) / 2 - m, y0: h - bottomInset - 30 * u - 26 * u - m, x1: (w + 220 * u) / 2 + m, y1: h },
       ];
       if (s.rivalIntro > 0 || (s.rivalResult && s.rivalResultTime > 0)) {
-        const cardW = Math.min(w * 0.82, 620 * u);
-        zones.push({ x0: (w - cardW) / 2 - m, y0: h * 0.17 - m, x1: (w + cardW) / 2 + m, y1: h * 0.17 + 84 * u + m });
+        const card = rivalCardRect(w, h, u, options.keepOut);
+        zones.push({ x0: card.x - m, y0: card.y - m, x1: card.x + card.w + m, y1: card.y + card.h + m });
       }
+      if (options.keepOut) zones.push(...options.keepOut);
       placePopups(s.popups, env(ctx, w, h, u, zones));
     }
     for (const p of s.popups) {
