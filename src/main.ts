@@ -2616,16 +2616,81 @@ function update(dt: number): void {
 
 // ---- render ----------------------------------------------------------------
 
+// ---- frozen screens ---------------------------------------------------------
+//
+// Paused, victory and game over hold the world still (update() returns before
+// any physics, traffic or camera step), yet the whole 3D scene used to repaint
+// every frame, and canvas raster is nearly all of a frame's cost. So:
+//  - PAUSED paints one finished frame and then draws NOTHING until something
+//    that shows on it changes. The canvas keeps its pixels.
+//  - VICTORY and GAME OVER paint the scene plus its scrim once into a shared
+//    offscreen layer and blit it, drawing only what really moves on top
+//    (fireworks, confetti, the finish cast, the pulsing GOAL!, blinking prompts).
+// A screen only takes these paths while nothing behind it animates on purpose:
+// the beer sway and the fly-agaric melt are deliberate effects, and a paused
+// frame with live sparks, popups or a flashing timer still changes, so those
+// cases keep the old per-frame repaint. What is frozen is the incidental drift
+// of time-driven scenery (clouds, lamp flicker, glitter, the off-road shake).
+
+/** Dev switch (window.__hof.setStaticScreens) to compare the cached screens
+ *  against a full repaint in one process. Always on in a production build. */
+let staticScreens = true;
+
+/** The finished paused frame on the main canvas, and what it was painted from. */
+let pausedPainted = false;
+let pausedW = 0;
+let pausedH = 0;
+let pausedLow = false;
+let pausedMuted = false;
+let pausedRoll = 0;
+
+/** The victory / game-over scene layer, shared by both screens, and its key. */
+let frozenLayer: HTMLCanvasElement | null = null;
+let frozenW = 0;
+let frozenH = 0;
+let frozenLow = false;
+let frozenPhase = ''; // '' = stale
+let frozenWon = false;
+let frozenTour = '';
+let frozenRoll = 0;
+
+/** Forget everything painted for the frozen screens. The canvas can lose its
+ *  pixels without the buffer size changing (a purged backing store after the tab
+ *  was backgrounded, a context restore) and a resize can re-lay the page out. */
+function invalidateFrozen(): void {
+  pausedPainted = false;
+  frozenPhase = '';
+}
+window.addEventListener('resize', invalidateFrozen);
+window.addEventListener('orientationchange', invalidateFrozen);
+window.addEventListener('pageshow', invalidateFrozen);
+window.addEventListener('focus', invalidateFrozen);
+window.visualViewport?.addEventListener('resize', invalidateFrozen);
+document.addEventListener('visibilitychange', invalidateFrozen);
+canvas.addEventListener('contextrestored', invalidateFrozen);
+
+/** True when a paused frame would paint exactly the same pixels as the last. */
+function pausedFrameSettled(): boolean {
+  return state.sparks.length === 0
+    && state.popups.length === 0
+    && state.flash <= 0
+    && !player.drifting // the drift meter flashes off the wall clock
+    && timerUrgency(timer) === 0; // so does the last-seconds clock
+}
+
 function render(): void {
   const store = state.store;
   if (!store) return;
-  ctx.clearRect(0, 0, W, H);
 
   if (state.phase === 'loading') {
+    invalidateFrozen();
+    ctx.clearRect(0, 0, W, H);
     renderLoading();
     return;
   }
   if (state.phase === 'title') {
+    invalidateFrozen();
+    ctx.clearRect(0, 0, W, H);
     renderTitle(store);
     return;
   }
@@ -2634,7 +2699,23 @@ function render(): void {
   // effect ever snaps on or off mid-frame.
   const wobble = clamp(Math.min(state.beerWobble / 1.5, (BEER_WOBBLE_TIME - state.beerWobble) / 0.6), 0, 1);
   const trip = clamp(Math.min(state.shroom / 1.2, (SHROOM_TIME - state.shroom) / 0.4), 0, 1);
-  renderScene({ ctx, width: W, height: H, track, player, world, store, time: state.time, wipeout: state.wipeout, boost: state.boost > 0 ? state.boost / ROSE_BOOST_TIME : 0, sling: state.slingshot > 0 ? state.slingshot / SLING_TIME_MAX : 0, draft: state.draftCharge, wobble, trip, palette: paletteAt(score.distance), scenery: sceneryKitAt(score.distance), terrain: terrainAt(score.distance), timeOfDay: timeOfDayAt(score.distance), camYaw: state.camYaw, camRoll: state.camRoll, camLag: camLag(), smoke: state.smoke, enclosure: state.enclosure, hideRider: state.outcome === 'finish' && (state.phase === 'victory' || state.phase === 'gameover'), heroSet: getActiveTour() === 'stone' ? 'caveman' : 'hero', cave: getActiveTour() === 'stone', detail: lowDetail ? 'low' : 'full' });
+  const sceneStill = staticScreens && wobble <= 0 && trip <= 0;
+  const celebrating = (state.phase === 'victory' || state.phase === 'gameover') && sceneStill;
+  const pausedStill = state.phase === 'playing' && state.paused && sceneStill && pausedFrameSettled();
+  if (pausedStill) {
+    if (pausedPainted && pausedW === W && pausedH === H && pausedLow === lowDetail && pausedMuted === isMuted() && pausedRoll === state.camRoll) return;
+  } else {
+    pausedPainted = false;
+  }
+
+  if (celebrating) blitFrozenScene(store, wobble, trip);
+  else {
+    frozenPhase = '';
+    ctx.clearRect(0, 0, W, H);
+    paintScene(store, wobble, trip);
+    if (state.phase === 'victory') drawVictoryScrims();
+    else if (state.phase === 'gameover') drawGameOverScrim(state.outcome === 'finish');
+  }
   if (state.phase === 'playing') drawSparks(ctx);
 
   // The game-over card carries the score/stats itself — drawing the live HUD
@@ -2674,6 +2755,58 @@ function render(): void {
   // Confetti pops over both celebration layers, never behind their scrims.
   if ((state.phase === 'victory' || state.phase === 'gameover') && state.outcome === 'finish') drawSparks(ctx);
   if (isMuted()) renderMuteBadge();
+  if (pausedStill) {
+    pausedPainted = true;
+    pausedW = W;
+    pausedH = H;
+    pausedLow = lowDetail;
+    pausedMuted = isMuted();
+    pausedRoll = state.camRoll;
+  }
+}
+
+/** The 3D scene exactly as every phase paints it, into whatever `ctx` is. */
+function paintScene(store: SpriteStore, wobble: number, trip: number): void {
+  renderScene({ ctx, width: W, height: H, track, player, world, store, time: state.time, wipeout: state.wipeout, boost: state.boost > 0 ? state.boost / ROSE_BOOST_TIME : 0, sling: state.slingshot > 0 ? state.slingshot / SLING_TIME_MAX : 0, draft: state.draftCharge, wobble, trip, palette: paletteAt(score.distance), scenery: sceneryKitAt(score.distance), terrain: terrainAt(score.distance), timeOfDay: timeOfDayAt(score.distance), camYaw: state.camYaw, camRoll: state.camRoll, camLag: camLag(), smoke: state.smoke, enclosure: state.enclosure, hideRider: state.outcome === 'finish' && (state.phase === 'victory' || state.phase === 'gameover'), heroSet: getActiveTour() === 'stone' ? 'caveman' : 'hero', cave: getActiveTour() === 'stone', detail: lowDetail ? 'low' : 'full' });
+}
+
+/**
+ * Victory and game-over backdrop: the frozen scene and that screen's scrim,
+ * rendered once into the shared layer and blitted until the buffer, the detail
+ * tier, the phase or the outcome changes. Any frame that renders something else
+ * (the live run, the title) stales the layer, so a new run always rebuilds it.
+ */
+function blitFrozenScene(store: SpriteStore, wobble: number, trip: number): void {
+  const won = state.outcome === 'finish';
+  const tour = getActiveTour();
+  if (!frozenLayer || frozenPhase !== state.phase || frozenW !== W || frozenH !== H || frozenLow !== lowDetail || frozenWon !== won || frozenTour !== tour || frozenRoll !== state.camRoll) {
+    if (!frozenLayer) frozenLayer = document.createElement('canvas');
+    if (frozenLayer.width !== W || frozenLayer.height !== H) {
+      frozenLayer.width = W;
+      frozenLayer.height = H;
+    }
+    const real = ctx;
+    ctx = frozenLayer.getContext('2d')!;
+    try {
+      ctx.clearRect(0, 0, W, H);
+      paintScene(store, wobble, trip);
+      if (state.phase === 'victory') drawVictoryScrims();
+      else drawGameOverScrim(won);
+    } finally {
+      ctx = real;
+    }
+    frozenPhase = state.phase;
+    frozenW = W;
+    frozenH = H;
+    frozenLow = lowDetail;
+    frozenWon = won;
+    frozenTour = tour;
+    frozenRoll = state.camRoll;
+  }
+  // 'copy' replaces what was there, so no separate clear of the main canvas.
+  ctx.globalCompositeOperation = 'copy';
+  ctx.drawImage(frozenLayer, 0, 0);
+  ctx.globalCompositeOperation = 'source-over';
 }
 
 function outlinedText(text: string, x: number, y: number, fill: string, u: number, stroke = 6): void {
@@ -2974,14 +3107,31 @@ function renderPaused(): void {
   outlinedText('Q — QUIT TO TITLE', W / 2, H * 0.58, '#bdeddb', u, 4);
 }
 
-function drawCheckeredRibbon(y: number, height: number): void {
+// The two finish ribbons are ~340 fillRects between them and never change for a
+// given buffer, so each is drawn once into a small strip and blitted. The strip
+// carries the ribbon's fractional y so its edges antialias as a direct fill would.
+const ribbonStrips: { w: number; sq: number; fy: number; cv: HTMLCanvasElement | null }[] = [{ w: 0, sq: 0, fy: 0, cv: null }, { w: 0, sq: 0, fy: 0, cv: null }];
+function drawCheckeredRibbon(slot: 0 | 1, y: number, height: number): void {
   const sq = Math.max(10, Math.round(height / 2));
-  for (let row = 0; row < 2; row += 1) {
-    for (let x = 0, col = 0; x < W; x += sq, col += 1) {
-      ctx.fillStyle = (row + col) % 2 ? '#f7f4df' : '#11131a';
-      ctx.fillRect(x, y + row * sq, sq + 1, sq + 1);
+  const yi = Math.floor(y);
+  const fy = y - yi;
+  const entry = ribbonStrips[slot];
+  if (!entry.cv || entry.w !== W || entry.sq !== sq || entry.fy !== fy) {
+    if (!entry.cv) entry.cv = document.createElement('canvas');
+    entry.cv.width = W;
+    entry.cv.height = 2 * sq + 3;
+    const c = entry.cv.getContext('2d')!;
+    for (let row = 0; row < 2; row += 1) {
+      for (let x = 0, col = 0; x < W; x += sq, col += 1) {
+        c.fillStyle = (row + col) % 2 ? '#f7f4df' : '#11131a';
+        c.fillRect(x, fy + row * sq, sq + 1, sq + 1);
+      }
     }
+    entry.w = W;
+    entry.sq = sq;
+    entry.fy = fy;
   }
+  ctx.drawImage(entry.cv, 0, yi);
 }
 
 /** Which welcome party waits past the tape: the Riviera flag marshals, or the
@@ -3053,10 +3203,8 @@ function drawFinishCast(store: SpriteStore): void {
   }
 }
 
-/** The dedicated five-second finish tableau: race scene still visible behind
- *  fireworks, checkered ribbons, the flag marshal cast and the banked bonus. */
-function renderVictory(store: SpriteStore): void {
-  const u = uiScale();
+/** The two darkening scrims behind the goal tableau; baked into the frozen layer. */
+function drawVictoryScrims(): void {
   const topShade = ctx.createLinearGradient(0, 0, 0, H * 0.5);
   topShade.addColorStop(0, 'rgba(15,10,30,0.76)');
   topShade.addColorStop(0.72, 'rgba(15,10,30,0.18)');
@@ -3068,13 +3216,18 @@ function renderVictory(store: SpriteStore): void {
   groundGlow.addColorStop(1, 'rgba(255,70,110,0.36)');
   ctx.fillStyle = groundGlow;
   ctx.fillRect(0, H * 0.6, W, H * 0.4);
+}
 
+/** The dedicated five-second finish tableau: race scene still visible behind
+ *  fireworks, checkered ribbons, the flag marshal cast and the banked bonus. */
+function renderVictory(store: SpriteStore): void {
+  const u = uiScale();
   // Above the darkening scrims so every burst punches through the bright
   // golden sky, but behind the cast and typography.
   drawFireworks(ctx);
 
-  drawCheckeredRibbon(0, 28 * u);
-  drawCheckeredRibbon(H - 24 * u, 24 * u);
+  drawCheckeredRibbon(0, 0, 28 * u);
+  drawCheckeredRibbon(1, H - 24 * u, 24 * u);
   drawFinishCast(store);
 
   ctx.textAlign = 'center';
@@ -3103,6 +3256,12 @@ function ordinal(n: number): string {
   return `${n}${suffix}`;
 }
 
+/** A darker scrim for a defeat, a warmer one for the victory card. */
+function drawGameOverScrim(won: boolean): void {
+  ctx.fillStyle = won ? 'rgba(10,26,20,0.66)' : 'rgba(6,19,28,0.72)';
+  ctx.fillRect(0, 0, W, H);
+}
+
 function renderGameOver(_store: SpriteStore): void {
   const s = state.summary;
   if (!s) return;
@@ -3124,9 +3283,7 @@ function renderGameOver(_store: SpriteStore): void {
   const titleY = entryLayout
     ? subtitleY - (won ? 62 : 28) * u
     : H * (won ? 0.2 : 0.24);
-  // A darker scrim for a defeat, a warmer one for the victory card.
-  ctx.fillStyle = won ? 'rgba(10,26,20,0.66)' : 'rgba(6,19,28,0.72)';
-  ctx.fillRect(0, 0, W, H);
+  // The scrim is baked into the frozen layer (drawGameOverScrim).
   if (won) drawFireworks(ctx);
   ctx.textAlign = 'center';
 
@@ -3330,6 +3487,7 @@ if ((import.meta as { env?: { DEV?: boolean } }).env?.DEV) {
     get renderQuality() { return quality; },
     get lowDetail() { return lowDetail; },
     setLowDetail: (v: boolean) => { lowDetail = v; },
+    setStaticScreens: (v: boolean) => { staticScreens = v; },
   };
 }
 
