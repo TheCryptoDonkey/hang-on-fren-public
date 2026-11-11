@@ -82,9 +82,9 @@ const WORST: LineSpec[] = [
   { id: 'title', text: 'FINISH!', base: 72, weight: 900, floor: 22, gap: 0, outline: 8 },
   { id: 'subtitle', text: 'NEW HIGH SCORE · 10th BEST!', base: 30, weight: 800, floor: 12, gap: 22, outline: 6 },
   { id: 'score', text: 'SCORE  9,999,999', base: 40, weight: 800, floor: 16, gap: 16 },
-  { id: 'bonus', text: 'TIME BONUS  99s × 100  =  +99,999', base: 22, weight: 700, floor: 11, gap: 15 },
+  { id: 'bonus', text: 'TIME BONUS  99s × 100  =  +99,999', base: 22, weight: 700, floor: 12, gap: 15 },
   {
-    id: 'stats', text: WORST_PARTS.join(WORST_SEP), base: 20, weight: 600, floor: 10.5, gap: 13,
+    id: 'stats', text: WORST_PARTS.join(WORST_SEP), base: 20, weight: 600, floor: 12, gap: 13,
     wrap: { parts: WORST_PARTS, sep: WORST_SEP },
   },
 ];
@@ -150,10 +150,10 @@ export function summaryLines(d: SummaryData): LineSpec[] {
     lines.push({
       id: 'bonus',
       text: `TIME BONUS  ${d.timeLeftS}s × ${d.bonusPerSec}  =  +${d.bonus.toLocaleString('en-GB')}`,
-      base: 22, weight: 700, floor: 11, gap: 15,
+      base: 22, weight: 700, floor: 12, gap: 15,
     });
   }
-  lines.push({ id: 'stats', text: parts.join(sep), base: 20, weight: 600, floor: 10.5, gap: 13, wrap: { parts, sep } });
+  lines.push({ id: 'stats', text: parts.join(sep), base: 20, weight: 600, floor: 12, gap: 13, wrap: { parts, sep } });
   if (!d.qualifies) {
     // The drift flourish is a secondary line; with the callsign keyboard up the
     // stack is already tight against it, so it only shows when not entering a name.
