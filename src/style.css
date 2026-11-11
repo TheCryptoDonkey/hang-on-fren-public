@@ -261,6 +261,19 @@ body[data-phase="victory"] #support-btn {
   animation: supportPulse 1.7s ease-in-out infinite;
 }
 
+/* Phone landscape: on the win screen the cast stands centre-bottom, so the
+ * button moves to the corner and slims down rather than cover them. */
+@media (orientation: landscape) and (max-height: 500px) {
+  body[data-phase="victory"] #support-btn {
+    left: auto;
+    right: max(14px, env(safe-area-inset-right));
+    bottom: max(14px, env(safe-area-inset-bottom));
+    transform: none;
+    padding: 10px 18px;
+    font-size: 15px;
+  }
+}
+
 /* hide it while the high-score name keyboard owns the lower screen, and when
  * the modal itself is open */
 body[data-naming="1"] #support-btn,
