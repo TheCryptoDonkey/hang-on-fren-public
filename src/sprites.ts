@@ -2214,6 +2214,11 @@ export class SpriteStore {
   has(name: string): boolean {
     return this.map.has(name);
   }
+
+  /** Drop a sprite and its canvas (art that is not needed any more). */
+  delete(name: string): void {
+    this.map.delete(name);
+  }
 }
 
 // Roadside sign texts — DNI-lore in-jokes. Each becomes a sign variant by
@@ -2433,25 +2438,35 @@ export function brandPetrol(store: SpriteStore): void {
   store.set('pickup-petrol', { canvas, w: base.w, h: base.h });
 }
 
-export async function loadSpriteInto(store: SpriteStore, name: string): Promise<boolean> {
+/** Load one named art asset; null when it has no art or fails to load. */
+export async function loadSprite(name: string): Promise<SpriteImage | null> {
   const url = ART_URLS[name];
-  if (!url) return false;
-  const sprite = await (isFullBleed(name) ? loadFullBleed(url) : loadTrimmed(url, name)).catch(() => null);
+  if (!url) return null;
+  return (isFullBleed(name) ? loadFullBleed(url) : loadTrimmed(url, name)).catch(() => null);
+}
+
+export async function loadSpriteInto(store: SpriteStore, name: string): Promise<boolean> {
+  const sprite = await loadSprite(name);
   if (!sprite) return false;
   store.set(name, sprite);
   return true;
 }
 
 /**
- * Load every known art asset into `store` (best-effort; fallbacks cover
- * per-sprite failure). Loaded in small batches, not one big Promise.all: each
- * trimmed sprite still costs a main-thread pixel pass, and a hundred of them
- * landing at once froze phones for seconds. `onProgress` feeds a loading bar.
+ * Load known art assets into `store` (every one unless `only` names a subset;
+ * best-effort, fallbacks cover per-sprite failure). Loaded in small batches,
+ * not one big Promise.all: each trimmed sprite still costs a main-thread pixel
+ * pass, and a hundred of them landing at once froze phones for seconds.
+ * `onProgress` feeds a loading bar.
  */
-export async function loadSpritesInto(store: SpriteStore, onProgress?: (done: number, total: number) => void): Promise<void> {
+export async function loadSpritesInto(
+  store: SpriteStore,
+  onProgress?: (done: number, total: number) => void,
+  only?: readonly string[],
+): Promise<void> {
   // No skip-if-present filter: get() bakes code-drawn fallbacks into the map
   // (boot decorates tracks before art lands), and those must be OVERWRITTEN.
-  const names = Object.keys(ART_URLS);
+  const names = only ?? Object.keys(ART_URLS);
   const total = names.length;
   let done = 0;
   const CONCURRENCY = 4;
