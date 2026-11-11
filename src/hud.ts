@@ -69,7 +69,7 @@ const FACE = "'Trebuchet MS', sans-serif";
 //
 // HUD text floats straight over the scenery, so it carries a dark outline to
 // stay readable over sky, sand and snow. Stroking text is the expensive part
-// (and shadowBlur is worse), so nothing here strokes every frame unless it has
+// (and a blurred shadow is worse), so nothing here strokes every frame unless it has
 // to: each label is rendered ONCE into a tight offscreen sprite and blitted, and
 // is re-rendered only when its text, font or colour changes (a new scale after a
 // resize changes the font, so that re-bakes too). Only the two values that
@@ -513,7 +513,13 @@ function env(ctx: CanvasRenderingContext2D, w: number, h: number, u: number, zon
 
 export function addPopup(list: Popup[], text: string, x: number, y: number, color: string, ttl = 1.1): void {
   list.push({ text, x, y, life: ttl, ttl, color });
-  if (list.length > 12) list.shift();
+  if (list.length > 12) {
+    // Drop the oldest popup that has been placed (so has been on screen); one
+    // still waiting for a row, or not yet drawn, has not been read, so it goes
+    // only when every popup is in that state.
+    const shown = list.findIndex((q) => q.ly !== undefined && !q.held);
+    list.splice(shown === -1 ? 0 : shown, 1);
+  }
 }
 
 export function updatePopups(list: Popup[], dt: number): void {

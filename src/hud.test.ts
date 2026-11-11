@@ -165,6 +165,22 @@ describe('popup list', () => {
     expect(list[0].text).toBe('P3');
   });
 
+  it('evicts a popup that was already shown before one still waiting or undrawn', () => {
+    const list: Popup[] = [];
+    for (let i = 0; i < 12; i += 1) addPopup(list, `P${i}`, 0, 0, '#fff');
+    // P0 and P1 wait for a row; P2 is the oldest one that was placed and drawn.
+    list[0].held = true;
+    list[1].held = true;
+    for (let i = 2; i < 6; i += 1) list[i].ly = 100;
+    addPopup(list, 'NEW', 0, 0, '#fff');
+    const texts = list.map((q) => q.text);
+    expect(list.length).toBe(12);
+    expect(texts).toContain('P0');
+    expect(texts).toContain('P1');
+    expect(texts).not.toContain('P2');
+    expect(texts).toContain('P6');
+  });
+
   it('expires popups as their life runs out', () => {
     const list: Popup[] = [];
     addPopup(list, 'X', 0, 0, '#fff', 0.5);
