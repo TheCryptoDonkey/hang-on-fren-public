@@ -24,7 +24,8 @@ import { unlockAudio, updateEngine, updateRumble, updateScreech, updateTurbo, up
 import { initMusic, preloadMusic, startMusic, currentMusicUrl } from './music.js';
 import { paletteAt, stageAt, stageIndexAt, sceneryKitAt, terrainAt, timeOfDayAt, marketPhaseAt, setActiveTour, getActiveTour, levelCount, finishDistanceM, roseRichAt, CHECKPOINT_BONUS, STAGE_M, TOUR_TITLES, type TourId } from './stages.js';
 import { loadSelectedTour, saveSelectedTour } from './progress.js';
-import { appendChar, backspace, cleanName, layout as nameLayout, keyAt as nameKeyAt, drawNameEntry } from './nameentry.js';
+import { appendChar, backspace, cleanName, keyAt as nameKeyAt, drawNameEntry } from './nameentry.js';
+import { cardLayout, entryLayout, summaryLines, type Measure } from './scorecard.js';
 import { connectNostr, fetchGlobalBoard, getIdentity, renameGuest, restoreIdentity, submitScore, retryPersonalScore, discardSavedPersonalScore, personalScoreIsPending, ScoreSigningError, useGuestMode, type GlobalScore, type Identity } from './nostr.js';
 import { pendingPersonalScores } from './score-recovery.js';
 import { MODES, loadModeIndex, saveModeIndex } from './difficulty.js';
@@ -809,10 +810,17 @@ function mobileHudBottomInset(): number {
   return isTouch && state.phase === 'playing' ? 126 * uiScale() : 0;
 }
 
+/** Width of `text` at 100px in the card's face, for fitting lines to the screen. */
+const measureCardText: Measure = (text, weight) => {
+  ctx.font = `${weight} 100px 'Trebuchet MS', sans-serif`;
+  return ctx.measureText(text).width;
+};
+
 /** Name-entry keyboard layout, lifted clear of the browser's bottom tap-zone on
  *  touch devices (Safari steals taps on the last ~40px for its own chrome). */
-function nameEntryLayout(): ReturnType<typeof nameLayout> {
-  return nameLayout(W, H, uiScale(), isTouch ? 44 * uiScale() : 0);
+function nameEntryLayout(): ReturnType<typeof entryLayout> {
+  const u = uiScale();
+  return entryLayout(W, H, u, renderScale, isTouch ? 44 * u : 0, measureCardText);
 }
 
 function syncDomState(): void {
@@ -2970,8 +2978,11 @@ function renderPaused(): void {
   outlinedText('PAUSED', W / 2, H * 0.42, '#ffd76b', u, 8);
   ctx.font = `700 ${22 * u}px 'Trebuchet MS', sans-serif`;
   outlinedText(isTouch ? 'TAP TO RESUME' : 'ESC — RESUME', W / 2, H * 0.52, '#ffffff', u, 5);
-  ctx.font = `600 ${17 * u}px 'Trebuchet MS', sans-serif`;
-  outlinedText('Q — QUIT TO TITLE', W / 2, H * 0.58, '#bdeddb', u, 4);
+  // Q is a keyboard shortcut: a phone has no such key, so don't offer it there.
+  if (!isTouch) {
+    ctx.font = `600 ${17 * u}px 'Trebuchet MS', sans-serif`;
+    outlinedText('Q — QUIT TO TITLE', W / 2, H * 0.58, '#bdeddb', u, 4);
+  }
 }
 
 function drawCheckeredRibbon(y: number, height: number): void {
@@ -3103,111 +3114,82 @@ function ordinal(n: number): string {
   return `${n}${suffix}`;
 }
 
+// Per-line look of the score card; sizes and positions come from scorecard.ts.
+const CARD_STYLE: Record<string, { weight: number; fill: string; outline?: number; blink?: boolean }> = {
+  title: { weight: 900, fill: '#ffd76b', outline: 8 },
+  titleLost: { weight: 900, fill: '#ff5d78' },
+  subtitle: { weight: 800, fill: '#ffd23f', outline: 6 },
+  subtitleGoal: { weight: 800, fill: '#8fe6c4', outline: 6 },
+  score: { weight: 800, fill: '#ffffff' },
+  bonus: { weight: 700, fill: '#ffd76b' },
+  stats: { weight: 600, fill: '#8fe6c4' },
+  drift: { weight: 700, fill: '#8fd0ff' },
+  status: { weight: 700, fill: '#9fd0ff' },
+  cont: { weight: 800, fill: '#ffffff', blink: true },
+};
+
+/** Fit the whole score card (summary lines, and the callsign keyboard on a new
+ *  best) to the screen. Cached: the inputs only change when the run ends. */
+let cardMemo: { key: string; card: ReturnType<typeof cardLayout> } | null = null;
+function scoreCard(s: NonNullable<typeof state.summary>, won: boolean, place: number): ReturnType<typeof cardLayout> {
+  const lines = summaryLines({
+    won,
+    placeLabel: place > 0 ? ordinal(place) : '',
+    score: s.score,
+    bonus: state.finishBonus,
+    timeLeftS: Math.ceil(state.finishTimeLeft),
+    bonusPerSec: TIME_BONUS_PER_SEC,
+    rank: overallGrade(state.stageResults.filter(Boolean)),
+    rival: state.rivalResult ? (state.rivalResult.won ? 'WIN' : 'LOSS') : '',
+    distanceM: s.distanceM,
+    roses: s.roses,
+    overtakes: s.overtakes,
+    topSpeedKph: s.topSpeedKph,
+    stone: state.stoneAge ? { joints: state.joints, stones: state.stones } : null,
+    drifts: s.drifts,
+    bestDriftS: s.bestDriftS,
+    status: state.submitStatus,
+    qualifies: state.qualifies,
+    touch: isTouch,
+  });
+  const u = uiScale();
+  const key = `${W}|${H}|${u}|${renderScale}|${state.qualifies}|${lines.map(l => l.id + l.text).join('\n')}`;
+  if (cardMemo?.key === key) return cardMemo.card;
+  const card = cardLayout({
+    W, H, u, pxPerCss: renderScale, bottomInset: isTouch ? 44 * u : 0,
+    qualifies: state.qualifies, lines, measure: measureCardText,
+  });
+  cardMemo = { key, card };
+  return card;
+}
+
 function renderGameOver(_store: SpriteStore): void {
   const s = state.summary;
   if (!s) return;
   const u = uiScale();
   const won = state.outcome === 'finish';
-  const entryLayout = state.qualifies ? nameEntryLayout() : null;
-  // Treat the result copy as one stack. When the on-screen callsign keyboard is
-  // present its real prompt position becomes the lower boundary, so every line
-  // moves together instead of the rank line being squeezed into the bonus.
-  const defaultStatsY = won ? H * 0.46 : H * 0.44;
-  const statsY = entryLayout ? Math.min(defaultStatsY, entryLayout.promptY - 22 * u) : defaultStatsY;
-  const bonusY = won && state.finishBonus > 0
-    ? (entryLayout ? statsY - 34 * u : H * 0.41)
-    : null;
-  const scoreY = entryLayout
-    ? (bonusY ?? statsY) - 42 * u
-    : H * 0.36;
-  const subtitleY = entryLayout ? scoreY - 55 * u : H * 0.28;
-  const titleY = entryLayout
-    ? subtitleY - (won ? 62 : 28) * u
-    : H * (won ? 0.2 : 0.24);
+  // A new board placing gets top billing on the card — the callsign prompt below
+  // then banks it. rankOf is 0-based; +1 gives the human "Nth best" position.
+  const place = state.qualifies ? rankOf(board, s.score) + 1 : 0;
+  const card = scoreCard(s, won, place);
   // A darker scrim for a defeat, a warmer one for the victory card.
   ctx.fillStyle = won ? 'rgba(10,26,20,0.66)' : 'rgba(6,19,28,0.72)';
   ctx.fillRect(0, 0, W, H);
   if (won) drawFireworks(ctx);
   ctx.textAlign = 'center';
 
-  // A new board placing gets top billing on the card — the callsign prompt below
-  // then banks it. rankOf is 0-based; +1 gives the human "Nth best" position.
-  const place = state.qualifies ? rankOf(board, s.score) + 1 : 0;
-  if (won) {
-    ctx.font = `900 ${72 * u}px 'Trebuchet MS', sans-serif`;
-    outlinedText('FINISH!', W / 2, titleY, '#ffd76b', u, 8);
-    ctx.font = `800 ${30 * u}px 'Trebuchet MS', sans-serif`;
-    if (place > 0) outlinedText(`NEW HIGH SCORE · ${ordinal(place)} BEST!`, W / 2, subtitleY, '#ffd23f', u, 6);
-    else outlinedText('YOU REACHED THE GOAL, FREN!', W / 2, subtitleY, '#8fe6c4', u, 6);
-  } else {
-    ctx.font = `900 ${64 * u}px 'Trebuchet MS', sans-serif`;
-    ctx.fillStyle = '#ff5d78';
-    // The clock is the only way a run ends short (wipeouts cost time, never a life).
-    ctx.fillText('OUT OF TIME', W / 2, titleY);
-    if (place > 0) {
-      ctx.font = `800 ${26 * u}px 'Trebuchet MS', sans-serif`;
-      outlinedText(`NEW HIGH SCORE · ${ordinal(place)} BEST!`, W / 2, subtitleY, '#ffd23f', u, 6);
+  for (const line of card.lines) {
+    const style = CARD_STYLE[line.id];
+    if (style.blink && Math.floor(state.time * 2) % 2 !== 0) continue;
+    ctx.font = `${style.weight} ${line.px}px 'Trebuchet MS', sans-serif`;
+    if (style.outline) outlinedText(line.text, W / 2, line.y, style.fill, line.ratio, style.outline);
+    else {
+      ctx.fillStyle = style.fill;
+      ctx.fillText(line.text, W / 2, line.y);
     }
   }
 
-  ctx.font = `800 ${40 * u}px 'Trebuchet MS', sans-serif`;
-  ctx.fillStyle = '#ffffff';
-  ctx.fillText(`SCORE  ${s.score.toLocaleString('en-GB')}`, W / 2, scoreY);
-
-  if (bonusY !== null) {
-    ctx.font = `700 ${22 * u}px 'Trebuchet MS', sans-serif`;
-    ctx.fillStyle = '#ffd76b';
-    ctx.fillText(
-      `TIME BONUS  ${Math.ceil(state.finishTimeLeft)}s × ${TIME_BONUS_PER_SEC}  =  +${state.finishBonus.toLocaleString('en-GB')}`,
-      W / 2,
-      bonusY,
-    );
-  }
-
-  ctx.font = `600 ${Math.min(20 * u, W * 0.022)}px 'Trebuchet MS', sans-serif`;
-  ctx.fillStyle = '#8fe6c4';
-  const rank = overallGrade(state.stageResults.filter(Boolean));
-  const rivalLabel = state.rivalResult ? `RIVAL ${state.rivalResult.won ? 'WIN' : 'LOSS'}   ·   ` : '';
-  // The stone age counts its smokes and its relics where the road tours count
-  // their roses.
-  const jointLabel = state.stoneAge
-    ? `   ·   ${state.joints} joint${state.joints === 1 ? '' : 's'}   ·   ${state.stones} sacred stone${state.stones === 1 ? '' : 's'}`
-    : '';
-  ctx.fillText(
-    `${rivalLabel}RANK ${rank}   ·   ${(s.distanceM / 1000).toFixed(2)} km   ·   ${s.roses} roses   ·   ${s.overtakes} overtakes   ·   ${s.topSpeedKph} km/h top${jointLabel}`,
-    W / 2,
-    statsY,
-  );
-  // The drift flourish is a secondary line; with the callsign keyboard up the
-  // stack is already tight against it, so it only shows when not entering a name.
-  if (s.drifts > 0 && !entryLayout) {
-    ctx.font = `700 ${Math.min(17 * u, W * 0.019)}px 'Trebuchet MS', sans-serif`;
-    ctx.fillStyle = '#8fd0ff';
-    ctx.fillText(
-      `${s.drifts} drift${s.drifts === 1 ? '' : 's'} landed   ·   longest ${s.bestDriftS.toFixed(1)}s sideways`,
-      W / 2,
-      statsY + 24 * u,
-    );
-  }
-
-  // gamestr publish status (non-qualifying runs publish immediately; a board
-  // run publishes on DONE and the title notice carries the outcome instead).
-  if (state.submitStatus && !state.qualifies) {
-    ctx.font = `700 ${15 * u}px 'Trebuchet MS', sans-serif`;
-    ctx.fillStyle = '#9fd0ff';
-    ctx.fillText(state.submitStatus, W / 2, won ? H * 0.52 : H * 0.5);
-  }
-
-  if (entryLayout) {
-    drawNameEntry(ctx, W, uiScale(), state.nameValue, state.time, entryLayout);
-  } else {
-    const blink = Math.floor(state.time * 2) % 2 === 0;
-    if (blink) {
-      ctx.font = `800 ${26 * u}px 'Trebuchet MS', sans-serif`;
-      ctx.fillStyle = '#ffffff';
-      ctx.fillText(isTouch ? 'TAP TO CONTINUE' : 'PRESS ENTER / TAP TO CONTINUE', W / 2, H * 0.64);
-    }
-  }
+  if (card.entry) drawNameEntry(ctx, W, u, state.nameValue, state.time, card.entry);
 }
 
 function renderMuteBadge(): void {
