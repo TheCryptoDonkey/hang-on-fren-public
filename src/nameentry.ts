@@ -149,8 +149,12 @@ function build(
     hintPx = Math.min(hintPx, (0.94 * W * 100) / measure(HINT_TEXT, 600));
   }
 
-  const hintBaseline = H - bottomInset - padB - DESC * hintPx;
-  const kbBottom = hintBaseline - ASC * hintPx - hintGap;
+  // The hint is not a tap target, so where the browser owns a bottom band deep
+  // enough to hold it, it sits in that band and the keys end at the band's edge
+  // instead of a line higher: that line goes to the summary above.
+  const hintBlock = hintGap + (ASC + DESC) * hintPx + padB;
+  const kbBottom = bottomInset >= hintBlock ? H - bottomInset : H - bottomInset - hintBlock;
+  const hintBaseline = kbBottom + hintGap + ASC * hintPx;
   const kbH = totalRows * keyH + (totalRows - 1) * gap;
   const kbTop = kbBottom - kbH;
   const boxY = kbTop - vGap - boxH;
