@@ -2205,12 +2205,12 @@ function renderSides(
 // Full-depth multiply colour for a tunnel bore, eased by how deep the rider is.
 // From outside the bore has to read dark (about 30% of lit) but never black, so
 // the lamps and the far exit still show; once the rider is inside it eases to
-// about 60% so walls, markings and traffic stay readable (the enclosure tint in
+// about 40% so walls, markings and traffic stay readable (the enclosure tint in
 // renderScene then rides on top). Caves stay warmer and a touch brighter.
 const BORE_OUT: ReadonlyArray<number> = [66, 76, 94];
-const BORE_IN: ReadonlyArray<number> = [140, 150, 164];
+const BORE_IN: ReadonlyArray<number> = [93, 100, 109];
 const CAVE_OUT: ReadonlyArray<number> = [110, 92, 70];
-const CAVE_IN: ReadonlyArray<number> = [190, 168, 140];
+const CAVE_IN: ReadonlyArray<number> = [127, 112, 93];
 
 function boreShadeColour(enclosure: number, cave: boolean): string {
   const e = clamp(enclosure, 0, 1);
