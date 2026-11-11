@@ -20,6 +20,26 @@ export const ROAD = {
   fogDensity: 6,
 } as const;
 
+/** How much a full turbo stretches the lane dashes: length × (1 + boost × this). */
+export const DASH_BOOST_STRETCH = 0.5;
+
+/**
+ * Lane paint is one light rumble stripe long, then a gap. Under turbo each dash
+ * grows forward (away from the camera) into the gap that follows it, by
+ * `boost × DASH_BOOST_STRETCH` of its own length. Its start stays pinned to the
+ * road, so nothing crawls while the boost fades; only the far end moves.
+ *
+ * Returns how much of the segment at `index` the stretched dash covers, 0..1,
+ * measured from its near end. Only dark-stripe segments can carry it: a light
+ * one is painted in full already. With no boost this is always 0.
+ */
+export function dashTailCover(index: number, boost: number): number {
+  const n = ROAD.rumbleSegments;
+  if (boost <= 0 || Math.floor(index / n) % 2 === 0) return 0;
+  const extra = n * DASH_BOOST_STRETCH * Math.min(1, boost);
+  return clamp(extra - (((index % n) + n) % n), 0, 1);
+}
+
 export const CAMERA_DEPTH = 1 / Math.tan(((ROAD.fieldOfView / 2) * Math.PI) / 180);
 
 /** World units per metre — the odometer's convention (shared with world.ts). */

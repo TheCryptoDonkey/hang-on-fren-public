@@ -332,6 +332,7 @@ export interface Banner {
 
 export const BANNER_KINDS = {
   wipeout: { size: 72, y: 0.42, ttl: 1.1, priority: 2 },
+  turbo: { size: 46, y: 0.34, ttl: 0.9, priority: 1 },
 } as const;
 
 /** Build a banner of a kind. */

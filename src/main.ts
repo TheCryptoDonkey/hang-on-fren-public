@@ -2358,7 +2358,9 @@ function update(dt: number): void {
           playSfx('overtake', 0.7);
           playVoice('rose');
           spawnRoseBurst(bx, by, 'rose');
-          addPopup(state.popups, 'TURBO!', bx, by - H * 0.06, '#ff5d78', 1.5);
+          // A banner, smaller than a wipeout's; if a wipeout banner is still up it
+          // keeps the slot and TURBO! falls back to an ordinary popup.
+          if (!showBanner('turbo', 'TURBO!', '#ff5d78')) addPopup(state.popups, 'TURBO!', bx, by - H * 0.06, '#ff5d78', 1.5);
           break;
         case 'cake':
           addRoseTime(timer, DEFAULT_TIMER);

@@ -3,7 +3,7 @@
 // hill occlusion, then the rider on top. Pure drawing over already-updated
 // state — all physics lives in road.ts / world.ts.
 
-import { ROAD, RIDER_SCREEN_FRAC, project, findSegment, yawPan, riderScreenX } from './road.js';
+import { ROAD, RIDER_SCREEN_FRAC, project, findSegment, yawPan, riderScreenX, dashTailCover } from './road.js';
 import type { Track, Player, Segment } from './road.js';
 import type { World } from './world.js';
 import { signedForward } from './world.js';
@@ -729,7 +729,7 @@ export function renderScene(scene: Scene): void {
         clipped = false;
       }
     }
-    renderSegment(ctx, width, height, seg, n / ROAD.drawDistance, palette, lamps, terrain, scene.time, groundTiles, cave, boreShade);
+    renderSegment(ctx, width, height, seg, n / ROAD.drawDistance, palette, lamps, terrain, scene.time, groundTiles, cave, boreShade, scene.boost);
   }
   if (clipped) ctx.restore();
   ctx.imageSmoothingEnabled = true;
@@ -2219,7 +2219,7 @@ function boreShadeColour(enclosure: number, cave: boolean): string {
   return `rgb(${Math.round(a[0] + (b[0] - a[0]) * e)},${Math.round(a[1] + (b[1] - a[1]) * e)},${Math.round(a[2] + (b[2] - a[2]) * e)})`;
 }
 
-function renderSegment(ctx: CanvasRenderingContext2D, width: number, height: number, seg: Segment, fogT: number, palette: Palette, lamps: Lamp[], terrain: Terrain, time: number, tiles: GroundTiles, cave = false, boreShade = ''): void {
+function renderSegment(ctx: CanvasRenderingContext2D, width: number, height: number, seg: Segment, fogT: number, palette: Palette, lamps: Lamp[], terrain: Terrain, time: number, tiles: GroundTiles, cave = false, boreShade = '', boost = 0): void {
   const p1 = seg.p1.screen;
   const p2 = seg.p2.screen;
   const dark = seg.color === 'dark';
@@ -2293,6 +2293,24 @@ function renderSegment(ctx: CanvasRenderingContext2D, width: number, height: num
       const lx1 = p1.x - p1.w + 2 * p1.w * t;
       const lx2 = p2.x - p2.w + 2 * p2.w * t;
       polygon(ctx, lx1 - l1, p1.y, lx1 + l1, p1.y, lx2 + l2, p2.y, lx2 - l2, p2.y, palette.lane);
+    }
+  } else if (boost > 0) {
+    // Turbo stretches each dash forward into the gap after it: only the near
+    // part of this dark segment is painted, up to where the dash now ends.
+    const cover = dashTailCover(seg.index, boost);
+    if (cover > 0) {
+      const w1 = p1.w;
+      const w2 = lerp(p1.w, p2.w, cover);
+      const x2 = lerp(p1.x, p2.x, cover);
+      const y2 = lerp(p1.y, p2.y, cover);
+      const l1 = laneMarkerWidth(w1);
+      const l2 = laneMarkerWidth(w2);
+      for (let lane = 1; lane < ROAD.lanes; lane += 1) {
+        const t = lane / ROAD.lanes;
+        const lx1 = p1.x - w1 + 2 * w1 * t;
+        const lx2 = x2 - w2 + 2 * w2 * t;
+        polygon(ctx, lx1 - l1, p1.y, lx1 + l1, p1.y, lx2 + l2, y2, lx2 - l2, y2, palette.lane);
+      }
     }
   }
 

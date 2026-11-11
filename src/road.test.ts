@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildTrack, buildStoneTrack, decorateTrack, findSegment, createPlayer, updatePlayer, resetDrift, enclosureAt, ROAD, DEFAULT_TUNING, TIGHT_CURVE_THRESHOLD } from './road.js';
+import { buildTrack, buildStoneTrack, decorateTrack, findSegment, createPlayer, updatePlayer, resetDrift, enclosureAt, dashTailCover, ROAD, DEFAULT_TUNING, TIGHT_CURVE_THRESHOLD } from './road.js';
 import type { DriveInput, Player, Segment, Track } from './road.js';
 
 describe('road', () => {
@@ -521,5 +521,40 @@ describe('tunnels and overpasses', () => {
     }
     expect(peak).toBeGreaterThan(0); // you DO pass under something…
     expect(peak).toBeLessThan(0.5); // …but it is over before the lights go out
+  });
+});
+
+describe('turbo lane dashes', () => {
+  const n = ROAD.rumbleSegments;
+  const isDark = (i: number): boolean => Math.floor(i / n) % 2 === 1;
+
+  it('paints no extra dash without boost', () => {
+    for (let i = 0; i < n * 8; i += 1) expect(dashTailCover(i, 0)).toBe(0);
+  });
+
+  it('never touches a light segment, which is painted in full already', () => {
+    for (let i = 0; i < n * 8; i += 1) if (!isDark(i)) expect(dashTailCover(i, 1)).toBe(0);
+  });
+
+  it('stretches each dash by half its length at full boost', () => {
+    // A 3-segment dash grows by 1.5 segments: the first dark segment in full, the next by half.
+    const covered = Array.from({ length: n }, (_, k) => dashTailCover(n + k, 1));
+    expect(covered.reduce((a, b) => a + b, 0)).toBeCloseTo(n * 0.5);
+    expect(covered[0]).toBe(1);
+    expect(covered[1]).toBeCloseTo(0.5);
+    expect(covered[2]).toBe(0);
+  });
+
+  it('grows with boost and keeps the dash start pinned', () => {
+    const total = (b: number): number => Array.from({ length: n }, (_, k) => dashTailCover(n + k, b)).reduce((a, c) => a + c, 0);
+    expect(total(0.5)).toBeCloseTo(n * 0.25);
+    expect(total(0.25)).toBeLessThan(total(0.5));
+    // The first dark segment is always the one that fills first.
+    expect(dashTailCover(n, 0.2)).toBeGreaterThan(0);
+    expect(dashTailCover(n + 1, 0.2)).toBe(0);
+  });
+
+  it('clamps boost above 1', () => {
+    expect(dashTailCover(n + 1, 5)).toBe(dashTailCover(n + 1, 1));
   });
 });
