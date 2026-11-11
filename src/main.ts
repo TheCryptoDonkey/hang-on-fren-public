@@ -656,6 +656,11 @@ let qProbeFails = 0;
  *  (renderScene detail:'low'). Sticky for the session: flip-flopping the
  *  world's dressing mid-run looks broken. */
 let lowDetail = false;
+/** True when the last rendered frame painted the live ride. Only those frames
+ *  feed adaptQuality(): the title, a held pause and the cached finish screens
+ *  cost next to nothing, and counting them as headroom stepped the buffer back
+ *  up while the player sat there, so the ride resumed at half the frame rate. */
+let sceneSampled = false;
 function adaptQuality(frameMs: number, now: number): void {
   // Ignore hiccups that are not rendering load: tab switches, huge GC pauses.
   if (document.visibilityState !== 'visible' || frameMs > 250) return;
@@ -2682,6 +2687,7 @@ let pausedH = 0;
 let pausedLow = false;
 let pausedMuted = false;
 let pausedRoll = 0;
+let pausedArt = -1;
 
 /** The victory / game-over scene layer, shared by both screens, and its key. */
 let frozenLayer: HTMLCanvasElement | null = null;
@@ -2692,6 +2698,7 @@ let frozenPhase = ''; // '' = stale
 let frozenWon = false;
 let frozenTour = '';
 let frozenRoll = 0;
+let frozenArt = -1;
 
 /** Forget everything painted for the frozen screens. The canvas can lose its
  *  pixels without the buffer size changing (a purged backing store after the tab
@@ -2720,6 +2727,7 @@ function pausedFrameSettled(): boolean {
 function render(): void {
   const store = state.store;
   if (!store) return;
+  sceneSampled = false;
 
   if (state.phase === 'loading') {
     invalidateFrozen();
@@ -2742,7 +2750,7 @@ function render(): void {
   const celebrating = (state.phase === 'victory' || state.phase === 'gameover') && sceneStill;
   const pausedStill = state.phase === 'playing' && state.paused && sceneStill && pausedFrameSettled();
   if (pausedStill) {
-    if (pausedPainted && pausedW === W && pausedH === H && pausedLow === lowDetail && pausedMuted === isMuted() && pausedRoll === state.camRoll) return;
+    if (pausedPainted && pausedW === W && pausedH === H && pausedLow === lowDetail && pausedMuted === isMuted() && pausedRoll === state.camRoll && pausedArt === store.revision) return;
   } else {
     pausedPainted = false;
   }
@@ -2754,6 +2762,7 @@ function render(): void {
     paintScene(store, wobble, trip);
     if (state.phase === 'victory') drawVictoryScrims();
     else if (state.phase === 'gameover') drawGameOverScrim(state.outcome === 'finish');
+    sceneSampled = state.phase === 'playing';
   }
   if (state.phase === 'playing') drawSparks(ctx);
 
@@ -2801,6 +2810,7 @@ function render(): void {
     pausedLow = lowDetail;
     pausedMuted = isMuted();
     pausedRoll = state.camRoll;
+    pausedArt = store.revision;
   }
 }
 
@@ -2818,7 +2828,7 @@ function paintScene(store: SpriteStore, wobble: number, trip: number): void {
 function blitFrozenScene(store: SpriteStore, wobble: number, trip: number): void {
   const won = state.outcome === 'finish';
   const tour = getActiveTour();
-  if (!frozenLayer || frozenPhase !== state.phase || frozenW !== W || frozenH !== H || frozenLow !== lowDetail || frozenWon !== won || frozenTour !== tour || frozenRoll !== state.camRoll) {
+  if (!frozenLayer || frozenPhase !== state.phase || frozenW !== W || frozenH !== H || frozenLow !== lowDetail || frozenWon !== won || frozenTour !== tour || frozenRoll !== state.camRoll || frozenArt !== store.revision) {
     if (!frozenLayer) frozenLayer = document.createElement('canvas');
     if (frozenLayer.width !== W || frozenLayer.height !== H) {
       frozenLayer.width = W;
@@ -2841,6 +2851,7 @@ function blitFrozenScene(store: SpriteStore, wobble: number, trip: number): void
     frozenWon = won;
     frozenTour = tour;
     frozenRoll = state.camRoll;
+    frozenArt = store.revision;
   }
   // 'copy' replaces what was there, so no separate clear of the main canvas.
   ctx.globalCompositeOperation = 'copy';
@@ -3440,7 +3451,7 @@ function frame(now: number): void {
   // Never let a transient error kill the loop — if it did, resize() would stop
   // and the canvas would freeze at its old size (black bars on window growth).
   try {
-    adaptQuality(rawMs, now);
+    if (sceneSampled) adaptQuality(rawMs, now);
     simAccum += elapsed;
     while (simAccum >= SIM_DT) {
       simAccum -= SIM_DT;

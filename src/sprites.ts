@@ -2194,6 +2194,9 @@ export const ART_URLS: Record<string, string> = {
 
 export class SpriteStore {
   private map = new Map<string, SpriteImage>();
+  /** Counts art that landed after the fact, so a screen that cached a picture
+   *  of the scene can tell it is out of date. Baked fallbacks do not count. */
+  revision = 0;
 
   get(name: string): SpriteImage | null {
     const found = this.map.get(name);
@@ -2209,6 +2212,7 @@ export class SpriteStore {
 
   set(name: string, sprite: SpriteImage): void {
     this.map.set(name, sprite);
+    this.revision += 1;
   }
 
   has(name: string): boolean {
