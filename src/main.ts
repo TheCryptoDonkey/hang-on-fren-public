@@ -33,6 +33,7 @@ import { MODES, loadModeIndex, saveModeIndex } from './difficulty.js';
 import { approach, clamp } from './util.js';
 import { isSteeringCode, KeyboardDriveState } from './keyboard-drive.js';
 import { createFlick, updateFlick, resetFlick } from './flick.js';
+import { DRIFT_HINT, createBendHold, driftHintText, loadDriftTaught, resetBendHold, saveDriftTaught, shouldShowDriftHint, tickBendHold } from './drifthint.js';
 import { assetUrl } from './asset-url.js';
 import { fetchBtcSnapshot, type BtcSnapshot } from './bitcoin.js';
 import { breakFlow, createFlow, flowLabel, flowMultiplier, gainFlow, tickFlow, FLOW_GAINS } from './flow.js';
@@ -343,6 +344,10 @@ const state = {
   driftArea: 0,
   driftHeld: 0, // seconds the current slide has been held
   wasDrifting: false,
+  // ---- drift lesson (drifthint.ts) ----
+  driftTaught: loadDriftTaught(), // a drift has been completed on this device
+  driftHintShown: false, // the prompt has shown in this run
+  bend: createBendHold(),
   flow: createFlow(),
   stageStartedAt: 0,
   stageStartCrashes: 0,
@@ -1596,6 +1601,8 @@ function beginRun(tour: TourId = selectedTour): void {
   state.driftArea = 0;
   state.driftHeld = 0;
   state.wasDrifting = false;
+  state.driftHintShown = false;
+  resetBendHold(state.bend);
   player.maxSpeed = BASE_MAX_SPEED;
   state.runId = typeof crypto.randomUUID === 'function'
     ? crypto.randomUUID()
@@ -2282,11 +2289,32 @@ function update(dt: number): void {
       vibrate(18);
       const label = state.driftHeld >= 2 ? 'BIG DRIFT' : 'DRIFT';
       addPopup(state.popups, `${label}  +${points.toLocaleString('en-GB')}`, W / 2, H * 0.56, '#8fd0ff', 1.3);
+      // A clean drift is the lesson learned: the in-run prompt retires for good.
+      if (!state.driftTaught) {
+        state.driftTaught = true;
+        saveDriftTaught();
+      }
     }
     state.driftArea = 0;
     state.driftHeld = 0;
   }
   state.wasDrifting = player.drifting;
+
+  // --- drift lesson: once per run, on the first sustained bend, until a drift lands
+  tickBendHold(state.bend, seg.curve, speedFrac, dt);
+  if (shouldShowDriftHint({
+    taught: state.driftTaught,
+    shownThisRun: state.driftHintShown,
+    runTime: state.runTime,
+    rivalIntro: state.rivalIntro,
+    rivalResultTime: state.rivalResultTime,
+    busy: state.popups.length > 0 || !!state.banner || state.wipeout > 0,
+    drifting: player.drifting,
+    bend: state.bend,
+  })) {
+    state.driftHintShown = true;
+    addPopup(state.popups, driftHintText(isTouch), W / 2, H * 0.5, '#8fd0ff', DRIFT_HINT.ttl);
+  }
 
   // --- camera: yaw into the corner, bank with the bike, trail it laterally ----
   const curveT = clamp(seg.curve / CURVE_REF, -1, 1);
