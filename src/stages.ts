@@ -132,10 +132,26 @@ function activeKits(): readonly SceneryKit[] {
   return SCENERY_KITS;
 }
 
-function activeBiomes(): readonly BiomeBackdrop[] {
-  if (activeTour === 'world') return WORLD_BIOME_NAMES;
-  if (activeTour === 'stone') return STONE_BIOME_NAMES;
+function biomesOf(tour: TourId): readonly BiomeBackdrop[] {
+  if (tour === 'world') return WORLD_BIOME_NAMES;
+  if (tour === 'stone') return STONE_BIOME_NAMES;
   return BIOME_NAMES;
+}
+
+function activeBiomes(): readonly BiomeBackdrop[] {
+  return biomesOf(activeTour);
+}
+
+/** Every horizon backdrop a tour can draw, distinct and in leg order. */
+export function tourHorizons(tour: TourId): readonly BiomeBackdrop[] {
+  return [...new Set(biomesOf(tour))];
+}
+
+/** The backdrops needed from the first metre of a tour: leg 0 crossfades its
+ *  own backdrop with the next leg's, and the renderer wants both resident. */
+export function openingHorizons(tour: TourId): readonly BiomeBackdrop[] {
+  const biomes = biomesOf(tour);
+  return [...new Set([biomes[0], biomes[Math.min(1, biomes.length - 1)]])];
 }
 
 /** True where the treat lottery should be dominated by roses — the Taj Mahal

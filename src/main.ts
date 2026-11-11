@@ -14,6 +14,7 @@ import { createTimer, tickTimer, addRoseTime, addCanTime, timerUrgency, DEFAULT_
 import { createScore, addDistance, addRose, addFuel, addBonus, addStuntBonus, addDrift, driftPayout, penalise, addOvertake, addNearMiss, registerCrash, summarise, type RunSummary } from './scoring.js';
 import type { PickupKind } from './world.js';
 import { SpriteStore, loadSpritesInto, buildSignVariants, buildBillboardVariants, brandPetrol } from './sprites.js';
+import { ensureTourArt, titleArt } from './tour-art.js';
 import { renderScene, drawTitleArt } from './render.js';
 import { spawnSmoke, updateSmoke, type Smoke } from './smoke.js';
 import { setPickupScale } from './geometry.js';
@@ -1343,16 +1344,53 @@ function readInput(): void {
 
 // ---- run lifecycle ---------------------------------------------------------
 
+// Longest a run start waits for its tour's opening horizons: past this the run
+// goes ahead on the code-drawn backdrop while they keep arriving.
+const TOUR_ART_BAIL_MS = 20_000;
+let tourGate = false;
+
 function startRun(tour: TourId = selectedTour): void {
   // The value-for-value ask sits between the title and the road: every
   // menu-launched run passes through it, retries go straight back out.
-  if (isV4vOpen()) return;
+  if (isV4vOpen() || tourGate) return;
+  // The tour's horizons are not part of the title gate (see tour-art.ts):
+  // start fetching them now so the ask, or a prefetch from the title, covers
+  // the wait; the gate below only holds for whatever is still missing.
+  if (state.store) void ensureTourArt(state.store, tour);
   if (state.phase === 'title' && shouldAskV4v()) {
     unlockAudio();
-    openV4v(() => beginRun(tour));
+    openV4v(() => enterRun(tour));
     return;
   }
-  beginRun(tour);
+  enterRun(tour);
+}
+
+function enterRun(tour: TourId): void {
+  const pending = state.store
+    ? ensureTourArt(state.store, tour, {
+      streamRest: true,
+      onProgress: (done, total) => { state.loadDone = done; state.loadTotal = total; },
+    })
+    : null;
+  if (!pending) {
+    beginRun(tour);
+    return;
+  }
+  // Reuse the loading screen and bar. Audio is unlocked inside the player's
+  // gesture, before the wait, so the run's music can still start after it.
+  unlockAudio();
+  tourGate = true;
+  state.loadDone = 0;
+  state.loadTotal = 1;
+  state.phase = 'loading';
+  let bail: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<void>(resolve => { bail = setTimeout(resolve, TOUR_ART_BAIL_MS); });
+  void Promise.race([pending, timeout]).finally(() => {
+    clearTimeout(bail);
+    tourGate = false;
+    if (state.store) void ensureTourArt(state.store, tour, { streamRest: true });
+    beginRun(tour);
+  });
 }
 
 function beginRun(tour: TourId = selectedTour): void {
@@ -3530,7 +3568,14 @@ async function boot(): Promise<void> {
     // Runs even if something (arcade handoff) already left the loading phase.
     decorateTrack(roadTrack, buildSignVariants(store), buildBillboardVariants(store));
     decorateTrack(stoneTrack, buildSignVariants(store), buildBillboardVariants(store));
-    if (state.phase === 'loading') state.phase = 'title';
+    // (A bail that fires first and the real finish both land here; the second
+    // must not pull the player off a run-start gate that reuses this phase.)
+    if (state.phase === 'loading' && !tourGate) state.phase = 'title';
+    // Idle prefetch of the selected tour's opening horizons: network and decode
+    // only, so the run start usually has nothing left to wait for.
+    const prefetch = (): void => { if (state.phase === 'title') void ensureTourArt(store, selectedTour); };
+    if ('requestIdleCallback' in window) window.requestIdleCallback(prefetch, { timeout: 2000 });
+    else setTimeout(prefetch, 500);
   };
   // Escape hatch for a dead/dripping connection: fallbacks cover every sprite,
   // so after 20s the game opens with whatever has landed (the rest keeps
@@ -3539,7 +3584,7 @@ async function boot(): Promise<void> {
   void loadSpritesInto(store, (done, total) => {
     state.loadDone = done;
     state.loadTotal = total;
-  })
+  }, titleArt())
     .catch(() => undefined)
     .then(() => {
       clearTimeout(bail);
