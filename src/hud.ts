@@ -49,6 +49,8 @@ export interface HudState {
   rivalResult: { won: boolean; deltaS: number } | null;
   rivalResultTime: number;
   popups: Popup[];
+  /** The one large banner (WIPEOUT, TURBO!), or null. Drawn centred, over the popups. */
+  banner?: Banner | null;
 }
 
 export interface HudOptions {
@@ -308,6 +310,92 @@ export function placePopups(list: Popup[], env: PopupEnv): void {
   }
 }
 
+// --- banners ------------------------------------------------------------------
+//
+// A banner is the HUD's big one-line announcement: a wipeout or a turbo needs to
+// land harder than a 24-unit popup. There is one slot, drawn centred, baked once
+// into a sprite and faded at blit time (re-baking a stroked sprite every frame to
+// animate its size would cost far more than the effect is worth).
+
+export interface Banner {
+  text: string;
+  color: string;
+  /** Font size, in HUD units (× u). */
+  size: number;
+  /** Glyph centre as a fraction of the buffer height. */
+  y: number;
+  life: number; // seconds remaining
+  ttl: number;
+  /** A banner only replaces one of equal or lower priority. */
+  priority: number;
+}
+
+export const BANNER_KINDS = {
+  wipeout: { size: 72, y: 0.42, ttl: 1.1, priority: 2 },
+} as const;
+
+/** Build a banner of a kind. */
+export function makeBanner(kind: keyof typeof BANNER_KINDS, text: string, color: string): Banner {
+  const k = BANNER_KINDS[kind];
+  return { text, color, size: k.size, y: k.y, life: k.ttl, ttl: k.ttl, priority: k.priority };
+}
+
+/** The slot after offering it `next`: a live banner of higher priority keeps it. */
+export function offerBanner(current: Banner | null, next: Banner): Banner | null {
+  return current && current.life > 0 && current.priority > next.priority ? current : next;
+}
+
+/** Age a banner; null once it has run out. */
+export function tickBanner(b: Banner | null, dt: number): Banner | null {
+  if (!b) return null;
+  b.life -= dt;
+  return b.life > 0 ? b : null;
+}
+
+/** Full strength for the first part of its life, then a clean fade to nothing. */
+export function bannerAlpha(b: Banner): number {
+  return Math.max(0, Math.min(1, b.life / (b.ttl * 0.45)));
+}
+
+/** Where a banner prints. `x` is its centre, `y` its baseline. */
+export interface BannerLayout { px: number; x: number; y: number; wid: number }
+
+/**
+ * Lay a banner out: centred, shrunk to fit the width left by anything in
+ * `keepOut` that shares its rows (the touch pause button), held below the TIME
+ * readout, and moved clear of `avoid` (the rival card), which it never overprints.
+ */
+export function bannerLayout(
+  w: number, h: number, u: number, b: Pick<Banner, 'text' | 'size' | 'y'>,
+  measure: (text: string, px: number) => number,
+  keepOut: readonly Rect[] = [], avoid: readonly Rect[] = [],
+): BannerLayout {
+  let px = Math.round(b.size * u);
+  let base = Math.max(b.y * h + 0.26 * px, 132 * u + ASC * px);
+  const room = (size: number, y: number): number => {
+    let maxW = w * 0.92;
+    for (const z of keepOut) {
+      if (z.y1 <= y - ASC * size || z.y0 >= y + DESC * size) continue;
+      if (z.x0 >= w / 2) maxW = Math.min(maxW, 2 * (z.x0 - w / 2));
+      else if (z.x1 <= w / 2) maxW = Math.min(maxW, 2 * (w / 2 - z.x1));
+    }
+    return Math.max(0, maxW);
+  };
+  const gap = 6 * u;
+  for (const r of avoid) {
+    if (r.x1 <= w * 0.04 || r.x0 >= w * 0.96) continue;
+    if (r.y1 <= base - ASC * px || r.y0 >= base + DESC * px) continue;
+    const below = r.y1 + gap + ASC * px;
+    base = below + DESC * px <= h * 0.94 ? below : r.y0 - gap - DESC * px;
+  }
+  for (let pass = 0; pass < 2; pass += 1) {
+    const wid = measure(b.text, px);
+    const maxW = room(px, base);
+    if (wid > maxW && wid > 0) px = Math.max(8, Math.floor(px * maxW / wid));
+  }
+  return { px, x: w / 2, y: base, wid: measure(b.text, px) };
+}
+
 function pill(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, fill: string): void {
   const r = h / 2;
   ctx.fillStyle = fill;
@@ -501,6 +589,22 @@ export function drawHud(ctx: CanvasRenderingContext2D, w: number, h: number, s: 
     label(ctx, 'rose', `ROSE x${s.roseStreak}`, 800, 16 * u, ROSE, 'center', w / 2, 118 * u, u);
   }
 
+  // --- banner layout (before the popups, which keep out of it) ---
+  const banner = s.banner && s.banner.life > 0 ? s.banner : null;
+  const cardUp = s.rivalIntro > 0 || (s.rivalResult && s.rivalResultTime > 0);
+  let bannerBox: BannerLayout | null = null;
+  if (banner) {
+    const avoid: Rect[] = [];
+    if (cardUp) {
+      const card = rivalCardRect(w, h, u, options.keepOut);
+      avoid.push({ x0: card.x, y0: card.y, x1: card.x + card.w, y1: card.y + card.h });
+    }
+    bannerBox = bannerLayout(w, h, u, banner, (text, px) => {
+      ctx.font = `900 ${px}px ${FACE}`;
+      return ctx.measureText(text).width;
+    }, options.keepOut, avoid);
+  }
+
   // --- popups ---
   if (s.popups.length > 0) {
     ctx.textAlign = 'center';
@@ -527,6 +631,9 @@ export function drawHud(ctx: CanvasRenderingContext2D, w: number, h: number, s: 
         zones.push({ x0: card.x - m, y0: card.y - m, x1: card.x + card.w + m, y1: card.y + card.h + m });
       }
       if (options.keepOut) zones.push(...options.keepOut);
+      if (bannerBox) {
+        zones.push({ x0: bannerBox.x - bannerBox.wid / 2 - m, y0: bannerBox.y - ASC * bannerBox.px - m, x1: bannerBox.x + bannerBox.wid / 2 + m, y1: bannerBox.y + DESC * bannerBox.px + m });
+      }
       placePopups(s.popups, env(ctx, w, h, u, zones));
     }
     for (const p of s.popups) {
@@ -541,6 +648,10 @@ export function drawHud(ctx: CanvasRenderingContext2D, w: number, h: number, s: 
       if (p.sprite) blit(ctx, p.sprite, 'center', p.lx as number, y, alpha);
       else liveOutlined(ctx, p.text, font, p.color, lw, 'center', p.lx as number, y, alpha);
     }
+  }
+  if (banner && bannerBox) {
+    ctx.textAlign = 'center';
+    label(ctx, 'banner', banner.text, 900, bannerBox.px, banner.color, 'center', bannerBox.x, bannerBox.y, u, bannerAlpha(banner));
   }
   ctx.globalAlpha = 1;
 }

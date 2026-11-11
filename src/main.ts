@@ -19,7 +19,7 @@ import { renderScene, drawTitleArt } from './render.js';
 import { spawnSmoke, updateSmoke, type Smoke } from './smoke.js';
 import { setPickupScale } from './geometry.js';
 import { riderSize } from './rider.js';
-import { drawHud, addPopup, updatePopups, type HudState, type Popup, type Rect } from './hud.js';
+import { drawHud, addPopup, updatePopups, makeBanner, offerBanner, tickBanner, BANNER_KINDS, type HudState, type Popup, type Banner, type Rect } from './hud.js';
 import { loadBoard, saveBoard, insertScore, qualifies, rankOf, topScore, type HighScore } from './highscore.js';
 import { unlockAudio, updateEngine, updateRumble, updateScreech, updateTurbo, updateTraffic, silenceTraffic, updateEcho, playSfx, playPassBy, playVoiceClip, preloadVoiceClip, resetGearbox, currentGear, toggleMuted, isMuted } from './audio.js';
 import { initMusic, preloadMusic, startMusic, currentMusicUrl } from './music.js';
@@ -283,6 +283,9 @@ const state = {
   finishTimeLeft: 0, // clock reading as the finish was crossed
   summary: null as RunSummary | null,
   popups: [] as Popup[],
+  banner: null as Banner | null, // the big WIPEOUT / TURBO! banner, drawn by the HUD
+  hitStop: 0, // seconds of crash hit-stop left: the simulation holds still while it runs
+  impactFlash: false, // paint one pale flash on the next frame drawn after a crash
   nameValue: '',
   lastStageIndex: 0,
   lastGateSpawned: 0, // highest checkpoint boundary index a gate has been dropped for
@@ -1548,6 +1551,9 @@ function beginRun(tour: TourId = selectedTour): void {
   state.voiceCooldown = 0;
   state.stingCooldown = 0;
   state.popups = [];
+  state.banner = null;
+  state.hitStop = 0;
+  state.impactFlash = false;
   state.sparks = [];
   state.fireworks = [];
   state.flash = 0;
@@ -1853,6 +1859,9 @@ function skipLevelCheat(): void {
 /** Abandon the run from the pause screen — no score entry, straight home. */
 function quitRun(): void {
   state.paused = false;
+  state.banner = null;
+  state.hitStop = 0;
+  state.impactFlash = false;
   state.phase = 'title';
   startMusic(MUSIC_URL); // the title always rides the main theme
   playSfx('milestone', 0.6, 0.8);
@@ -1956,6 +1965,18 @@ function resolveOpeningRivalTour(): void {
   retireRival(world);
 }
 
+/** How long the whole simulation holds still at the moment of a wipeout. The
+ *  clock, physics and world all wait, so the freeze costs the rider nothing and
+ *  gives nothing back: it is a beat on the screen, not a change to the run. */
+const HIT_STOP_S = 0.08;
+
+/** Show a banner; false when a live banner of higher priority already holds the slot. */
+function showBanner(kind: keyof typeof BANNER_KINDS, text: string, color: string): boolean {
+  const next = makeBanner(kind, text, color);
+  state.banner = offerBanner(state.banner, next);
+  return state.banner === next;
+}
+
 // A wipeout is now purely a momentary spin-out: you lose your momentum and your
 // pickup streak, which costs you time on the clock — but it NO LONGER ends the
 // run. The clock is the only thing that can finish you (out of time), so runs
@@ -1976,7 +1997,10 @@ function startWipeout(reason: 'crash' | 'spin' = 'crash'): void {
   playSfx('crash', 1.1);
   playSfx('wipeout', 0.9);
   vibrate([60, 40, 90]);
-  addPopup(state.popups, reason === 'spin' ? 'SPUN IT!' : 'WIPEOUT!', W / 2, H * 0.5, '#ff5d78', 1.3);
+  // The beat: hold the sim still for a moment, flash once, and say it big.
+  state.hitStop = HIT_STOP_S;
+  state.impactFlash = true;
+  showBanner('wipeout', reason === 'spin' ? 'SPUN IT!' : 'WIPEOUT!', '#ff5d78');
 }
 
 /** Throw away the slide in progress — nothing banked, angle wiped. */
@@ -2032,6 +2056,9 @@ function snapshotBitcoin(): void {
 }
 
 function endRun(endedBy: 'time' | 'crashes'): void {
+  state.banner = null;
+  state.hitStop = 0;
+  state.impactFlash = false;
   state.endedBy = endedBy;
   state.outcome = 'time';
   startMusic(MUSIC_URL); // back to the main theme for the card + title
@@ -2051,6 +2078,9 @@ function endRun(endedBy: 'time' | 'crashes'): void {
 // on the clock, throw confetti and a fanfare, then show a celebratory game-over
 // card (OutRun-style goal) before the normal high-score flow.
 function winRun(): void {
+  state.banner = null;
+  state.hitStop = 0;
+  state.impactFlash = false;
   state.endedBy = 'time';
   state.outcome = 'finish';
   // Exactly ONE trio of cavewomen on the GOAL screen. The road-side welcome
@@ -2121,6 +2151,7 @@ let devPaused = false;
 function update(dt: number): void {
   state.time += dt;
   updatePopups(state.popups, dt);
+  state.banner = tickBanner(state.banner, dt);
   updateSparks(dt);
   updateFireworks(dt);
   if (devPaused) return; // dev-only: freeze physics so art can be inspected
@@ -2165,6 +2196,13 @@ function update(dt: number): void {
     updateRumble({ active: false, intensity: 0, speed: 0 });
     updateScreech({ active: false, load: 0, speed: 0 });
     updateTurbo({ active: false, intensity: 0 });
+    return;
+  }
+
+  // Crash hit-stop: past the pause check, so a pause never spends it and never
+  // fires it, and ahead of the clock, so the freeze is exact in both directions.
+  if (state.hitStop > 0) {
+    state.hitStop = Math.max(0, state.hitStop - dt);
     return;
   }
 
@@ -2804,6 +2842,8 @@ canvas.addEventListener('contextrestored', invalidateFrozen);
 function pausedFrameSettled(): boolean {
   return state.sparks.length === 0
     && state.popups.length === 0
+    && !state.banner
+    && !state.impactFlash
     && state.flash <= 0
     && !player.drifting // the drift meter flashes off the wall clock
     && timerUrgency(timer) === 0; // so does the last-seconds clock
@@ -2850,6 +2890,14 @@ function render(): void {
     sceneSampled = state.phase === 'playing';
   }
   if (state.phase === 'playing') drawSparks(ctx);
+  // One pale frame at the moment of impact: a flat low-alpha fill, no gradient.
+  if (state.impactFlash) {
+    state.impactFlash = false;
+    if (state.phase === 'playing') {
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.22)';
+      ctx.fillRect(0, 0, W, H);
+    }
+  }
 
   // The game-over card carries the score/stats itself — drawing the live HUD
   // under it just bled the speed/distance pills through the name-entry keys.
@@ -2878,6 +2926,7 @@ function render(): void {
       rivalResult: state.rivalResult,
       rivalResultTime: state.rivalResultTime,
       popups: state.popups,
+      banner: state.banner,
     };
     drawHud(ctx, W, H, hud, { bottomInset: mobileHudBottomInset(), scale: uiScale(), keepOut: pauseButtonKeepOut() });
   }

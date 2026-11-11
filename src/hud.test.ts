@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
-  addPopup, updatePopups, placePopups, popupY, rivalCardRect, rivalCardY, POPUP_RISE,
+  addPopup, updatePopups, placePopups, popupY, rivalCardRect, rivalCardY, POPUP_RISE, POPUP_SIZE,
+  makeBanner, offerBanner, tickBanner, bannerAlpha, bannerLayout,
   type Popup, type PopupEnv, type Rect,
 } from './hud.js';
 
@@ -235,5 +236,82 @@ describe('rival card', () => {
     const y = rivalCardY(320, 0.6);
     const above: Rect = { x0: 500, y0: 0, x1: 560, y1: y - 1 };
     expect(rivalCardRect(568, 320, 0.6, [above]).w).toBe(rivalCardRect(568, 320, 0.6).w);
+  });
+});
+
+describe('banner', () => {
+  const wipeout = (): ReturnType<typeof makeBanner> => makeBanner('wipeout', 'WIPEOUT!', '#ff5d78');
+
+  it('is clearly larger than a popup, with a short life', () => {
+    const b = wipeout();
+    expect(b.size).toBeGreaterThanOrEqual(POPUP_SIZE * 2.5);
+    expect(b.ttl).toBeLessThanOrEqual(1.5);
+  });
+
+  it('holds, then fades to nothing, then goes', () => {
+    const b = wipeout();
+    expect(bannerAlpha(b)).toBe(1);
+    tickBanner(b, b.ttl * 0.5);
+    expect(bannerAlpha(b)).toBe(1);
+    tickBanner(b, b.ttl * 0.3);
+    expect(bannerAlpha(b)).toBeGreaterThan(0);
+    expect(bannerAlpha(b)).toBeLessThan(1);
+    expect(tickBanner(b, 10)).toBeNull();
+    expect(tickBanner(null, 1)).toBeNull();
+  });
+
+  it('lets an equal or higher priority banner take the slot, never a lower one', () => {
+    const live = wipeout();
+    const low = { ...wipeout(), priority: 1, text: 'TURBO!' };
+    expect(offerBanner(live, low)).toBe(live);
+    expect(offerBanner(null, low)).toBe(low);
+    expect(offerBanner(low, live)).toBe(live);
+    const spent = { ...live, life: 0 };
+    expect(offerBanner(spent, low)).toBe(low);
+  });
+
+  const VIEWS: [string, number, number, number][] = [
+    ['phone landscape', 1688, 780, 1.56],
+    ['small phone landscape', 1136, 640, 1.56],
+    ['desktop', 1280, 720, 1.0],
+  ];
+  for (const [name, w, h, u] of VIEWS) {
+    it(`fits on screen, centred and below the TIME readout: ${name}`, () => {
+      const l = bannerLayout(w, h, u, wipeout(), measure);
+      expect(l.x).toBe(w / 2);
+      expect(l.wid).toBeLessThanOrEqual(w * 0.92 + 1);
+      expect(l.y - 0.8 * l.px).toBeGreaterThanOrEqual(126 * u);
+      expect(l.y + 0.28 * l.px).toBeLessThanOrEqual(h);
+      expect(l.px).toBeGreaterThanOrEqual(POPUP_SIZE * u * 2);
+    });
+  }
+
+  it('narrows to stay clear of a pause button on its rows', () => {
+    const w = 568;
+    const h = 320;
+    const u = 0.6;
+    const free = bannerLayout(w, h, u, wipeout(), measure);
+    const row = { x0: w / 2 + 60, y0: free.y - 0.8 * free.px, x1: w / 2 + 110, y1: free.y + 0.28 * free.px };
+    const l = bannerLayout(w, h, u, wipeout(), measure, [row]);
+    expect(l.x + l.wid / 2).toBeLessThanOrEqual(row.x0 + 1);
+    expect(l.px).toBeLessThan(free.px);
+  });
+
+  it('ignores a keep-out on other rows', () => {
+    const free = bannerLayout(844, 390, 0.7, wipeout(), measure);
+    const above: Rect = { x0: 700, y0: 0, x1: 760, y1: 40 };
+    expect(bannerLayout(844, 390, 0.7, wipeout(), measure, [above]).px).toBe(free.px);
+  });
+
+  it('moves clear of the rival card rather than printing over it', () => {
+    const u = 1.56;
+    const w = 1136;
+    const h = 640;
+    const c = rivalCardRect(w, h, u);
+    const card: Rect = { x0: c.x, y0: c.y, x1: c.x + c.w, y1: c.y + c.h };
+    const l = bannerLayout(w, h, u, wipeout(), measure, [], [card]);
+    const box: Rect = { x0: l.x - l.wid / 2, y0: l.y - 0.8 * l.px, x1: l.x + l.wid / 2, y1: l.y + 0.28 * l.px };
+    expect(overlap(box, card)).toBe(false);
+    expect(box.y1).toBeLessThanOrEqual(h);
   });
 });
