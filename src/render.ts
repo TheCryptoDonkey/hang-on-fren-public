@@ -703,6 +703,7 @@ export function renderScene(scene: Scene): void {
   // Resolve the frame's ground patterns once — the per-band loop below runs
   // hundreds of times and must never touch the tile cache or allocate.
   const groundTiles = resolveGroundTiles(ctx, palette, terrain);
+  const boreShade = boreShadeColour(scene.enclosure ?? 0, cave);
   for (let i = drawn.length - 1; i >= 0; i -= 1) {
     const seg = drawn[i];
     const n = (seg.index - baseSegment.index + track.segments.length) % track.segments.length;
@@ -717,7 +718,7 @@ export function renderScene(scene: Scene): void {
         clipped = false;
       }
     }
-    renderSegment(ctx, width, height, seg, n / ROAD.drawDistance, palette, lamps, terrain, scene.time, groundTiles, cave);
+    renderSegment(ctx, width, height, seg, n / ROAD.drawDistance, palette, lamps, terrain, scene.time, groundTiles, cave, boreShade);
   }
   if (clipped) ctx.restore();
   ctx.imageSmoothingEnabled = true;
@@ -2190,7 +2191,24 @@ function renderSides(
   // valley art shows through where the wall used to stand.)
 }
 
-function renderSegment(ctx: CanvasRenderingContext2D, width: number, height: number, seg: Segment, fogT: number, palette: Palette, lamps: Lamp[], terrain: Terrain, time: number, tiles: GroundTiles, cave = false): void {
+// Full-depth multiply colour for a tunnel bore, eased by how deep the rider is.
+// From outside the bore has to read dark (about 30% of lit) but never black, so
+// the lamps and the far exit still show; once the rider is inside it eases to
+// about 60% so walls, markings and traffic stay readable (the enclosure tint in
+// renderScene then rides on top). Caves stay warmer and a touch brighter.
+const BORE_OUT: ReadonlyArray<number> = [66, 76, 94];
+const BORE_IN: ReadonlyArray<number> = [140, 150, 164];
+const CAVE_OUT: ReadonlyArray<number> = [110, 92, 70];
+const CAVE_IN: ReadonlyArray<number> = [190, 168, 140];
+
+function boreShadeColour(enclosure: number, cave: boolean): string {
+  const e = clamp(enclosure, 0, 1);
+  const a = cave ? CAVE_OUT : BORE_OUT;
+  const b = cave ? CAVE_IN : BORE_IN;
+  return `rgb(${Math.round(a[0] + (b[0] - a[0]) * e)},${Math.round(a[1] + (b[1] - a[1]) * e)},${Math.round(a[2] + (b[2] - a[2]) * e)})`;
+}
+
+function renderSegment(ctx: CanvasRenderingContext2D, width: number, height: number, seg: Segment, fogT: number, palette: Palette, lamps: Lamp[], terrain: Terrain, time: number, tiles: GroundTiles, cave = false, boreShade = ''): void {
   const p1 = seg.p1.screen;
   const p2 = seg.p2.screen;
   const dark = seg.color === 'dark';
@@ -2286,7 +2304,8 @@ function renderSegment(ctx: CanvasRenderingContext2D, width: number, height: num
     // road with a lid on. It has to look dark in there from OUT here, and that
     // means the segments themselves carry the dark, deepening as they recede.
     const depth = clamp(Math.min(seg.index - overhead.start, overhead.end - seg.index) / 6, 0, 1);
-    const gloom = overhead.kind === 'tunnel' ? depth : depth * 0.45;
+    const tunnel = overhead.kind === 'tunnel';
+    const gloom = tunnel ? depth : depth * 0.45;
     if (gloom > 0.01) {
       // From the roof down to this segment's near edge. At the mouth itself depth
       // is 0, so nothing is shaded there and the portal stays crisp; deeper
@@ -2296,8 +2315,26 @@ function renderSegment(ctx: CanvasRenderingContext2D, width: number, height: num
       const top = Math.min(upFrom(p1, ROOF_Y, height), upFrom(p2, ROOF_Y, height));
       ctx.save();
       ctx.globalCompositeOperation = 'multiply';
-      ctx.fillStyle = cave ? `rgba(172,138,102,${gloom * 0.5})` : `rgba(88,102,128,${gloom * 0.62})`;
-      ctx.fillRect(bleedX, top, bleedW, p1.y - top + 1);
+      if (tunnel && boreShade) {
+        // Each part of the bore is darkened ONCE, by its own depth: the far
+        // aperture is cut out (even-odd) because the farther segments, drawn
+        // earlier, already carry their own gloom. A full-width rect from the roof
+        // would re-multiply everything behind it and take the far bore to black.
+        ctx.globalAlpha = gloom;
+        ctx.fillStyle = boreShade;
+        // Edges snap to whole pixels so neighbouring segments tile exactly: a
+        // fractional shared edge multiplies twice and draws a pale hairline.
+        const y0 = Math.floor(top);
+        const fr = Math.floor(upFrom(p2, ROOF_Y, height));
+        const fx = Math.round(p2.x - p2.w * WALL_X);
+        ctx.beginPath();
+        ctx.rect(bleedX, y0, bleedW, Math.floor(p1.y) - y0);
+        ctx.rect(fx, fr, Math.round(p2.x + p2.w * WALL_X) - fx, Math.floor(p2.y) - fr);
+        ctx.fill('evenodd');
+      } else {
+        ctx.fillStyle = cave ? `rgba(172,138,102,${gloom * 0.5})` : `rgba(88,102,128,${gloom * 0.62})`;
+        ctx.fillRect(bleedX, top, bleedW, p1.y - top + 1);
+      }
       ctx.restore();
     }
     // A cave is lit by candles down both walls; a road tunnel by strip lights.
