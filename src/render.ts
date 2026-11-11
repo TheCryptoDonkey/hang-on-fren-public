@@ -117,6 +117,47 @@ function glowSprite(key: string, colour: string, stops: ReadonlyArray<readonly [
   return cv;
 }
 
+// Full-screen vignettes (turbo, slingshot, crash). A fresh full-buffer radial
+// gradient per frame, per active effect, is real fill cost under software
+// raster, and because the alpha moves every frame the gradient object cannot be
+// cached. Each effect is baked ONCE at full strength into a buffer-sized sprite
+// (rebuilt only when the buffer size changes) and stamped 1:1 with the strength
+// on globalAlpha. It has to be 1:1: a half-resolution sprite scaled up measured
+// no cheaper than the live gradient.
+const vignetteCache = new Map<string, { w: number; h: number; cv: HTMLCanvasElement }>();
+
+function drawVignette(
+  ctx: CanvasRenderingContext2D,
+  key: string,
+  width: number,
+  height: number,
+  cy: number,
+  r0: number,
+  r1: number,
+  from: string,
+  to: string,
+  strength: number,
+): void {
+  let v = vignetteCache.get(key);
+  if (!v || v.w !== width || v.h !== height) {
+    const cv = v ? v.cv : document.createElement('canvas');
+    cv.width = width;
+    cv.height = height;
+    const c = cv.getContext('2d');
+    if (!c) return;
+    const g = c.createRadialGradient(width / 2, cy, r0, width / 2, cy, r1);
+    g.addColorStop(0, from);
+    g.addColorStop(1, to);
+    c.fillStyle = g;
+    c.fillRect(0, 0, width, height);
+    v = { w: width, h: height, cv };
+    vignetteCache.set(key, v);
+  }
+  ctx.globalAlpha = strength;
+  ctx.drawImage(v.cv, 0, 0);
+  ctx.globalAlpha = 1;
+}
+
 // Rainbow pickup halo. Its own tiny cache (24 pre-baked hue discs) rather than
 // the shared glowCache, so cycling the hue every frame can't thrash it — and
 // because rgba() above only speaks hex, whereas these need hsl. A soft filled
@@ -946,30 +987,18 @@ export function renderScene(scene: Scene): void {
 
   // Turbo warm-speed vignette (drawn un-shaken, over the scene, under the HUD).
   if (scene.boost > 0) {
-    const g = ctx.createRadialGradient(width / 2, height * 0.62, height * 0.18, width / 2, height * 0.62, width * 0.72);
-    g.addColorStop(0, 'rgba(255,150,70,0)');
-    g.addColorStop(1, `rgba(255,95,45,${scene.boost * 0.3})`);
-    ctx.fillStyle = g;
-    ctx.fillRect(0, 0, width, height);
+    drawVignette(ctx, 'turbo', width, height, height * 0.62, height * 0.18, width * 0.72, 'rgba(255,150,70,0)', 'rgb(255,95,45)', scene.boost * 0.3);
   }
 
   // Slingshot vignette: a cool rush of air, distinct from the warm rose turbo.
   const sling = scene.sling ?? 0;
   if (sling > 0) {
-    const g = ctx.createRadialGradient(width / 2, height * 0.62, height * 0.2, width / 2, height * 0.62, width * 0.72);
-    g.addColorStop(0, 'rgba(120,200,255,0)');
-    g.addColorStop(1, `rgba(90,170,255,${sling * 0.22})`);
-    ctx.fillStyle = g;
-    ctx.fillRect(0, 0, width, height);
+    drawVignette(ctx, 'sling', width, height, height * 0.62, height * 0.2, width * 0.72, 'rgba(120,200,255,0)', 'rgb(90,170,255)', sling * 0.22);
   }
 
   // Crash impact vignette: a red pulse that fades with the spin-out.
   if (impact > 0) {
-    const g = ctx.createRadialGradient(width / 2, height * 0.55, height * 0.2, width / 2, height * 0.55, width * 0.75);
-    g.addColorStop(0, 'rgba(255,40,60,0)');
-    g.addColorStop(1, `rgba(255,30,50,${impact * 0.42})`);
-    ctx.fillStyle = g;
-    ctx.fillRect(0, 0, width, height);
+    drawVignette(ctx, 'crash', width, height, height * 0.55, height * 0.2, width * 0.75, 'rgba(255,40,60,0)', 'rgb(255,30,50)', impact * 0.42);
   }
 }
 
