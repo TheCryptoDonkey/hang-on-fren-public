@@ -17,8 +17,7 @@
     "typecheck": "tsc --noEmit && tsc --noEmit --project tsconfig.server.json",
     "test": "vitest run",
     "test:qr": "node tools/qr-smoke.mjs",
-    "gen:art": "node tools/gen-art.mjs",
-    "trim-manifest": "node tools/trim-manifest.mjs"
+    "gen:art": "node tools/gen-art.mjs"
   },
   "devDependencies": {
     "@napplet/conformance-cli": "0.3.4",
