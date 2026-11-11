@@ -1364,9 +1364,10 @@ function beginRun(tour: TourId = selectedTour): void {
   // (score.distance still holds the LAST run here, so don't use stageMusicUrl).
   startMusic(STAGE_MUSIC[tour][0] ?? MUSIC_URL);
   // Warm EVERY bed the tour will play, right now: the run's start absorbs the
-  // fetches (instant from the SW cache after the first visit) instead of the
-  // network spiking mid-run at each checkpoint — which on a phone connection
-  // was another face of "it goes laggy while you ride".
+  // fetches (once a bed has been fetched in full, the service worker serves it
+  // from Cache Storage, offline too) instead of the network spiking mid-run at
+  // each checkpoint — which on a phone connection was another face of "it goes
+  // laggy while you ride".
   for (const bed of Object.values(STAGE_MUSIC[tour])) if (bed) preloadMusic(bed);
   // The stone tour's short goal-screen sting is tiny — warm it up front so it's
   // ready the instant the rider crosses the 600B YEARS BC finish.
