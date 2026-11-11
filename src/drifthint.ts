@@ -93,9 +93,10 @@ export function shouldShowDriftHint(c: DriftHintContext): boolean {
 }
 
 /** The prompt: the title's own wording, then how to do it. One popup, so a short
- *  phone never holds the second half back behind other popups. */
+ *  phone never holds the second half back behind other popups. Touch steers with
+ *  on-screen arrows too, so both inputs are told the same move. */
 export function driftHintText(touch: boolean): string {
   return touch
-    ? 'FLICK TO DRIFT  ·  TAP AWAY, THEN BACK'
+    ? 'FLICK TO DRIFT  ·  OTHER ARROW, THEN BACK'
     : 'FLICK THE BARS TO DRIFT  ·  OTHER ARROW, THEN BACK';
 }

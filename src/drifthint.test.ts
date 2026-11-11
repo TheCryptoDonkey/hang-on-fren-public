@@ -81,9 +81,9 @@ describe('drift hint: wording', () => {
     expect(driftHintText(false).startsWith('FLICK THE BARS TO DRIFT')).toBe(true);
   });
 
-  it('words the how-to for the input', () => {
-    expect(driftHintText(true)).toContain('TAP AWAY');
-    expect(driftHintText(false)).toContain('ARROW');
+  it('names the other arrow on both inputs', () => {
+    expect(driftHintText(true)).toContain('OTHER ARROW, THEN BACK');
+    expect(driftHintText(false)).toContain('OTHER ARROW, THEN BACK');
   });
 });
 
