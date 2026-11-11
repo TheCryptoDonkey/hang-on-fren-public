@@ -25,6 +25,14 @@ import { clamp, lerp, wrap } from './util.js';
  * canvas wedges at the edges of every bend.
  */
 const ROLL_BLEED = 0.28;
+/**
+ * Roll smaller than this is drawn as no roll at all. Under a software-raster
+ * canvas ANY rotation, however slight, costs two to three times the frame
+ * (every axis-aligned fill becomes an anti-aliased quad), and the camera eases
+ * towards level without ever quite arriving. 0.0005 rad is about a third of a
+ * pixel at the edge of a phone screen, so the snap cannot be seen.
+ */
+const ROLL_EPS = 0.0005;
 
 // Pickup kind → sprite id (kinds live in world.ts; art in sprites.ts).
 const PICKUP_SPRITE: Record<string, string> = {
@@ -563,7 +571,10 @@ export function renderScene(scene: Scene): void {
   const terrain = scene.terrain ?? DEFAULT_TERRAIN;
   const cave = scene.cave ?? false;
   const camYaw = scene.camYaw ?? 0;
-  const camRoll = scene.camRoll ?? 0;
+  // The potato tier is by definition a software-raster device, where banking
+  // is the single dearest thing in the frame — it rides level.
+  const rawRoll = scene.camRoll ?? 0;
+  const camRoll = LOW_DETAIL || Math.abs(rawRoll) < ROLL_EPS ? 0 : rawRoll;
   const camLag = scene.camLag ?? 0;
 
   const baseSegment = findSegment(track, player.z);
