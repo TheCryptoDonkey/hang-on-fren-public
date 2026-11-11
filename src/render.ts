@@ -125,6 +125,47 @@ function glowSprite(key: string, colour: string, stops: ReadonlyArray<readonly [
   return cv;
 }
 
+// Full-screen vignettes (turbo, slingshot, crash). A fresh full-buffer radial
+// gradient per frame, per active effect, is real fill cost under software
+// raster, and because the alpha moves every frame the gradient object cannot be
+// cached. Each effect is baked ONCE at full strength into a buffer-sized sprite
+// (rebuilt only when the buffer size changes) and stamped 1:1 with the strength
+// on globalAlpha. It has to be 1:1: a half-resolution sprite scaled up measured
+// no cheaper than the live gradient.
+const vignetteCache = new Map<string, { w: number; h: number; cv: HTMLCanvasElement }>();
+
+function drawVignette(
+  ctx: CanvasRenderingContext2D,
+  key: string,
+  width: number,
+  height: number,
+  cy: number,
+  r0: number,
+  r1: number,
+  from: string,
+  to: string,
+  strength: number,
+): void {
+  let v = vignetteCache.get(key);
+  if (!v || v.w !== width || v.h !== height) {
+    const cv = v ? v.cv : document.createElement('canvas');
+    cv.width = width;
+    cv.height = height;
+    const c = cv.getContext('2d');
+    if (!c) return;
+    const g = c.createRadialGradient(width / 2, cy, r0, width / 2, cy, r1);
+    g.addColorStop(0, from);
+    g.addColorStop(1, to);
+    c.fillStyle = g;
+    c.fillRect(0, 0, width, height);
+    v = { w: width, h: height, cv };
+    vignetteCache.set(key, v);
+  }
+  ctx.globalAlpha = strength;
+  ctx.drawImage(v.cv, 0, 0);
+  ctx.globalAlpha = 1;
+}
+
 // Rainbow pickup halo. Its own tiny cache (24 pre-baked hue discs) rather than
 // the shared glowCache, so cycling the hue every frame can't thrash it — and
 // because rgba() above only speaks hex, whereas these need hsl. A soft filled
@@ -673,6 +714,7 @@ export function renderScene(scene: Scene): void {
   // Resolve the frame's ground patterns once — the per-band loop below runs
   // hundreds of times and must never touch the tile cache or allocate.
   const groundTiles = resolveGroundTiles(ctx, palette, terrain);
+  const boreShade = boreShadeColour(scene.enclosure ?? 0, cave);
   for (let i = drawn.length - 1; i >= 0; i -= 1) {
     const seg = drawn[i];
     const n = (seg.index - baseSegment.index + track.segments.length) % track.segments.length;
@@ -687,7 +729,7 @@ export function renderScene(scene: Scene): void {
         clipped = false;
       }
     }
-    renderSegment(ctx, width, height, seg, n / ROAD.drawDistance, palette, lamps, terrain, scene.time, groundTiles, cave);
+    renderSegment(ctx, width, height, seg, n / ROAD.drawDistance, palette, lamps, terrain, scene.time, groundTiles, cave, boreShade);
   }
   if (clipped) ctx.restore();
   ctx.imageSmoothingEnabled = true;
@@ -957,30 +999,18 @@ export function renderScene(scene: Scene): void {
 
   // Turbo warm-speed vignette (drawn un-shaken, over the scene, under the HUD).
   if (scene.boost > 0) {
-    const g = ctx.createRadialGradient(width / 2, height * 0.62, height * 0.18, width / 2, height * 0.62, width * 0.72);
-    g.addColorStop(0, 'rgba(255,150,70,0)');
-    g.addColorStop(1, `rgba(255,95,45,${scene.boost * 0.3})`);
-    ctx.fillStyle = g;
-    ctx.fillRect(0, 0, width, height);
+    drawVignette(ctx, 'turbo', width, height, height * 0.62, height * 0.18, width * 0.72, 'rgba(255,150,70,0)', 'rgb(255,95,45)', scene.boost * 0.3);
   }
 
   // Slingshot vignette: a cool rush of air, distinct from the warm rose turbo.
   const sling = scene.sling ?? 0;
   if (sling > 0) {
-    const g = ctx.createRadialGradient(width / 2, height * 0.62, height * 0.2, width / 2, height * 0.62, width * 0.72);
-    g.addColorStop(0, 'rgba(120,200,255,0)');
-    g.addColorStop(1, `rgba(90,170,255,${sling * 0.22})`);
-    ctx.fillStyle = g;
-    ctx.fillRect(0, 0, width, height);
+    drawVignette(ctx, 'sling', width, height, height * 0.62, height * 0.2, width * 0.72, 'rgba(120,200,255,0)', 'rgb(90,170,255)', sling * 0.22);
   }
 
   // Crash impact vignette: a red pulse that fades with the spin-out.
   if (impact > 0) {
-    const g = ctx.createRadialGradient(width / 2, height * 0.55, height * 0.2, width / 2, height * 0.55, width * 0.75);
-    g.addColorStop(0, 'rgba(255,40,60,0)');
-    g.addColorStop(1, `rgba(255,30,50,${impact * 0.42})`);
-    ctx.fillStyle = g;
-    ctx.fillRect(0, 0, width, height);
+    drawVignette(ctx, 'crash', width, height, height * 0.55, height * 0.2, width * 0.75, 'rgba(255,40,60,0)', 'rgb(255,30,50)', impact * 0.42);
   }
 }
 
@@ -2172,7 +2202,24 @@ function renderSides(
   // valley art shows through where the wall used to stand.)
 }
 
-function renderSegment(ctx: CanvasRenderingContext2D, width: number, height: number, seg: Segment, fogT: number, palette: Palette, lamps: Lamp[], terrain: Terrain, time: number, tiles: GroundTiles, cave = false): void {
+// Full-depth multiply colour for a tunnel bore, eased by how deep the rider is.
+// From outside the bore has to read dark (about 30% of lit) but never black, so
+// the lamps and the far exit still show; once the rider is inside it eases to
+// about 60% so walls, markings and traffic stay readable (the enclosure tint in
+// renderScene then rides on top). Caves stay warmer and a touch brighter.
+const BORE_OUT: ReadonlyArray<number> = [66, 76, 94];
+const BORE_IN: ReadonlyArray<number> = [140, 150, 164];
+const CAVE_OUT: ReadonlyArray<number> = [110, 92, 70];
+const CAVE_IN: ReadonlyArray<number> = [190, 168, 140];
+
+function boreShadeColour(enclosure: number, cave: boolean): string {
+  const e = clamp(enclosure, 0, 1);
+  const a = cave ? CAVE_OUT : BORE_OUT;
+  const b = cave ? CAVE_IN : BORE_IN;
+  return `rgb(${Math.round(a[0] + (b[0] - a[0]) * e)},${Math.round(a[1] + (b[1] - a[1]) * e)},${Math.round(a[2] + (b[2] - a[2]) * e)})`;
+}
+
+function renderSegment(ctx: CanvasRenderingContext2D, width: number, height: number, seg: Segment, fogT: number, palette: Palette, lamps: Lamp[], terrain: Terrain, time: number, tiles: GroundTiles, cave = false, boreShade = ''): void {
   const p1 = seg.p1.screen;
   const p2 = seg.p2.screen;
   const dark = seg.color === 'dark';
@@ -2268,7 +2315,8 @@ function renderSegment(ctx: CanvasRenderingContext2D, width: number, height: num
     // road with a lid on. It has to look dark in there from OUT here, and that
     // means the segments themselves carry the dark, deepening as they recede.
     const depth = clamp(Math.min(seg.index - overhead.start, overhead.end - seg.index) / 6, 0, 1);
-    const gloom = overhead.kind === 'tunnel' ? depth : depth * 0.45;
+    const tunnel = overhead.kind === 'tunnel';
+    const gloom = tunnel ? depth : depth * 0.45;
     if (gloom > 0.01) {
       // From the roof down to this segment's near edge. At the mouth itself depth
       // is 0, so nothing is shaded there and the portal stays crisp; deeper
@@ -2278,8 +2326,26 @@ function renderSegment(ctx: CanvasRenderingContext2D, width: number, height: num
       const top = Math.min(upFrom(p1, ROOF_Y, height), upFrom(p2, ROOF_Y, height));
       ctx.save();
       ctx.globalCompositeOperation = 'multiply';
-      ctx.fillStyle = cave ? `rgba(172,138,102,${gloom * 0.5})` : `rgba(88,102,128,${gloom * 0.62})`;
-      ctx.fillRect(bleedX, top, bleedW, p1.y - top + 1);
+      if (tunnel && boreShade) {
+        // Each part of the bore is darkened ONCE, by its own depth: the far
+        // aperture is cut out (even-odd) because the farther segments, drawn
+        // earlier, already carry their own gloom. A full-width rect from the roof
+        // would re-multiply everything behind it and take the far bore to black.
+        ctx.globalAlpha = gloom;
+        ctx.fillStyle = boreShade;
+        // Edges snap to whole pixels so neighbouring segments tile exactly: a
+        // fractional shared edge multiplies twice and draws a pale hairline.
+        const y0 = Math.floor(top);
+        const fr = Math.floor(upFrom(p2, ROOF_Y, height));
+        const fx = Math.round(p2.x - p2.w * WALL_X);
+        ctx.beginPath();
+        ctx.rect(bleedX, y0, bleedW, Math.floor(p1.y) - y0);
+        ctx.rect(fx, fr, Math.round(p2.x + p2.w * WALL_X) - fx, Math.floor(p2.y) - fr);
+        ctx.fill('evenodd');
+      } else {
+        ctx.fillStyle = cave ? `rgba(172,138,102,${gloom * 0.5})` : `rgba(88,102,128,${gloom * 0.62})`;
+        ctx.fillRect(bleedX, top, bleedW, p1.y - top + 1);
+      }
       ctx.restore();
     }
     // A cave is lit by candles down both walls; a road tunnel by strip lights.
