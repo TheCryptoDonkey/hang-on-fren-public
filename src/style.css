@@ -310,6 +310,34 @@ body.donate-open #support-btn { display: none; }
 #donate-overlay[hidden],
 #v4v-overlay[hidden] { display: none; }
 
+/* Phone landscape: the stacked card is about 620px tall on a 375 to 390px
+ * screen, which left I PAID and NEXT TIME below the fold with no cue to scroll.
+ * Same content in the same order, laid out in two columns: QR on the left,
+ * everything else on the right, the two answers side by side. */
+@media (orientation: landscape) and (max-height: 500px) {
+  #v4v-overlay { padding-top: max(10px, env(safe-area-inset-top)); padding-bottom: max(10px, env(safe-area-inset-bottom)); }
+  #v4v-overlay .donate-card { width: min(700px, 100%); padding: 14px 18px; }
+  #v4v-ask {
+    display: grid;
+    grid-template-columns: auto 1fr 1fr;
+    column-gap: 16px;
+    align-items: center;
+  }
+  #v4v-ask[hidden] { display: none; }
+  #v4v-ask > * { grid-column: 2 / 4; min-width: 0; }
+  #v4v-ask .donate-qr { grid-column: 1; grid-row: 1 / span 6; width: min(190px, 44vh); margin: 0; padding: 10px; }
+  #v4v-ask h2 { font-size: 22px; }
+  #v4v-ask .donate-sub { margin: 3px 0 8px; font-size: 13px; }
+  #v4v-ask .v4v-bless { margin: 0 0 8px; font-size: 12px; }
+  #v4v-ask .donate-addr { margin: 0 0 8px; padding: 8px 12px; }
+  #v4v-ask .donate-links-row { margin: 0 0 8px; }
+  #v4v-ask .donate-link { padding: 9px 12px; }
+  #v4v-ask #v4v-paid { grid-column: 2; margin: 0; padding: 11px 12px; }
+  #v4v-ask #v4v-later { grid-column: 3; padding: 11px 12px; align-self: stretch; }
+  /* The art takes what the heading, two lines and the button leave of the screen. */
+  #v4v-thanks .v4v-thanks-img { width: auto; height: min(calc(100vh - 226px), 170px); margin: 8px auto; }
+}
+
 .v4v-thanks-img {
   width: min(60vw, 260px);
   height: auto;
