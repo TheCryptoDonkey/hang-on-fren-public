@@ -747,7 +747,6 @@ type ActiveTouchControl = { action: TouchControl; button: HTMLButtonElement; seq
 // drifting right — the "player stuck on the right, left button does nothing" bug.
 let touchControlSeq = 0;
 
-const mobileControls = document.getElementById('mobile-controls');
 const touchControlButtons = Array.from(document.querySelectorAll<HTMLButtonElement>('[data-touch-control]'));
 const activeTouchControls = new Map<number, ActiveTouchControl>();
 
@@ -838,7 +837,57 @@ function syncDomState(): void {
   // SUPPORT button out of the way (CSS hides it on data-naming).
   const naming = state.phase === 'gameover' && state.qualifies ? '1' : '';
   if (body.dataset.naming !== naming) body.dataset.naming = naming;
+  // The touch pause button turns into a resume button and the quit button
+  // appears (CSS, on data-paused); leaving the pause screen disarms the quit.
+  const paused = state.phase === 'playing' && state.paused ? '1' : '';
+  if (body.dataset.paused !== paused) {
+    body.dataset.paused = paused;
+    pauseBtn?.setAttribute('aria-label', paused ? 'Resume' : 'Pause');
+    if (!paused) disarmQuit();
+  }
 }
+
+// ---- touch pause and quit ---------------------------------------------------
+// A phone has no Escape or Q key. The pause button toggles the pause; on the
+// pause screen a quit button abandons the run, and asks for a second tap first
+// because any stray tap on the canvas there is meant to resume.
+const pauseBtn = document.getElementById('pause-btn');
+const quitBtn = document.getElementById('quit-btn');
+const QUIT_LABEL = 'QUIT TO TITLE';
+const QUIT_CONFIRM_LABEL = 'TAP AGAIN TO QUIT';
+let quitArmed = false;
+function disarmQuit(): void {
+  if (!quitArmed) return;
+  quitArmed = false;
+  if (quitBtn) {
+    quitBtn.textContent = QUIT_LABEL;
+    quitBtn.classList.remove('is-armed');
+  }
+}
+/** Pause or resume the run, dropping any held input either way. */
+function setPaused(on: boolean): void {
+  if (state.phase !== 'playing' || state.paused === on) return;
+  state.paused = on;
+  clearAllInput();
+  playSfx('combo', 0.6, on ? 0.8 : 1.15);
+}
+pauseBtn?.addEventListener('pointerdown', e => {
+  // Cancelled so no compatibility mouse event follows the tap onto the canvas,
+  // where a mousedown on the pause screen would resume straight away.
+  e.preventDefault();
+  setPaused(!state.paused);
+});
+quitBtn?.addEventListener('click', () => {
+  if (state.phase !== 'playing' || !state.paused) return;
+  if (!quitArmed) {
+    quitArmed = true;
+    quitBtn.textContent = QUIT_CONFIRM_LABEL;
+    quitBtn.classList.add('is-armed');
+    return;
+  }
+  disarmQuit();
+  quitRun();
+});
 
 // ---- value-for-value support modal -----------------------------------------
 // A floating SUPPORT button (title + game-over) opens a modal with Lightning /
@@ -1011,9 +1060,7 @@ function onKeyDown(e: KeyboardEvent): void {
   // Escape pauses/resumes a run; Q from the pause screen abandons it.
   if (state.phase === 'playing') {
     if (k === 'escape') {
-      state.paused = !state.paused;
-      clearAllInput();
-      playSfx('combo', 0.6, state.paused ? 0.8 : 1.15);
+      setPaused(!state.paused);
       return;
     }
     if (state.paused && k === 'q') {
@@ -1163,7 +1210,9 @@ function updateTouchFromEvent(touches: TouchList): void {
   touchBrake = false;
   for (let i = 0; i < touches.length; i += 1) {
     const t = touches[i];
-    if (mobileControls?.contains(t.target as Node | null)) continue;
+    // Only touches that began on the canvas steer: the control clusters and the
+    // pause and quit buttons own theirs.
+    if (t.target !== canvas) continue;
     const x = (t.clientX / window.innerWidth);
     const y = (t.clientY / window.innerHeight);
     if (y < 0.35) touchBrake = true;

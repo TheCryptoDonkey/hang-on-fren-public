@@ -134,6 +134,83 @@ body.touch-device[data-phase="playing"] .mobile-control-cluster {
   background: rgba(255, 93, 120, 0.3);
 }
 
+/* ---- touch pause and quit ----------------------------------------------- */
+/* Phones have no Escape or Q. The pause button sits under the score block and
+ * stays put while paused (as a resume button), so the finger that pressed it
+ * never lands on the canvas underneath. Quit shows only on the pause screen. */
+#pause-btn,
+#quit-btn {
+  position: fixed;
+  z-index: 6;
+  display: none;
+  font-family: inherit;
+  color: #fff7df;
+  background: rgba(8, 26, 36, 0.54);
+  cursor: pointer;
+  touch-action: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+#pause-btn {
+  top: calc(env(safe-area-inset-top, 0px) + 84px);
+  right: max(14px, env(safe-area-inset-right));
+  width: 44px;
+  height: 44px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0;
+  border: 2px solid rgba(255, 215, 107, 0.55);
+  border-radius: 999px;
+}
+
+#pause-btn::before,
+#pause-btn::after {
+  content: '';
+  width: 5px;
+  height: 16px;
+  border-radius: 1px;
+  background: #fff7df;
+}
+
+/* Paused: the two bars become a play triangle. */
+body[data-paused="1"] #pause-btn::before {
+  width: 0;
+  height: 0;
+  margin-left: 4px;
+  border-radius: 0;
+  background: none;
+  border-style: solid;
+  border-width: 9px 0 9px 15px;
+  border-color: transparent transparent transparent #fff7df;
+}
+
+body[data-paused="1"] #pause-btn::after { display: none; }
+
+body.touch-device[data-phase="playing"] #pause-btn { display: flex; }
+
+#quit-btn {
+  left: 50%;
+  top: 66%;
+  transform: translateX(-50%);
+  min-height: 44px;
+  padding: 0 22px;
+  border: 2px solid rgba(255, 93, 120, 0.72);
+  border-radius: 999px;
+  color: #ffe4eb;
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+#quit-btn.is-armed {
+  background: rgba(255, 93, 120, 0.3);
+  border-color: rgba(255, 255, 255, 0.9);
+}
+
+body.touch-device[data-phase="playing"][data-paused="1"] #quit-btn { display: block; }
+
 /* ---- value-for-value support -------------------------------------------- */
 /* A tap-to-tip button surfaced on the title + game-over screens (never during
  * play), and the modal it opens: copyable Lightning address, scannable QR and
