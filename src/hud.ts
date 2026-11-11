@@ -11,6 +11,17 @@ export interface Popup {
   life: number; // seconds remaining
   ttl: number;
   color: string;
+  // Layout state, owned by placePopups (callers never set these). A popup is
+  // placed once, into a row of its own, and keeps that row for its whole life.
+  px?: number; // font size in buffer px (shrunk if the text would not fit the width)
+  wid?: number; // text advance width at px
+  lx?: number; // placed centre x
+  ly?: number; // placed baseline y at age 0; undefined until it has a free row
+  held?: boolean; // no free row yet: waits unticked rather than overprinting
+  lw?: number; // buffer size and scale the placement was made for
+  lh?: number;
+  lu?: number;
+  sprite?: TextSprite; // outlined text, rendered once
 }
 
 export interface HudState {
@@ -51,6 +62,226 @@ const PANEL = 'rgba(8, 26, 36, 0.72)';
 const GOLD = '#ffd76b';
 const MINT = '#8fe6c4';
 const ROSE = '#ff5d78';
+const OUTLINE = 'rgba(4, 12, 18, 0.92)'; // same dark round-join stroke the title and end screens use
+const FACE = "'Trebuchet MS', sans-serif";
+
+// --- outlined text ------------------------------------------------------------
+//
+// HUD text floats straight over the scenery, so it carries a dark outline to
+// stay readable over sky, sand and snow. Stroking text is the expensive part
+// (and shadowBlur is worse), so nothing here strokes every frame unless it has
+// to: each label is rendered ONCE into a tight offscreen sprite and blitted, and
+// is re-rendered only when its text, font or colour changes (a new scale after a
+// resize changes the font, so that re-bakes too). Only the two values that
+// change almost every frame (the score and the showdown gap) are stroked live.
+
+/** Outlined text rendered once into a tight canvas, padded by the stroke width. */
+export interface TextSprite {
+  key: string;
+  canvas: HTMLCanvasElement;
+  adv: number; // text advance width — what alignment is measured against
+  ox: number; // x of the text origin inside the canvas
+  oy: number; // y of the baseline inside the canvas
+}
+
+let measureCtx: CanvasRenderingContext2D | null = null;
+
+function outlineWidth(px: number, u: number): number {
+  return 2.2 * u + px * 0.1;
+}
+
+function makeSprite(key: string, text: string, font: string, px: number, fill: string, lw: number): TextSprite | null {
+  if (typeof document === 'undefined') return null; // unit tests / no DOM
+  if (!measureCtx) measureCtx = document.createElement('canvas').getContext('2d');
+  if (!measureCtx) return null;
+  measureCtx.font = font;
+  const adv = measureCtx.measureText(text).width;
+  const pad = Math.ceil(lw / 2) + 2;
+  const asc = Math.ceil(px * 1.0);
+  const desc = Math.ceil(px * 0.3);
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.ceil(adv) + pad * 2;
+  canvas.height = asc + desc + pad * 2;
+  const g = canvas.getContext('2d');
+  if (!g) return null;
+  g.font = font; // sizing the canvas reset its state
+  g.textAlign = 'left';
+  g.textBaseline = 'alphabetic';
+  g.lineJoin = 'round';
+  g.lineWidth = lw;
+  g.strokeStyle = OUTLINE;
+  g.strokeText(text, pad, pad + asc);
+  g.fillStyle = fill;
+  g.fillText(text, pad, pad + asc);
+  return { key, canvas, adv, ox: pad, oy: pad + asc };
+}
+
+function blit(ctx: CanvasRenderingContext2D, spr: TextSprite, align: CanvasTextAlign, x: number, y: number, alpha: number): void {
+  const left = align === 'right' ? x - spr.adv : align === 'center' ? x - spr.adv / 2 : x;
+  // Integer destination: a fractional blit would resample (soften) the sprite.
+  if (alpha !== 1) ctx.globalAlpha = alpha;
+  ctx.drawImage(spr.canvas, Math.round(left - spr.ox), Math.round(y - spr.oy));
+  if (alpha !== 1) ctx.globalAlpha = 1;
+}
+
+/** Stroke + fill straight onto the canvas. For values that change every frame
+ *  (a cached sprite would just be rebuilt every frame) and as the no-DOM fallback. */
+function liveOutlined(
+  ctx: CanvasRenderingContext2D, text: string, font: string, fill: string, lw: number,
+  align: CanvasTextAlign, x: number, y: number, alpha = 1,
+): void {
+  ctx.save();
+  ctx.font = font;
+  ctx.textAlign = align;
+  ctx.globalAlpha = alpha;
+  ctx.lineJoin = 'round';
+  ctx.lineWidth = lw;
+  ctx.strokeStyle = OUTLINE;
+  ctx.strokeText(text, x, y);
+  ctx.fillStyle = fill;
+  ctx.fillText(text, x, y);
+  ctx.restore();
+}
+
+// One cached sprite per named slot: a slot re-bakes only when its key changes.
+const slots = new Map<string, TextSprite>();
+
+/** Draw outlined text from a named slot's cache; returns its advance width.
+ *  `alpha` is applied at blit time so the baked colours stay opaque. */
+function label(
+  ctx: CanvasRenderingContext2D, slot: string, text: string, weight: number, px: number, fill: string,
+  align: CanvasTextAlign, x: number, y: number, u: number, alpha = 1,
+): number {
+  const font = `${weight} ${px}px ${FACE}`;
+  const lw = outlineWidth(px, u);
+  const key = `${text}|${font}|${fill}|${lw}`;
+  let spr = slots.get(slot);
+  if (!spr || spr.key !== key) {
+    spr = makeSprite(key, text, font, px, fill, lw) ?? undefined;
+    if (spr) slots.set(slot, spr);
+    else slots.delete(slot);
+  }
+  if (!spr) { // no DOM to bake into: stroke live
+    liveOutlined(ctx, text, font, fill, lw, align, x, y, alpha);
+    ctx.font = font;
+    return ctx.measureText(text).width;
+  }
+  blit(ctx, spr, align, x, y, alpha);
+  return spr.adv;
+}
+
+// --- popups -------------------------------------------------------------------
+//
+// Popups are placed, not just drawn: every popup gets a row of its own that no
+// other popup and no HUD readout occupies, and keeps it for its whole life, so
+// a burst (the checkpoint block, a rose + overtake + flow-tier pile-up) reads
+// as a stack instead of one smear. All popups float up at the same speed, so
+// rows placed apart stay apart. If the screen has no free row, the popup waits
+// (its clock held) until one frees up: every message still shows.
+
+export interface Rect { x0: number; y0: number; x1: number; y1: number }
+
+export interface PopupEnv {
+  w: number;
+  h: number;
+  u: number;
+  /** Screen areas the popups must stay out of (HUD readouts, cards). */
+  zones: readonly Rect[];
+  /** Text advance width at the given font size. */
+  measure: (text: string, px: number) => number;
+}
+
+/** Popup font size, in HUD units (× u). */
+export const POPUP_SIZE = 24;
+/** Shared float speed, HUD units per second. */
+export const POPUP_RISE = 10;
+const ASC = 0.8; // glyph height above the baseline, plus outline, in em
+const DESC = 0.28; // …and below it
+const ROW = 1.2; // baseline-to-baseline distance of stacked rows, in em
+const SIDE_GAP = 6; // horizontal clearance between popups sharing a row, × u
+
+/** The baseline the popup is drawn at, `age` seconds into its life. */
+export function popupY(p: Popup, u: number): number {
+  return (p.ly ?? p.y) - POPUP_RISE * u * (p.ttl - p.life);
+}
+
+function placedFor(p: Popup, w: number, h: number, u: number): boolean {
+  return p.ly !== undefined && p.lw === w && p.lh === h && p.lu === u;
+}
+
+function fits(p: Popup, c: number, others: Popup[], env: PopupEnv): boolean {
+  const { u, h, zones } = env;
+  const px = p.px as number;
+  const wid = p.wid as number;
+  const rem = POPUP_RISE * u * p.life; // how much further it will float
+  const top = c - rem - ASC * px;
+  const bottom = c + DESC * px;
+  if (top < 4 * u || bottom > h - 4 * u) return false;
+  const x0 = (p.lx as number) - wid / 2;
+  const x1 = (p.lx as number) + wid / 2;
+  for (const z of zones) {
+    if (x1 > z.x0 && x0 < z.x1 && bottom > z.y0 && top < z.y1) return false;
+  }
+  for (const q of others) {
+    const qpx = q.px as number;
+    if (Math.abs((q.lx as number) - (p.lx as number)) >= (wid + (q.wid as number)) / 2 + SIDE_GAP * u) continue;
+    if (Math.abs(c - popupY(q, u)) < ROW * Math.max(px, qpx) - 0.5) return false;
+  }
+  return true;
+}
+
+/**
+ * Give every unplaced popup a row. Cheap when nothing is new (one pass over a
+ * handful of popups), and the only per-popup work that measures text.
+ */
+export function placePopups(list: Popup[], env: PopupEnv): void {
+  const { w, u } = env;
+  for (const p of list) {
+    if (placedFor(p, env.w, env.h, env.u)) continue;
+    p.ly = undefined;
+    let px = POPUP_SIZE * u;
+    let wid = env.measure(p.text, px);
+    const maxW = w - 24 * u;
+    if (wid > maxW) { // a long line on a narrow screen: shrink it to fit rather than clip
+      px *= maxW / wid;
+      wid = maxW;
+    }
+    p.px = px;
+    p.wid = wid;
+    p.lx = Math.min(Math.max(p.x, wid / 2 + 12 * u), Math.max(wid / 2 + 12 * u, w - wid / 2 - 12 * u));
+    const age = p.ttl - p.life;
+    const others = list.filter(q => q !== p && placedFor(q, env.w, env.h, env.u));
+    // Candidate baselines (as drawn now): the asked-for spot, then just clear of
+    // each obstacle. Take the nearest that fits, preferring to sit below.
+    const rem = POPUP_RISE * u * p.life;
+    const cands = [p.y - POPUP_RISE * u * age, rem + ASC * px + 4 * u, env.h - DESC * px - 4 * u];
+    for (const z of env.zones) {
+      cands.push(z.y1 + rem + ASC * px + 0.5, z.y0 - DESC * px - 0.5);
+    }
+    for (const q of others) {
+      cands.push(popupY(q, u) + ROW * Math.max(px, q.px as number), popupY(q, u) - ROW * Math.max(px, q.px as number));
+    }
+    const want = p.y - POPUP_RISE * u * age;
+    let best = Number.NaN;
+    let bestCost = Infinity;
+    for (const c of cands) {
+      const cost = c >= want ? c - want : (want - c) * 1.5;
+      if (cost < bestCost && fits(p, c, others, env)) {
+        best = c;
+        bestCost = cost;
+      }
+    }
+    if (bestCost === Infinity) {
+      p.held = true;
+      continue;
+    }
+    p.held = false;
+    p.ly = best + POPUP_RISE * u * age;
+    p.lw = env.w;
+    p.lh = env.h;
+    p.lu = env.u;
+  }
+}
 
 function pill(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, fill: string): void {
   const r = h / 2;
@@ -74,42 +305,28 @@ export function drawHud(ctx: CanvasRenderingContext2D, w: number, h: number, s: 
   // --- centre TIME ---
   const timeStr = Math.ceil(s.timeLeft).toString();
   const flash = s.urgency > 0 && Math.floor(performance.now() / 120) % 2 === 0;
-  ctx.textAlign = 'center';
-  ctx.font = `700 ${18 * u}px 'Trebuchet MS', sans-serif`;
-  ctx.fillStyle = MINT;
-  ctx.fillText('TIME', w / 2, 30 * u);
-  ctx.font = `800 ${64 * u}px 'Trebuchet MS', sans-serif`;
-  ctx.fillStyle = s.urgency > 0 ? (flash ? '#ff5252' : '#ffd0d0') : '#ffffff';
-  ctx.save();
-  ctx.shadowColor = 'rgba(0,0,0,0.5)';
-  ctx.shadowBlur = 8 * u;
-  ctx.fillText(timeStr, w / 2, 92 * u);
-  ctx.restore();
+  // (Outlined text from here on: baked labels via label(), see above.)
+  const timeColour = s.urgency > 0 ? (flash ? '#ff5252' : '#ffd0d0') : '#ffffff';
+  label(ctx, 'time-label', 'TIME', 700, 18 * u, MINT, 'center', w / 2, 30 * u, u);
+  label(ctx, `time:${timeColour}`, timeStr, 800, 64 * u, timeColour, 'center', w / 2, 92 * u, u);
 
   // --- score / hi (right) ---
-  ctx.textAlign = 'right';
-  ctx.font = `700 ${18 * u}px 'Trebuchet MS', sans-serif`;
-  ctx.fillStyle = GOLD;
-  ctx.fillText('SCORE', w - 24 * u, 30 * u);
-  ctx.font = `800 ${34 * u}px 'Trebuchet MS', sans-serif`;
-  ctx.fillStyle = '#ffffff';
-  ctx.fillText(Math.floor(s.score).toLocaleString('en-GB'), w - 24 * u, 64 * u);
-  ctx.font = `700 ${15 * u}px 'Trebuchet MS', sans-serif`;
-  ctx.fillStyle = MINT;
-  ctx.fillText(`HI  ${Math.floor(s.hiScore).toLocaleString('en-GB')}`, w - 24 * u, 88 * u);
+  label(ctx, 'score-label', 'SCORE', 700, 18 * u, GOLD, 'right', w - 24 * u, 30 * u, u);
+  // The score moves nearly every frame, so a cached sprite would only be
+  // rebuilt every frame: this one value is stroked live.
+  liveOutlined(
+    ctx, Math.floor(s.score).toLocaleString('en-GB'), `800 ${34 * u}px ${FACE}`, '#ffffff',
+    outlineWidth(34 * u, u), 'right', w - 24 * u, 64 * u,
+  );
+  label(ctx, 'hi', `HI  ${Math.floor(s.hiScore).toLocaleString('en-GB')}`, 700, 15 * u, MINT, 'right', w - 24 * u, 88 * u, u);
 
   // --- FREN FLOW (top-left) ---
   const flowX = 20 * u;
   const flowY = 18 * u;
   const flowW = Math.min(190 * u, w * 0.38);
   const flowH = 13 * u;
-  ctx.textAlign = 'left';
-  ctx.font = `800 ${14 * u}px 'Trebuchet MS', sans-serif`;
-  ctx.fillStyle = GOLD;
-  ctx.fillText(`FREN FLOW  ${s.flowLabel}`, flowX, flowY + 12 * u);
-  ctx.textAlign = 'right';
-  ctx.fillStyle = '#ffffff';
-  ctx.fillText(`x${s.flowMultiplier.toFixed(2)}`, flowX + flowW, flowY + 12 * u);
+  label(ctx, 'flow', `FREN FLOW  ${s.flowLabel}`, 800, 14 * u, GOLD, 'left', flowX, flowY + 12 * u, u);
+  label(ctx, 'flow-x', `x${s.flowMultiplier.toFixed(2)}`, 800, 14 * u, '#ffffff', 'right', flowX + flowW, flowY + 12 * u, u);
   pill(ctx, flowX, flowY + 19 * u, flowW, flowH, PANEL);
   const fillW = Math.max(0, (flowW - 4 * u) * Math.min(100, Math.max(0, s.flowValue)) / 100);
   if (fillW > 0) {
@@ -118,14 +335,13 @@ export function drawHud(ctx: CanvasRenderingContext2D, w: number, h: number, s: 
   }
 
   if (s.rivalGapM !== null) {
-    ctx.textAlign = 'left';
-    ctx.font = `800 ${14 * u}px 'Trebuchet MS', sans-serif`;
-    ctx.fillStyle = s.rivalGapM >= 0 ? '#ff9b9b' : MINT;
     const gap = Math.round(Math.abs(s.rivalGapM));
-    ctx.fillText(s.rivalGapM >= 0 ? `FREN  ▲ ${gap}m` : `YOU  ▲ ${gap}m`, flowX, flowY + 54 * u);
-    ctx.fillStyle = 'rgba(255,255,255,0.72)';
-    ctx.font = `700 ${11 * u}px 'Trebuchet MS', sans-serif`;
-    ctx.fillText('SHOWDOWN  12.6 KM', flowX, flowY + 70 * u);
+    liveOutlined( // live for the same reason as the score: it counts down the metres
+      ctx, s.rivalGapM >= 0 ? `FREN  ▲ ${gap}m` : `YOU  ▲ ${gap}m`, `800 ${14 * u}px ${FACE}`,
+      s.rivalGapM >= 0 ? '#ff9b9b' : MINT, outlineWidth(14 * u, u), 'left', flowX, flowY + 54 * u,
+    );
+    // Baked opaque and faded at blit time: the same 72% white, with a clean outline.
+    label(ctx, 'showdown', 'SHOWDOWN  12.6 KM', 700, 11 * u, '#ffffff', 'left', flowX, flowY + 70 * u, u, 0.72);
   }
 
   // --- speed + gear (bottom-right) ---
@@ -172,15 +388,8 @@ export function drawHud(ctx: CanvasRenderingContext2D, w: number, h: number, s: 
 
   // --- level / region marker (bottom-left, above the distance pill) ---
   const markerY = h - bottomInset - spH - 34 * u;
-  ctx.textAlign = 'left';
-  ctx.font = `800 ${15 * u}px 'Trebuchet MS', sans-serif`;
-  ctx.fillStyle = GOLD;
-  const lvLabel = `LV ${s.level}/${s.levels}`;
-  ctx.fillText(lvLabel, 24 * u, markerY);
-  const lvWidth = ctx.measureText(lvLabel).width;
-  ctx.font = `700 ${15 * u}px 'Trebuchet MS', sans-serif`;
-  ctx.fillStyle = MINT;
-  ctx.fillText(s.region, 24 * u + lvWidth + 12 * u, markerY);
+  const lvWidth = label(ctx, 'lv', `LV ${s.level}/${s.levels}`, 800, 15 * u, GOLD, 'left', 24 * u, markerY, u);
+  const regionWidth = label(ctx, 'region', s.region, 700, 15 * u, MINT, 'left', 24 * u + lvWidth + 12 * u, markerY, u);
 
   // --- distance (bottom-left) ---
   const distanceY = h - bottomInset - spH - 20 * u;
@@ -246,26 +455,60 @@ export function drawHud(ctx: CanvasRenderingContext2D, w: number, h: number, s: 
 
   // rose streak flag
   if (s.roseStreak > 1) {
-    ctx.textAlign = 'center';
-    ctx.font = `800 ${16 * u}px 'Trebuchet MS', sans-serif`;
-    ctx.fillStyle = ROSE;
-    ctx.fillText(`ROSE x${s.roseStreak}`, w / 2, 118 * u);
+    label(ctx, 'rose', `ROSE x${s.roseStreak}`, 800, 16 * u, ROSE, 'center', w / 2, 118 * u, u);
   }
 
   // --- popups ---
-  for (const p of s.popups) {
-    const t = p.life / p.ttl;
-    ctx.globalAlpha = Math.min(1, t * 1.6);
+  if (s.popups.length > 0) {
     ctx.textAlign = 'center';
-    ctx.font = `800 ${24 * u}px 'Trebuchet MS', sans-serif`;
-    ctx.fillStyle = p.color;
-    ctx.save();
-    ctx.shadowColor = 'rgba(0,0,0,0.6)';
-    ctx.shadowBlur = 6 * u;
-    ctx.fillText(p.text, p.x, p.y - (1 - t) * 40 * u);
-    ctx.restore();
+    // The readouts a popup must not print over, wherever it asked to appear.
+    // Built only on a frame that actually has a popup to place.
+    if (s.popups.some(p => !placedFor(p, w, h, u))) {
+      const m = 6 * u;
+      const zones: Rect[] = [
+        // centre TIME + ROSE streak (reserved even when the streak is off)
+        { x0: w / 2 - 74 * u, y0: 6 * u, x1: w / 2 + 74 * u, y1: 126 * u },
+        // SCORE / HI
+        { x0: w - 24 * u - 200 * u, y0: 6 * u, x1: w, y1: 96 * u },
+        // FREN FLOW + showdown gap + HODL shield badge
+        { x0: 0, y0: 6 * u, x1: flowX + flowW + 40 * u, y1: (s.shield ? (s.rivalGapM !== null ? 137 : 96) : (s.rivalGapM !== null ? 88 : 62)) * u },
+        // level / region marker + distance pill
+        { x0: 0, y0: markerY - 17 * u, x1: Math.max(180 * u, 24 * u + lvWidth + 12 * u + regionWidth) + m, y1: h },
+        // speed pill
+        { x0: spX - m, y0: spY - m, x1: w, y1: h },
+        // drift meter (reserved even when not drifting)
+        { x0: (w - 220 * u) / 2 - m, y0: h - bottomInset - 30 * u - 26 * u - m, x1: (w + 220 * u) / 2 + m, y1: h },
+      ];
+      if (s.rivalIntro > 0 || (s.rivalResult && s.rivalResultTime > 0)) {
+        const cardW = Math.min(w * 0.82, 620 * u);
+        zones.push({ x0: (w - cardW) / 2 - m, y0: h * 0.17 - m, x1: (w + cardW) / 2 + m, y1: h * 0.17 + 84 * u + m });
+      }
+      placePopups(s.popups, env(ctx, w, h, u, zones));
+    }
+    for (const p of s.popups) {
+      if (p.ly === undefined || p.held) continue;
+      const px = p.px as number;
+      const font = `800 ${px}px ${FACE}`;
+      const lw = outlineWidth(px, u);
+      const key = `${p.text}|${font}|${p.color}|${lw}`;
+      if (!p.sprite || p.sprite.key !== key) p.sprite = makeSprite(key, p.text, font, px, p.color, lw) ?? undefined;
+      const alpha = Math.min(1, (p.life / p.ttl) * 1.6);
+      const y = popupY(p, u);
+      if (p.sprite) blit(ctx, p.sprite, 'center', p.lx as number, y, alpha);
+      else liveOutlined(ctx, p.text, font, p.color, lw, 'center', p.lx as number, y, alpha);
+    }
   }
   ctx.globalAlpha = 1;
+}
+
+function env(ctx: CanvasRenderingContext2D, w: number, h: number, u: number, zones: readonly Rect[]): PopupEnv {
+  return {
+    w, h, u, zones,
+    measure: (text, px) => {
+      ctx.font = `800 ${px}px ${FACE}`;
+      return ctx.measureText(text).width;
+    },
+  };
 }
 
 export function addPopup(list: Popup[], text: string, x: number, y: number, color: string, ttl = 1.1): void {
@@ -275,6 +518,7 @@ export function addPopup(list: Popup[], text: string, x: number, y: number, colo
 
 export function updatePopups(list: Popup[], dt: number): void {
   for (let i = list.length - 1; i >= 0; i -= 1) {
+    if (list[i].held) continue; // still waiting for a free row: its clock has not started
     list[i].life -= dt;
     if (list[i].life <= 0) list.splice(i, 1);
   }
