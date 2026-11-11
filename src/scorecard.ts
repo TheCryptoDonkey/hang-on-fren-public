@@ -64,6 +64,9 @@ export interface CardInput {
   /** Space the browser owns at the bottom (touch devices). */
   bottomInset: number;
   qualifies: boolean;
+  /** Canvas px at the bottom edge that the summary must stay clear of: the DOM
+   *  support button on a card that is not asking for a callsign. */
+  bottomReserve?: number;
   lines: LineSpec[];
   measure: Measure;
 }
@@ -271,7 +274,7 @@ export function cardLayout(inp: CardInput): CardLayout {
   const topMargin = Math.max(6 * pc, 8 * u);
 
   let entry: NameLayout | null = null;
-  let regionBottom = H - Math.max(6 * pc, 8 * u);
+  let regionBottom = H - Math.max(inp.bottomReserve ?? 0, Math.max(6 * pc, 8 * u));
   if (qualifies) {
     entry = entryLayout(W, H, u, pc, inp.bottomInset, measure);
     regionBottom = entry.promptTop - Math.max(5 * pc, 10 * u * entry.chrome);

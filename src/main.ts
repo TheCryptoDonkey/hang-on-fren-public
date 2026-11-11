@@ -3131,6 +3131,17 @@ const CARD_STYLE: Record<string, { weight: number; fill: string; outline?: numbe
 /** Fit the whole score card (summary lines, and the callsign keyboard on a new
  *  best) to the screen. Cached: the inputs only change when the run ends. */
 let cardMemo: { key: string; card: ReturnType<typeof cardLayout> } | null = null;
+
+/** Canvas px from the bottom edge to the top of the DOM support button, plus a
+ *  margin, so the card never prints under it. -1 while it is not laid out. */
+function supportButtonReserve(u: number): number {
+  const btn = document.getElementById('support-btn');
+  if (!btn) return 0;
+  const r = btn.getBoundingClientRect();
+  if (r.height === 0) return -1;
+  const cssH = canvas.getBoundingClientRect().height || 1;
+  return (cssH - r.top) * (H / cssH) + Math.max(6 * renderScale, 8 * u);
+}
 function scoreCard(s: NonNullable<typeof state.summary>, won: boolean, place: number): ReturnType<typeof cardLayout> {
   const lines = summaryLines({
     won,
@@ -3155,11 +3166,14 @@ function scoreCard(s: NonNullable<typeof state.summary>, won: boolean, place: nu
   const u = uiScale();
   const key = `${W}|${H}|${u}|${renderScale}|${state.qualifies}|${lines.map(l => l.id + l.text).join('\n')}`;
   if (cardMemo?.key === key) return cardMemo.card;
+  // The support button sits under a card that is not asking for a callsign.
+  const reserve = state.qualifies ? 0 : supportButtonReserve(u);
   const card = cardLayout({
     W, H, u, pxPerCss: renderScale, bottomInset: isTouch ? 44 * u : 0,
-    qualifies: state.qualifies, lines, measure: measureCardText,
+    qualifies: state.qualifies, bottomReserve: Math.max(0, reserve), lines, measure: measureCardText,
   });
-  cardMemo = { key, card };
+  // Not laid out yet (the page has not shown the button): lay out again next frame.
+  if (reserve >= 0) cardMemo = { key, card };
   return card;
 }
 

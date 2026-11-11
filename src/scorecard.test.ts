@@ -56,18 +56,26 @@ CASES.push(
     data: { ...BASE, won: false, drifts: 7, bestDriftS: 3.4, status: 'CLAIMING ON GAMESTR…' },
   },
   {
+    name: 'tallest card: stone tour, rival, bonus, drifts and a long status',
+    data: { ...BASE, stone: { joints: 14, stones: 5 }, rival: 'WIN', bonus: 54000, timeLeftS: 18, drifts: 12, bestDriftS: 3.2, status: 'GAMESTR REFUSED THE RUN — IMPLAUSIBLE SCORE RATE' },
+  },
+  {
     name: 'long claim status',
     data: { ...BASE, drifts: 7, bestDriftS: 3.4, status: 'CLAIMED ON GAMESTR · SCORE PUBLISHED TO 4 RELAYS' },
   },
 );
 
+// Height the bottom-centred support button and its offset take on a phone.
+const SUPPORT_CSS = 80;
+
 function layoutFor(s: Screen, data: SummaryData) {
   const d = dims(s);
   const lines = summaryLines(data);
   const card = cardLayout({
-    W: d.W, H: d.H, u: d.u, pxPerCss: s.rs, bottomInset: d.inset, qualifies: data.qualifies, lines, measure,
+    W: d.W, H: d.H, u: d.u, pxPerCss: s.rs, bottomInset: d.inset, qualifies: data.qualifies,
+    bottomReserve: data.qualifies ? 0 : SUPPORT_CSS * s.rs, lines, measure,
   });
-  return { ...d, card };
+  return { ...d, card, reserve: data.qualifies ? 0 : SUPPORT_CSS * s.rs };
 }
 
 describe('summaryLines', () => {
@@ -109,12 +117,12 @@ describe('score card layout', () => {
   for (const s of SCREENS) {
     for (const c of CASES) {
       it(`${s.name}: ${c.name} fits without overlap`, () => {
-        const { W, H, card } = layoutFor(s, c.data);
+        const { W, H, card, reserve } = layoutFor(s, c.data);
         const eps = 0.5;
         expect(card.lines.length).toBeGreaterThan(0);
         for (const l of card.lines) {
           expect(l.top).toBeGreaterThanOrEqual(-eps);
-          expect(l.bottom).toBeLessThanOrEqual(H + eps);
+          expect(l.bottom).toBeLessThanOrEqual(H - reserve + eps);
           expect(l.x0).toBeGreaterThanOrEqual(-eps);
           expect(l.x1).toBeLessThanOrEqual(W + eps);
         }
@@ -168,5 +176,17 @@ describe('score card layout', () => {
     const s = SCREENS[2];
     const { card } = layoutFor(s, CASES.find(c => c.name === 'stone tour, rival, long stats')!.data);
     for (const l of card.lines.filter(x => x.id === 'stats')) expect(l.px / s.rs).toBeGreaterThanOrEqual(10);
+  });
+
+  it('keeps a card without a keyboard clear of the support button', () => {
+    const s = SCREENS[2];
+    const d = dims(s);
+    const data = CASES.find(c => c.name === 'stone tour, rival, long stats')!.data;
+    const lines = summaryLines({ ...data, drifts: 12, bestDriftS: 3.2, status: 'GAMESTR REFUSED THE RUN — IMPLAUSIBLE SCORE RATE' });
+    const reserve = SUPPORT_CSS * s.rs;
+    const open = cardLayout({ W: d.W, H: d.H, u: d.u, pxPerCss: s.rs, bottomInset: d.inset, qualifies: false, lines, measure });
+    const clear = cardLayout({ W: d.W, H: d.H, u: d.u, pxPerCss: s.rs, bottomInset: d.inset, qualifies: false, bottomReserve: reserve, lines, measure });
+    expect(clear.lines[clear.lines.length - 1].bottom).toBeLessThanOrEqual(d.H - reserve + 0.5);
+    expect(open.lines[open.lines.length - 1].bottom).toBeGreaterThan(d.H - reserve);
   });
 });
