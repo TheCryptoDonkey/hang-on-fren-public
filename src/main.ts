@@ -896,8 +896,8 @@ pauseBtn?.addEventListener('pointerdown', e => {
   e.preventDefault();
   setPaused(!state.paused);
 });
-quitBtn?.addEventListener('click', () => {
-  if (state.phase !== 'playing' || !state.paused) return;
+function pressQuit(): void {
+  if (!quitBtn || state.phase !== 'playing' || !state.paused) return;
   if (!quitArmed) {
     quitArmed = true;
     quitBtn.textContent = QUIT_CONFIRM_LABEL;
@@ -906,6 +906,19 @@ quitBtn?.addEventListener('click', () => {
   }
   disarmQuit();
   quitRun();
+}
+// A touch acts on pointerdown: with a steering thumb still resting on the glass
+// the pinch lockout cancels the second finger's touchstart, so no click follows
+// and a click-only button would be dead. The click stays for keyboard users,
+// skipping the one that follows a pointer press.
+let quitPointerAt = -Infinity;
+quitBtn?.addEventListener('pointerdown', () => {
+  quitPointerAt = performance.now();
+  pressQuit();
+});
+quitBtn?.addEventListener('click', () => {
+  if (performance.now() - quitPointerAt < 700) return;
+  pressQuit();
 });
 
 // ---- value-for-value support modal -----------------------------------------
