@@ -601,11 +601,30 @@ export interface Scene {
 /** Frame-wide low-detail switch, set from scene.detail each renderScene. */
 let LOW_DETAIL = false;
 
-// Offscreen frame snapshot reused by the trip kaleidoscope (no per-frame alloc).
+// Offscreen frame snapshots reused by the pickup effects (no per-frame alloc).
+let effectSnap: HTMLCanvasElement | null = null;
 let tripSnap: HTMLCanvasElement | null = null;
 
 export function renderScene(scene: Scene): void {
-  const { ctx, width, height, track, player, world, store } = scene;
+  const { track, player, world, store } = scene;
+  const output = scene.ctx;
+  const outputWidth = scene.width;
+  const outputHeight = scene.height;
+  const wobble = scene.wobble ?? 0;
+  const trip = scene.trip ?? 0;
+  const effectScale = trip > 0 ? 0.75 : wobble > 0 ? 0.85 : 1;
+  let width = Math.round(outputWidth * effectScale);
+  let height = Math.round(outputHeight * effectScale);
+  let ctx = output;
+  if (wobble > 0 || trip > 0) {
+    if (!effectSnap) effectSnap = document.createElement('canvas');
+    if (effectSnap.width !== width || effectSnap.height !== height) {
+      effectSnap.width = width;
+      effectSnap.height = height;
+    }
+    ctx = effectSnap.getContext('2d')!;
+    ctx.clearRect(0, 0, width, height);
+  }
   LOW_DETAIL = scene.detail === 'low';
   groundArt = store; // ground tiles pull their generated textures from here
   const palette = scene.palette ?? DEFAULT_PALETTE;
@@ -658,23 +677,6 @@ export function renderScene(scene: Scene): void {
   const shake = (player.offRoad ? 2 + speedPct0 * 8 : 0) + impact * 16;
   ctx.save();
   if (shake > 0) ctx.translate((Math.random() - 0.5) * shake, (Math.random() - 0.5) * shake);
-
-  // Beer wobble: the whole scene rolls, breathes and sways on slow sinusoids —
-  // seasick rather than shaken (that's what the crash shake above is for).
-  const wobble = scene.wobble ?? 0;
-  if (wobble > 0) {
-    const t = scene.time;
-    ctx.translate(width / 2, height / 2);
-    ctx.rotate((Math.sin(t * 1.8) * 0.028 + Math.sin(t * 0.9 + 1.3) * 0.014) * wobble);
-    // Overscan so the roll/sway never exposes bare canvas at the screen edges.
-    const overscan = 1 + 0.06 * wobble;
-    const breathe = overscan * (1 + Math.sin(t * 1.3) * 0.02 * wobble);
-    ctx.scale(breathe, overscan * (1 + Math.cos(t * 1.7) * 0.02 * wobble));
-    ctx.translate(
-      -width / 2 + Math.sin(t * 2.2) * width * 0.02 * wobble,
-      -height / 2 + Math.cos(t * 1.5) * height * 0.014 * wobble,
-    );
-  }
 
   const horizon = clamp(drawn.length ? drawn[drawn.length - 1].p2.screen.y : height * 0.5, height * 0.18, height * 0.62);
 
@@ -920,16 +922,38 @@ export function renderScene(scene: Scene): void {
   }
   drawLamps(ctx, lamps, scene.time);
 
+  // Transform one finished blit, not every road polygon, sprite and text path.
+  if (wobble > 0) {
+    const t = scene.time;
+    output.save();
+    output.translate(outputWidth / 2, outputHeight / 2);
+    output.rotate((Math.sin(t * 1.8) * 0.028 + Math.sin(t * 0.9 + 1.3) * 0.014) * wobble);
+    const overscan = 1 + 0.06 * wobble;
+    const breathe = overscan * (1 + Math.sin(t * 1.3) * 0.02 * wobble);
+    output.scale(breathe, overscan * (1 + Math.cos(t * 1.7) * 0.02 * wobble));
+    output.translate(
+      -outputWidth / 2 + Math.sin(t * 2.2) * outputWidth * 0.02 * wobble,
+      -outputHeight / 2 + Math.cos(t * 1.5) * outputHeight * 0.014 * wobble,
+    );
+    output.drawImage(ctx.canvas, 0, 0, outputWidth, outputHeight);
+    output.restore();
+    ctx = output;
+    width = outputWidth;
+    height = outputHeight;
+  } else if (trip > 0) {
+    ctx = output;
+    width = outputWidth;
+    height = outputHeight;
+  }
+
   // Beer double vision: ghost the finished scene back over itself, drifting on
-  // its own slow sinusoid, then wash the colours with a gently cycling hue.
-  // (Blend modes, not ctx.filter — Safari didn't support canvas filters.)
+  // its own slow sinusoid, then wash it with a gently cycling colour.
   if (wobble > 0) {
     const t = scene.time;
     ctx.save();
     ctx.globalAlpha = 0.22 * wobble;
-    ctx.drawImage(ctx.canvas, Math.sin(t * 2.6) * width * 0.016 * wobble, Math.cos(t * 1.9) * height * 0.008 * wobble);
-    ctx.globalCompositeOperation = 'hue';
-    ctx.globalAlpha = 0.3 * wobble;
+    ctx.drawImage(effectSnap!, 0, 0, effectSnap!.width, effectSnap!.height, Math.sin(t * 2.6) * width * 0.016 * wobble, Math.cos(t * 1.9) * height * 0.008 * wobble, width, height);
+    ctx.globalAlpha = 0.12 * wobble;
     ctx.fillStyle = `hsl(${(t * 40) % 360}, 80%, 55%)`;
     ctx.fillRect(0, 0, width, height);
     ctx.restore();
@@ -938,50 +962,48 @@ export function renderScene(scene: Scene): void {
   // Fly-agaric trip: the world gently MELTS. The frame is redrawn in vertical
   // slivers, each stretching downward and swaying on its own drifting phase so
   // the scene runs like warm wax (tops stay anchored — the sky holds while the
-  // road drips). A dreamy echo doubles the edges, then multi-coloured hue bands
+  // road drips). A dreamy echo doubles the edges, then multi-coloured bands
   // slide across the melt so every part of the scene cycles through a different
   // colour. HUD still drawn clean above. (Blend modes + strip blits, not
   // ctx.filter — Safari didn't support canvas filters.)
-  const trip = scene.trip ?? 0;
   if (trip > 0) {
     const t = scene.time;
-    if (!tripSnap) tripSnap = document.createElement('canvas');
-    if (tripSnap.width !== ctx.canvas.width || tripSnap.height !== ctx.canvas.height) {
-      tripSnap.width = ctx.canvas.width;
-      tripSnap.height = ctx.canvas.height;
+    let source = wobble > 0 ? null : effectSnap!;
+    if (!source) {
+      if (!tripSnap) tripSnap = document.createElement('canvas');
+      if (tripSnap.width !== ctx.canvas.width || tripSnap.height !== ctx.canvas.height) {
+        tripSnap.width = ctx.canvas.width;
+        tripSnap.height = ctx.canvas.height;
+      }
+      tripSnap.getContext('2d')!.drawImage(ctx.canvas, 0, 0);
+      source = tripSnap;
     }
-    tripSnap.getContext('2d')!.drawImage(ctx.canvas, 0, 0);
     ctx.save();
     // melt: two beat frequencies per sliver keep the drip organic, not
     // metronomic; the phases change slowly across neighbouring slivers so the
     // surface reads as liquid rather than torn strips
-    const cols = 80;
+    const cols = 40;
+    const phaseStep = 80 / cols;
+    const sourceCw = Math.ceil(source.width / cols);
     const cw = Math.ceil(width / cols);
+    const overlap = 4;
     for (let i = 0; i < cols; i += 1) {
       const x = i * cw;
-      const sway = (Math.sin(t * 1.6 + i * 0.21) + Math.sin(t * 0.9 + i * 0.09) * 0.6) * width * 0.006 * trip;
-      const sag = (Math.sin(t * 1.1 + i * 0.16) + 1.4) * height * 0.028 * trip;
-      ctx.drawImage(tripSnap, x, 0, cw, height, x + sway, 0, cw, height + sag);
+      const phase = i * phaseStep;
+      const sway = (Math.sin(t * 1.6 + phase * 0.21) + Math.sin(t * 0.9 + phase * 0.09) * 0.6) * width * 0.006 * trip;
+      const sag = (Math.sin(t * 1.1 + phase * 0.16) + 1.4) * height * 0.028 * trip;
+      ctx.drawImage(source, i * sourceCw, 0, Math.min(sourceCw, source.width - i * sourceCw), source.height, x + sway - overlap / 2, 0, cw + overlap, height + sag);
     }
     // dreamy echo orbiting the frame — double vision without the beer hangover
     ctx.globalAlpha = 0.2 * trip;
-    ctx.drawImage(tripSnap, Math.sin(t * 1.3) * width * 0.012, Math.cos(t * 1.7) * height * 0.009);
-    // multi-coloured: rainbow hue bands slide diagonally across the melt
-    ctx.globalCompositeOperation = 'hue';
-    ctx.globalAlpha = 0.7 * trip;
+    ctx.drawImage(source, 0, 0, source.width, source.height, Math.sin(t * 1.3) * width * 0.012, Math.cos(t * 1.7) * height * 0.009, width, height);
+    // multi-coloured: rainbow bands slide diagonally across the melt
+    ctx.globalAlpha = 0.28 * trip;
     const bands = ctx.createLinearGradient(0, 0, width, height * 0.8);
     for (let i = 0; i <= 8; i += 1) {
       bands.addColorStop(i / 8, `hsl(${(i * 90 + t * 110) % 360}, 100%, 55%)`);
     }
     ctx.fillStyle = bands;
-    ctx.fillRect(0, 0, width, height);
-    ctx.globalCompositeOperation = 'overlay';
-    ctx.globalAlpha = 0.4 * trip;
-    const rainbow = ctx.createLinearGradient(0, height, width, 0);
-    for (let i = 0; i <= 6; i += 1) {
-      rainbow.addColorStop(i / 6, `hsl(${(i * 60 + t * 120) % 360}, 100%, 60%)`);
-    }
-    ctx.fillStyle = rainbow;
     ctx.fillRect(0, 0, width, height);
     // breathing rainbow rings rippling out from the horizon
     ctx.globalCompositeOperation = 'lighter';
