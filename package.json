@@ -34,6 +34,6 @@
   "license": "MIT",
   "dependencies": {
     "@forgesworn/joystick-protocol": "file:vendor/joystick/joystick-protocol-0.4.2-613408c2b830.tgz",
-    "qrcode-generator": "1.5.2"
+    "@forgesworn/qr": "^0.1.0"
   }
 }

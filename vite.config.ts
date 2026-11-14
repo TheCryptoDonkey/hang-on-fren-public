@@ -39,5 +39,14 @@ export default defineConfig({
   build: {
     target: 'es2022',
     sourcemap: true,
+    rollupOptions: {
+      output: {
+        // The sign-in QR encoder loads on demand; keep it in a chunk named
+        // qrcode so tools/qr-smoke.mjs can withhold it.
+        manualChunks(id) {
+          if (id.includes('/node_modules/@forgesworn/qr/') || id.endsWith('/src/login-qr-encoder.ts')) return 'qrcode'
+        },
+      },
+    },
   },
 });
